@@ -2,5 +2,11 @@
     "name": "tt-toolkit",
     "type": "module",
     "version": "1.0.0",
-    "private": true
+    "private": true,
+    "scripts": {
+        "lint": "eslint ."
+    },
+    "devDependencies": {
+        "eslint": "^9"
+    }
 }
