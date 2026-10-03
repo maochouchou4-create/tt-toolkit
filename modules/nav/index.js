@@ -10,19 +10,25 @@
 //   - 斜杠执行器走宿主 ABI（st-context.js:177），v4 的兜底转正为唯一路径；
 //   - 日志转发接入 shared/log.js（v4 的 ttlog 转发器本体已抽成该工厂），
 //     target 仍为 "msgnav"，落盘 tauritavern.log.*；
-//   - 按钮为原生图标形态注入 #leftSendForm 图标槽（酒馆助手按钮 API 不可
-//     移植，见 §8；用户拍板：不自造横条）。
+//   - 入口为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（四按钮，消息体
+//     为 /ttnav-* slash 命令），命令亦可直接在输入框敲（用户拍板：推翻
+//     1.2.x 两轮自造 UI，原生机制零维护、用户零学习成本）。
 // DOM 契约与 v4 同源已核：#chat / .mes[mesid]（index.html:8382 区域）、
-// #mes_stop（:8417）、#send_but（:8422）、#leftSendForm 原生图标槽
-// （#options_button fa-bars 同款 rail，index.html:8380-8426）。
+// #mes_stop（:8417）、#send_but（:8422）。
 
 import { eventSource, event_types } from "../../../../../../scripts/events.js";
+import { SlashCommandParser } from "../../../../../../scripts/slash-commands/SlashCommandParser.js";
+import { SlashCommand } from "../../../../../../scripts/slash-commands/SlashCommand.js";
 import { createTtlog } from "../../shared/log.js";
 
 // 防异常双注入：同 URL 的动态 import 不会重复执行，但扩展重载/缓存击穿
 // 场景下 ESM 层无保护，仍需窗口旗标。字面量只出现一次（机判断言），
 // 经由常量间接引用。
 const NAV_FLAG = "__TT_NAV_MOD__";
+
+// 版本戳：加载日志 / dump / 错误 toast 全带版本，现场排障可区分运行的
+// 是哪一版（批3 教训：两版同名 nav-v1，回归时日志无法归因）
+const NAV_VERSION = "nav-v2";
 
 // --------------------------------------------------------
 // 1. CONFIG —— 所有可调参数集中在这里（与 v4 同值）
@@ -52,6 +58,8 @@ const CONFIG = Object.freeze({
     SCROLL_VERIFY_TOLERANCE_PX: 2,
     // 自动回顶开关的持久化键（与 v4 iframe 时代同 key 同语义，升级无缝）
     STORAGE_KEY: "tt_msg_nav_auto_top",
+    // 快速回复集「首次激活」标记的持久化键（激活一次制，见 §8）
+    QR_ACTIVATED_KEY: "tt_nav_qr_activated",
     // 默认开启自动回顶
     AUTO_TOP_DEFAULT: true,
     // DOM 契约（TauriTavern 主干）
@@ -275,7 +283,7 @@ async function scrollToMessageTop(messageId, { smooth = true } = {}) {
 let lastNavTarget = null;
 
 function navReferenceId(currentId) {
-    if (lastNavTarget !== null && Math.abs(currentId - lastNavTarget) <= NAV_REF_TOLERANCE) {
+    if (lastNavTarget !== null && Math.abs(currentId - lastNavTarget) <= CONFIG.NAV_REF_TOLERANCE) {
         return lastNavTarget;
     }
     return currentId;
@@ -460,61 +468,143 @@ function startGenerationWatch() {
 function toggleAutoTop() {
     autoTop.enabled = !autoTop.enabled;
     saveAutoTopEnabled(autoTop.enabled);
-    refreshAutoButton();
     toast(`自动回顶已${autoTop.enabled ? "开启" : "关闭"}`, autoTop.enabled ? "success" : "info");
     ttlog.info(`auto-top toggled ${autoTop.enabled ? "on" : "off"}`);
 }
 
 // --------------------------------------------------------
-// 8. 按钮 —— 注入输入框左侧原生图标槽 #leftSendForm（"≡"选项按钮
-//    同款 rail、同款 interactable 图标形态，用户拍板：不自造横条）。
-//    四个图标按钮：定位（回顶）/上一条/下一条/自动回顶开关。
-//    自动回顶用图标透明度区分开/关，title 常显状态。
+// 8. 入口接线 —— TT 原生快速回复（QR）栏 + slash 命令（用户拍板：自造
+//    UI 两轮形态废弃，全面走宿主原生机制）。命令是主体、QR 集是按钮化
+//    包装：QR 扩展不可用时命令通道仍独立可用，不静默降级。
 // --------------------------------------------------------
-const NAV_BAR_ID = "tt-nav-icons";
-const NAV_AUTO_BTN_ID = "tt-nav-auto-btn";
+const QR_SET_NAME = "tt-toolkit 导航";
+// quickReplyApi 等待轮询参数（QR 扩展 init 同步挂载 api、先于 APP_READY，
+// 但扩展加载顺序不受本模块控制，等待期按最坏情况放宽）
+const QR_POLL_INTERVAL_MS = 250;
+const QR_POLL_MAX_TRIES = 40;
 
-let autoTopButton = null;
+// 命令表＝slash 注册与 QR 按钮的单一事实源
+const NAV_ACTIONS = Object.freeze([
+    { command: "ttnav-top",  label: "回顶",     title: "当前消息回顶：视口顶楼层对齐到顶",         run: () => scrollCurrentMessageToTop() },
+    { command: "ttnav-prev", label: "上一条",   title: "跳到上一条角色回复",                       run: () => navigateAssistantReply(-1) },
+    { command: "ttnav-next", label: "下一条",   title: "跳到下一条角色回复",                       run: () => navigateAssistantReply(1) },
+    { command: "ttnav-auto", label: "自动回顶", title: "自动回顶开关：生成结束后跳回最新楼层",     run: () => toggleAutoTop() },
+]);
 
-// 同步/异步 handler 的异常都归到日志，不静默吞进 unhandledrejection
-function buildNavIcon(id, iconClass, title, onClick) {
-    const btn = document.createElement("div");
-    btn.id = id;
-    btn.className = `fa-solid ${iconClass} interactable tt-nav-icon`;
-    btn.title = title;
-    btn.tabIndex = 0;
-    btn.addEventListener("click", () => {
-        Promise.resolve(onClick()).catch(e => ttlog.error("nav button handler error", e?.message || String(e)));
-    });
-    return btn;
+// QR message＝slash 命令本体，不带尾空格——宿主执行时会自行拼接
+// （QuickReplySet.js:160 `${finalMessage} `），自带尾空格成冗余
+function qrMessage(action) {
+    return `/${action.command}`;
 }
 
-function mountButtonBar() {
-    if (document.getElementById(NAV_BAR_ID)) return; // 防重复注入
-    const rail = document.getElementById("leftSendForm");
-    if (!rail) {
-        ttlog.warn("nav icons mount failed: #leftSendForm not found");
+function registerSlashCommands() {
+    for (const action of NAV_ACTIONS) {
+        // 重名保护：宿主或其他扩展已注册同名命令时跳过（与 NAV_FLAG 双保险）
+        if (SlashCommandParser.commands[action.command]) continue;
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: action.command,
+            helpString: action.title,
+            callback: async () => {
+                // 错误表面化：入口异常必须 toast 给用户，不许只留日志
+                // （批3 回归教训：裸 typo 的 ReferenceError 被吞成日志，
+                // 用户只见「点了没反应」，排障只能靠翻文件日志）
+                try {
+                    await action.run();
+                } catch (e) {
+                    const msg = e?.message || String(e);
+                    toast(`导航出错[${NAV_VERSION}]：${msg}`, "error");
+                    ttlog.error(`/${action.command} handler error`, msg);
+                }
+                return "";
+            },
+        }));
+    }
+    ttlog.info(`slash commands registered: ${NAV_ACTIONS.map(a => `/${a.command}`).join(" ")}`);
+}
+
+function getQuickReplyApi() {
+    return window.quickReplyApi ?? null;
+}
+
+// 三段等待：立查 → APP_READY（autoFire 事件，晚订阅会立即重放，不悬挂）
+// → 轮询兜底；APP_READY 已发而 api 仍缺席＝QR 扩展被禁用，立即认定失败
+async function waitForQuickReplyApi() {
+    const immediate = getQuickReplyApi();
+    if (immediate) return immediate;
+
+    await new Promise(resolve => {
+        let settled = false;
+        let timer = null;
+        // 单一出口：finish 自清轮询——APP_READY 晚订阅同步重放可能先于
+        // setInterval 创建而 settle，此时不再起轮询（防 detached 计时器
+        // 空转到 deadline）
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer !== null) clearInterval(timer);
+            resolve();
+        };
+        try {
+            eventSource.once(event_types.APP_READY, finish);
+        } catch (e) {
+            ttlog.warn("APP_READY subscribe failed, poll only", e?.message || String(e));
+        }
+        if (!settled) {
+            const deadline = Date.now() + QR_POLL_INTERVAL_MS * QR_POLL_MAX_TRIES;
+            timer = setInterval(() => {
+                if (getQuickReplyApi() || Date.now() >= deadline) finish();
+            }, QR_POLL_INTERVAL_MS);
+        }
+    });
+    return getQuickReplyApi();
+}
+
+function qrActivated() {
+    try { return localStorage.getItem(CONFIG.QR_ACTIVATED_KEY) === "1"; } catch { return false; }
+}
+
+async function ensureNavQrSet() {
+    const api = await waitForQuickReplyApi();
+    if (!api) {
+        // fail fast：QR 栏缺席要让用户看见，且明说替代入口（命令通道独立于 QR）
+        console.warn(`[tt-toolkit][nav] ${NAV_VERSION}: quickReplyApi unavailable, QR bar not created; /ttnav-* commands remain available`);
+        ttlog.warn("quickReplyApi unavailable after wait, QR bar skipped");
+        toast("快速回复不可用：命令已注册为 /ttnav-*，可在输入框直接执行", "warning");
         return;
     }
-    const wrap = document.createElement("div");
-    wrap.id = NAV_BAR_ID;
-    wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;";
-    wrap.append(
-        buildNavIcon("tt-nav-top", "fa-location-arrow", "当前消息回顶：视口顶楼层对齐", () => scrollCurrentMessageToTop()),
-        buildNavIcon("tt-nav-prev", "fa-chevron-up", "上一条角色回复", () => navigateAssistantReply(-1)),
-        buildNavIcon("tt-nav-next", "fa-chevron-down", "下一条角色回复", () => navigateAssistantReply(1)),
-    );
-    autoTopButton = buildNavIcon(NAV_AUTO_BTN_ID, "fa-bolt", "自动回顶：生成结束后跳回最新楼层（点击开关）", () => toggleAutoTop());
-    wrap.append(autoTopButton);
-    rail.append(wrap);
-    refreshAutoButton();
-}
 
-// 开关状态用透明度+提示语表达（不换图标，避免误触后状态不可读）
-function refreshAutoButton() {
-    if (autoTopButton) {
-        autoTopButton.style.opacity = autoTop.enabled ? "1" : "0.35";
-        autoTopButton.title = `自动回顶：${autoTop.enabled ? "开" : "关"}（点击切换）`;
+    try {
+        // createSet 对同名集是原位替换语义（丢集内全部 QR），仅在集不存在时
+        // 调用；已存在只逐条补缺/对齐 message，不触 updateSet/deleteSet
+        // （保护用户对集属性与按钮的自定义）
+        if (!api.getSetByName(QR_SET_NAME)) {
+            await api.createSet(QR_SET_NAME);
+        }
+        for (const action of NAV_ACTIONS) {
+            const qr = api.getQrByLabel(QR_SET_NAME, action.label);
+            if (!qr) {
+                await api.createQuickReply(QR_SET_NAME, action.label, {
+                    message: qrMessage(action),
+                    title: action.title,
+                });
+            } else if (qr.message !== qrMessage(action)) {
+                await api.updateQuickReply(QR_SET_NAME, action.label, {
+                    message: qrMessage(action),
+                });
+            }
+        }
+
+        // 激活一次制：仅首次把集挂入全局列表并置位；用户此后手动移除该集
+        // 不复活（尊重用户对快速回复栏的自主管理）
+        if (!qrActivated()) {
+            await api.addGlobalSet(QR_SET_NAME);
+            try { localStorage.setItem(CONFIG.QR_ACTIVATED_KEY, "1"); } catch { /* 忽略：仅影响下次会话的激活判断 */ }
+        }
+        ttlog.info(`QR set "${QR_SET_NAME}" ready (activated=${qrActivated()}, buttons=${NAV_ACTIONS.length})`);
+    } catch (e) {
+        const msg = e?.message || String(e);
+        ttlog.error("QR set ensure failed", msg);
+        toast(`导航快速回复建立失败[${NAV_VERSION}]：${msg}`, "error");
     }
 }
 
@@ -539,7 +629,8 @@ function dump() {
     const root = getScrollRoot();
     const lines = [
         `tt-toolkit nav dump @ ${new Date().toISOString()}`,
-        `version=nav-v1 autoTop=${autoTop.enabled ? "on" : "off"} ttlog=${ttlogHealth()} mode=${getSlashExecutor() ? "mainline" : "fallback"}`,
+        `version=${NAV_VERSION} autoTop=${autoTop.enabled ? "on" : "off"} ttlog=${ttlogHealth()} mode=${getSlashExecutor() ? "mainline" : "fallback"}`,
+        `qrApi=${getQuickReplyApi() ? "ready" : "unavailable"} qrSet="${QR_SET_NAME}" qrActivated=${qrActivated()}`,
         `root=${root ? `#${root.id || "(no id)"}` : "missing"}` +
             ` mounted=${root ? root.querySelectorAll(CONFIG.SEL.MESSAGE).length : 0}` +
             ` lastId=${getLastMessageIdSafe()} genActive=${isGenerationActive()}`,
@@ -553,14 +644,15 @@ function dump() {
 // 10. 初始化（加载完成不加 toast：loader 的 tt-toolkit[nav] ready 日志即载体）
 // --------------------------------------------------------
 function initNav() {
-    window.__TT_NAV__ = Object.freeze({ version: "nav-v1", dump });
+    window.__TT_NAV__ = Object.freeze({ version: NAV_VERSION, dump });
 
     autoTop.enabled = loadAutoTopEnabled();
-    mountButtonBar();
+    registerSlashCommands();
+    void ensureNavQrSet(); // 异步等 QR API 就绪，不阻塞命令注册与事件接线
     bindEvents();
     startGenerationWatch();
 
-    ttlog.info(`nav-v1 loaded autoTop=${autoTop.enabled ? "on" : "off"} mode=${CONFIG.MAINLINE_JUMP_FIRST ? "mainline" : "fallback"} ttlog=${ttlogHealth()}`);
+    ttlog.info(`${NAV_VERSION} loaded autoTop=${autoTop.enabled ? "on" : "off"} mode=${CONFIG.MAINLINE_JUMP_FIRST ? "mainline" : "fallback"} ttlog=${ttlogHealth()}`);
 }
 
 function onReady(fn) {
