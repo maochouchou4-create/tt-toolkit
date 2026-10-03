@@ -1,0 +1,27 @@
+node_modules
+
+.DS_Store
+Thumbs.db
+
+*.log
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+auto-imports.d.ts
+auto-imports.zod.d.ts
+components.d.ts
+
+screenshot_verify.png
+
+# 本地测试用数据（ST 正则导出样例等用户数据），不属于扩展代码
+正则示例/
+
+.playwright-mcp/
+.kilo/
+.zcode/
+.vscode/
+tailwind.config.js
+postcss.config.js

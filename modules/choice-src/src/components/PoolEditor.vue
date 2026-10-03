@@ -1,0 +1,731 @@
+<template>
+  <div class="choice-pool-editor">
+    <!-- 抽取参数（全局）：页面级工具栏，置于配置栏之上（对齐提示词页 toolbar 布局）。
+         v35 起为全局参数（settings.generation），不属于任何条目池配置——池配置只管条目引用，
+         切换配置不得带动这些开关（历史耦合：曾绑 selectedConfig.generation，
+         切池配置分组抽取/固定溢出即跳变）。与生成设置页的冗余比例同源 -->
+    <div class="choice-inline-field">
+      <label class="choice-inline-label">{{ t`抽取参数（全局）` }}</label>
+      <div class="choice-inline-gen">
+        <label class="choice-check" :title="t`按条目分类分组轮流抽取，避免同组扎堆`">
+          <input v-model="globalStore.settings.generation.categories_enabled" type="checkbox" />
+          {{ t`分组抽取` }}
+        </label>
+        <label class="choice-check" :title="t`结果随机打乱，避免固定条目总在开头`">
+          <input v-model="globalStore.settings.generation.shuffle_final" type="checkbox" />
+          {{ t`打乱结果` }}
+        </label>
+        <label class="choice-inline-gen-item">
+          <span :title="t`固定条目超过数量上限时：全发=全部保留，截断=只取前N个`">{{ t`固定溢出` }}</span>
+          <select v-model="globalStore.settings.generation.pinned_overflow" class="choice-select">
+            <option value="send_all">{{ t`全发` }}</option>
+            <option value="trim">{{ t`截断` }}</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <hr class="sysHR" />
+
+    <!-- 配置工具栏 -->
+    <div class="choice-config-bar">
+      <div class="choice-config-row">
+        <label class="choice-config-label">{{ t`配置` }}</label>
+        <select v-model="selectedConfigId" class="choice-config-select">
+          <option v-for="cfg in configs" :key="cfg.id" :value="cfg.id">{{ cfg.name }}</option>
+        </select>
+        <button class="choice-btn-sm" :title="t`重命名`" :disabled="!selectedConfig" @click="startRenameConfig">
+          <i class="fa-solid fa-pen-to-square"></i>
+        </button>
+        <div class="choice-config-actions">
+          <button class="choice-btn-sm" :title="t`设为默认`" :disabled="selectedConfig?.is_default" @click="setDefault">
+            <i class="fa-solid fa-star"></i>
+          </button>
+          <button
+            class="choice-btn-sm"
+            :class="{ active: selectedConfigId === chatStore.settings.config_id }"
+            :title="
+              selectedConfigId === chatStore.settings.config_id ? t`当前聊天已绑定（点击取消）` : t`绑定到当前聊天`
+            "
+            @click="bindChat"
+          >
+            <i class="fa-solid fa-comment"></i>
+          </button>
+          <button
+            class="choice-btn-sm"
+            :class="{ active: selectedConfigId === characterStore.settings.config_id }"
+            :disabled="!currentCharAvailable"
+            :title="
+              !currentCharAvailable
+                ? t`请先在酒馆中选择一个角色卡`
+                : selectedConfigId === characterStore.settings.config_id
+                  ? t`当前角色已绑定（点击取消）`
+                  : t`绑定到当前角色`
+            "
+            @click="bindCharacter"
+          >
+            <i class="fa-solid fa-user"></i>
+          </button>
+          <button
+            class="choice-btn-sm choice-btn-del"
+            :title="t`删除`"
+            :disabled="selectedConfig?.is_default"
+            @click="removeConfig"
+          >
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+          <button class="choice-btn-sm choice-btn-new" :title="t`新建`" @click="showCreateDialog = true">
+            <i class="fa-solid fa-plus"></i> {{ t`新建` }}
+          </button>
+        </div>
+      </div>
+      <div class="choice-config-status">
+        <span class="choice-config-status-label">{{ t`当前生效` }}:</span>
+        <span class="choice-config-status-name">{{ effectiveName }}</span>
+        <span v-if="chatStore.settings.config_id" class="choice-bound-badge">{{ t`聊天` }}</span>
+        <span v-if="characterStore.settings.config_id" class="choice-bound-badge choice-bound-char">{{ t`角色` }}</span>
+        <span v-if="!effectiveConfig" class="choice-bound-badge choice-bound-fallback">{{ t`全部条目` }}</span>
+      </div>
+
+      <!-- 已绑定当前配置的角色卡徽章（反向视角：角色卡→配置 的绑定关系列表，同过滤页角色卡区） -->
+      <ConfigBindings :config-id="selectedConfigId" kind="pool" />
+    </div>
+
+    <hr class="sysHR" />
+
+    <!-- 配置编辑区域（始终可编辑） -->
+    <div v-if="selectedConfig && configs.length > 0" class="choice-inline-edit">
+      <!-- 已选条目列表 -->
+      <div class="choice-inline-field">
+        <div class="choice-inline-field-head">
+          <label class="choice-inline-label">{{ t`已选条目` }} ({{ selectedCount }})</label>
+          <button
+            class="choice-btn-sm choice-btn-new"
+            data-tour="pool-add"
+            :title="t`从条目库勾选条目添加到当前配置`"
+            @click="showSelectDialog = true"
+          >
+            <i class="fa-solid fa-plus"></i> {{ t`添加条目` }}
+          </button>
+        </div>
+        <div v-if="selectedEntries.length > 0" ref="entriesContainer" class="choice-inline-entries">
+          <div
+            v-for="cfgEntry in selectedEntries"
+            :key="cfgEntry.entry_id"
+            class="choice-inline-entry"
+            :class="{ 'choice-inline-entry--disabled': cfgEntry.enabled === false }"
+          >
+            <div class="choice-inline-entry-row">
+              <DragHandle :title="t`拖动排序`" />
+              <button
+                type="button"
+                class="choice-expand-btn"
+                :class="{ expanded: expandedEntries.has(cfgEntry.entry_id) }"
+                :title="t`查看条目内容与规则`"
+                @click="toggleExpandEntry(cfgEntry.entry_id)"
+              >
+                <i class="fa-solid fa-chevron-right"></i>
+              </button>
+              <span class="choice-inline-entry-text" @click="toggleExpandEntry(cfgEntry.entry_id)">
+                <span
+                  class="choice-inline-cat-badge"
+                  :class="{ 'choice-inline-cat-badge--muted': !getEntryCategory(cfgEntry.entry_id) }"
+                  >{{ getEntryCategory(cfgEntry.entry_id) || t`未分组` }}</span
+                >
+                {{ entrySummary(cfgEntry.entry_id) }}
+              </span>
+              <div class="choice-inline-entry-fields">
+                <!-- 开关形态（区别于「固定」checkbox）：停用后条目保留在配置中，只是不参与生成 -->
+                <ChoiceSwitch
+                  v-model="cfgEntry.enabled"
+                  :title="
+                    cfgEntry.enabled === false ? t`已停用：条目保留在配置中，但不参与生成` : t`已启用：点击停用该条目`
+                  "
+                />
+                <label class="choice-check" :title="t`固定：勾选后该条目固定生成`">
+                  <input v-model="cfgEntry.pinned" type="checkbox" />
+                  <span class="choice-check-text">{{ t`固定` }}</span>
+                </label>
+                <label class="choice-inline-field-item">
+                  <span class="choice-inline-field-label">{{ t`权重` }}</span>
+                  <input
+                    v-model.number="cfgEntry.weight"
+                    class="choice-input choice-small-input"
+                    type="number"
+                    min="0"
+                    :title="t`权重`"
+                  />
+                </label>
+                <button
+                  class="choice-icon-btn choice-delete-btn"
+                  :title="t`移除`"
+                  @click="removeConfigEntry(cfgEntry.entry_id)"
+                >
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+            <!-- 只读详情：content/rule/category 只存在于 master_pool（内容层唯一真相源），
+                 配置层不持有这些字段，这里只做展示，编辑请去条目库 -->
+            <div v-if="expandedEntries.has(cfgEntry.entry_id)" class="choice-inline-entry-detail">
+              <template v-if="masterEntryOf(cfgEntry.entry_id)">
+                <div
+                  v-for="field in entryDetailFields(cfgEntry.entry_id)"
+                  :key="field.label"
+                  class="choice-inline-detail-item"
+                >
+                  <span class="choice-inline-detail-label">{{ field.label }}</span>
+                  <div class="choice-inline-detail-text">{{ field.value }}</div>
+                </div>
+                <div v-if="entryDetailFields(cfgEntry.entry_id).length === 0" class="choice-inline-detail-empty">
+                  {{ t`该条目无内容与规则` }}
+                </div>
+              </template>
+              <div v-else class="choice-inline-detail-empty">{{ t`条目已不存在` }}</div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="choice-empty">
+          <div class="choice-empty-icon"><i class="fa-solid fa-layer-group"></i></div>
+          <p>{{ t`未选择条目，请点击"添加条目"选择` }}</p>
+        </div>
+      </div>
+
+      <!-- 配置级规则/示例：用户按需求或角色卡自行书写，不加任何标签；空则生成时不注入，不影响通用行为 -->
+      <div class="choice-inline-field">
+        <div class="choice-inline-field-head">
+          <label class="choice-inline-label">{{ t`规则（可选）` }}</label>
+          <span class="choice-inline-hint">{{
+            t`留空则不注入；无需任何标签，直接按需求或角色卡书写，AI 原样读取`
+          }}</span>
+        </div>
+        <textarea
+          v-model="selectedConfig.rules"
+          class="choice-textarea choice-inline-textarea"
+          rows="4"
+          :placeholder="t`例如：选项按角色当前性格与场景书写，动词开头、不超过 15 字`"
+        ></textarea>
+      </div>
+    </div>
+
+    <div v-else-if="configs.length === 0" class="choice-empty">
+      <div class="choice-empty-icon"><i class="fa-solid fa-database"></i></div>
+      <p>{{ t`暂无配置，请点击新建创建配置` }}</p>
+    </div>
+
+    <hr class="sysHR" />
+
+    <!-- 条目库入口 -->
+    <button
+      class="choice-entrypool-btn"
+      data-tour="pool-library"
+      :title="t`打开条目库管理弹窗`"
+      @click="showEntryPool = true"
+    >
+      <i class="fa-solid fa-database"></i>
+      {{ t`条目库` }} ({{ masterPool.length }})
+    </button>
+
+    <EntryPoolDialog :open="showEntryPool" @close="showEntryPool = false" />
+
+    <CreateConfigDialog
+      :open="showCreateDialog"
+      :existing-names="configs.map(c => c.name)"
+      @close="showCreateDialog = false"
+      @create="onCreateConfig"
+    />
+
+    <SelectEntriesDialog
+      :open="showSelectDialog"
+      :title="t`选择条目`"
+      :selected-ids="selectedEntryIds"
+      @close="showSelectDialog = false"
+      @confirm="handleSelectEntries"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import EntryPoolDialog from '@/components/EntryPoolDialog.vue';
+import CreateConfigDialog from '@/components/CreateConfigDialog.vue';
+import SelectEntriesDialog from '@/components/SelectEntriesDialog.vue';
+import ConfigBindings from '@/components/shared/ConfigBindings.vue';
+import toastr from 'toastr';
+import { this_chid } from '@sillytavern/script';
+import { uuidv4 } from '@sillytavern/scripts/utils';
+import { getStCharacter } from '@/core/st-character';
+import { useCharacterSettingsStore } from '@/store/character-settings';
+import { useChatSettingsStore } from '@/store/chat-settings';
+import { useGlobalSettingsStore } from '@/store/global-settings';
+import { usePoolSelectorStore } from '@/store/pool-selector';
+import { onboardingPendingAction } from '@/core/onboarding';
+import { focusPoolEntryId } from '@/core/floating-state';
+import type { PoolConfig, PoolEntry } from '@/type/settings';
+import { GenerationSettings } from '@/type/settings';
+import { toggleChatBinding, toggleCharacterBinding } from '@/core/bindings';
+import DragHandle from '@/components/shared/DragHandle.vue';
+import ChoiceSwitch from '@/components/shared/ChoiceSwitch.vue';
+import { DRAG_HANDLE_SELECTOR, draggableFilterOptions } from '@/util/sortable';
+import { entrySummaryText } from '@/util/entry-preview';
+import Sortable from 'sortablejs';
+
+const globalStore = useGlobalSettingsStore();
+const characterStore = useCharacterSettingsStore();
+const chatStore = useChatSettingsStore();
+const poolSelector = usePoolSelectorStore();
+
+const masterPool = computed(() => globalStore.settings.master_pool);
+const configs = computed(() => globalStore.settings.configs);
+const effectiveConfig = computed(() => poolSelector.effectiveConfig);
+
+const selectedConfigId = ref<string | null>(null);
+const showEntryPool = ref(false);
+const showCreateDialog = ref(false);
+const showSelectDialog = ref(false);
+
+// 新手引导弹窗状态信号：action 语义 = "本步应有的完整弹窗状态"（含 close-all 归零），
+// 保证上一步/下一步来回走时弹窗开合完整还原，而不是只管开不管关
+watch(onboardingPendingAction, a => {
+  if (a === 'pool-library') {
+    showEntryPool.value = true;
+    showSelectDialog.value = false;
+    onboardingPendingAction.value = null;
+  } else if (a === 'pool-select-entries') {
+    showEntryPool.value = false;
+    showSelectDialog.value = true;
+    onboardingPendingAction.value = null;
+  } else if (a === 'close-all') {
+    showEntryPool.value = false;
+    showSelectDialog.value = false;
+    onboardingPendingAction.value = null;
+  }
+});
+
+// 统计页「定位条目」：收到 focusPoolEntryId 后打开条目库弹窗（master_pool 全量视图）。
+// 目标条目可能不在当前 config 的 selectedEntries 中，config 视图定位不到，
+// 故定位到 EntryPoolDialog。PoolEditor 本身是 v-if 渲染（非 pool tab 时未挂载），
+// 用 immediate 让切到 pool tab 挂载时立即消费已设置的信号。
+// 不在此处置回 focusPoolEntryId——由 EntryPoolDialog 消费后置回（定位完成或失败）。
+watch(
+  focusPoolEntryId,
+  id => {
+    if (id) showEntryPool.value = true;
+  },
+  { immediate: true },
+);
+
+watch(
+  [configs, effectiveConfig],
+  () => {
+    if (configs.value.length === 0) {
+      selectedConfigId.value = null;
+      return;
+    }
+    if (!selectedConfigId.value || !configs.value.find(c => c.id === selectedConfigId.value)) {
+      selectedConfigId.value = effectiveConfig.value?.id ?? configs.value[0].id;
+    }
+  },
+  { immediate: true },
+);
+
+const selectedConfig = computed(() => configs.value.find(c => c.id === selectedConfigId.value) ?? null);
+
+const effectiveName = computed(() => {
+  if (!effectiveConfig.value) return t`全部条目`;
+  return effectiveConfig.value.name;
+});
+
+const onCreateConfig = (payload: { name: string; isDefault: boolean; bindChat: boolean; bindChar: boolean }) => {
+  const id = uuidv4();
+  const newConfig: PoolConfig = {
+    id,
+    name: payload.name,
+    entries: [],
+    is_default: payload.isDefault || configs.value.length === 0,
+    rules: '',
+    // 用 schema 默认而非硬编码字面量：避免字段遗漏（曾漏 count_mode）与默认值漂移
+    generation: GenerationSettings.parse({}),
+  };
+  if (payload.isDefault) {
+    for (const cfg of configs.value) {
+      cfg.is_default = false;
+    }
+  }
+  configs.value.push(newConfig);
+  selectedConfigId.value = id;
+  if (payload.bindChat) chatStore.settings.config_id = id;
+  if (payload.bindChar) {
+    // 编辑归属走角色卡扩展写入，无当前角色时绑定必失效（与 bindCharacter 同一根因），防御提示
+    if (getStCharacter(this_chid)) {
+      characterStore.setBinding('pool', id);
+    } else {
+      toastr.warning(t`未选择角色卡，「绑定角色」未生效`);
+    }
+  }
+  showCreateDialog.value = false;
+};
+
+const startRenameConfig = () => {
+  if (!selectedConfig.value) return;
+  const name = prompt(t`请输入新名称`, selectedConfig.value.name);
+  const trimmed = name?.trim();
+  if (!trimmed || trimmed === selectedConfig.value.name) return;
+  // 重名检测：与其他配置同名会让下拉/绑定歧义，提醒后放弃修改
+  if (configs.value.some(c => c.id !== selectedConfig.value!.id && c.name === trimmed)) {
+    toastr.warning(t`配置名「${trimmed}」已存在`);
+    return;
+  }
+  selectedConfig.value.name = trimmed;
+};
+
+const setDefault = () => {
+  if (!selectedConfig.value) return;
+  for (const cfg of configs.value) {
+    cfg.is_default = cfg.id === selectedConfigId.value;
+  }
+};
+
+const bindChat = () => toggleChatBinding('pool', selectedConfigId.value);
+
+// 无当前角色时绑定无意义（store watch 对 this_chid 为空会静默跳过写卡，造成「绑定无效」），
+// 按钮禁用 + toggleCharacterBinding 内再 guard 双保险。
+// 依赖 store 的响应式 currentCharacterId 而非模块变量 this_chid：this_chid 非响应式，
+// computed 不会在切角色后自动重算（曾有实证：切到角色聊天后按钮仍停留 disabled 态）
+const currentCharAvailable = computed(() => globalStore.currentCharacterId != null);
+
+const bindCharacter = () => toggleCharacterBinding('pool', selectedConfigId.value);
+
+const removeConfig = () => {
+  const cfg = selectedConfig.value;
+  if (!cfg || cfg.is_default) return;
+  const idx = configs.value.findIndex(c => c.id === cfg.id);
+  if (idx === -1) return;
+  configs.value.splice(idx, 1);
+  if (chatStore.settings.config_id === cfg.id) chatStore.settings.config_id = null;
+  if (characterStore.settings.config_id === cfg.id) characterStore.setBinding('pool', null);
+  if (configs.value.length > 0) {
+    selectedConfigId.value = effectiveConfig.value?.id ?? configs.value[0].id;
+  }
+};
+
+const selectedCount = computed(() => selectedConfig.value?.entries.length ?? 0);
+
+const selectedEntries = computed(() => selectedConfig.value?.entries ?? []);
+
+const selectedEntryIds = computed(() => {
+  if (!selectedConfig.value) return new Set<string>();
+  return new Set(selectedConfig.value.entries.map(e => e.entry_id));
+});
+
+// 展开态按 entry_id 记录；切换配置时清空，避免残留指向其他配置条目的展开态
+const expandedEntries = ref<Set<string>>(new Set());
+watch(selectedConfigId, () => (expandedEntries.value = new Set()));
+
+const toggleExpandEntry = (entryId: string) => {
+  if (expandedEntries.value.has(entryId)) expandedEntries.value.delete(entryId);
+  else expandedEntries.value.add(entryId);
+};
+
+const masterEntryOf = (entryId: string): PoolEntry | undefined => masterPool.value.find(e => e.id === entryId);
+
+const getEntryCategory = (entryId: string): string => {
+  const entry = masterEntryOf(entryId);
+  return entry?.category?.trim() || '';
+};
+
+// 折叠摘要只显示条目标识：完整内容/规则仅在展开详情出现，避免同一内容两处重复
+const entrySummary = (entryId: string): string => {
+  const entry = masterEntryOf(entryId);
+  if (!entry) return t`<空条目>`;
+  return entrySummaryText(entry.type, entry.content, t`<空条目>`);
+};
+
+type DetailField = { label: string; value: string };
+
+// 只读详情字段：内容/规则均非空才显示对应块；条目已被从条目库删除时返回空数组，
+// 由模板的"条目已不存在"分支兜底
+const entryDetailFields = (entryId: string): DetailField[] => {
+  const entry = masterEntryOf(entryId);
+  if (!entry) return [];
+  const fields: DetailField[] = [];
+  if (entry.content.trim()) fields.push({ label: t`内容`, value: entry.content });
+  if (entry.rule.trim()) fields.push({ label: t`规则`, value: entry.rule });
+  return fields;
+};
+
+const removeConfigEntry = (entryId: string) => {
+  if (!selectedConfig.value) return;
+  const idx = selectedConfig.value.entries.findIndex(e => e.entry_id === entryId);
+  if (idx !== -1) selectedConfig.value.entries.splice(idx, 1);
+  expandedEntries.value.delete(entryId);
+};
+
+const handleSelectEntries = (selectedIds: Set<string>) => {
+  if (!selectedConfig.value) return;
+  const currentIds = new Set(selectedConfig.value.entries.map(e => e.entry_id));
+  for (let i = selectedConfig.value.entries.length - 1; i >= 0; i--) {
+    if (!selectedIds.has(selectedConfig.value.entries[i].entry_id)) {
+      selectedConfig.value.entries.splice(i, 1);
+    }
+  }
+  for (const id of selectedIds) {
+    if (!currentIds.has(id)) {
+      const src = masterEntryOf(id);
+      selectedConfig.value.entries.push({
+        entry_id: id,
+        pinned: src?.pinned ?? false,
+        weight: src?.weight ?? 1,
+        enabled: true,
+      });
+    }
+  }
+  showSelectDialog.value = false;
+};
+
+const entriesContainer = ref<HTMLElement | null>(null);
+let sortable: Sortable | null = null;
+
+onMounted(() => {
+  watch(
+    entriesContainer,
+    el => {
+      if (sortable) sortable.destroy();
+      if (!el || !selectedConfig.value) return;
+      sortable = Sortable.create(el, {
+        ...draggableFilterOptions,
+        handle: DRAG_HANDLE_SELECTOR,
+        animation: 150,
+        onEnd: evt => {
+          if (evt.oldIndex === undefined || evt.newIndex === undefined) return;
+          const entries = selectedConfig.value?.entries;
+          if (!entries) return;
+          const [moved] = entries.splice(evt.oldIndex, 1);
+          entries.splice(evt.newIndex, 0, moved);
+        },
+      });
+    },
+    { immediate: true },
+  );
+});
+
+onUnmounted(() => {
+  if (sortable) sortable.destroy();
+});
+</script>
+
+<style scoped>
+.choice-pool-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--choice-space-2);
+}
+
+/* 分隔线：条目池页的历史粗 hr.sysHR（酒馆全局银色粗线）改为主题细边框语言，
+   与全扩展的 border token 一致（简约去装饰） */
+hr.sysHR {
+  border: none;
+  border-top: 1px solid var(--choice-border);
+  margin: var(--choice-space-2) 0;
+  background: transparent;
+}
+
+/* 内联编辑区域 */
+.choice-inline-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--choice-space-3);
+}
+
+.choice-inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--choice-space-1);
+}
+
+.choice-inline-gen {
+  display: flex;
+  align-items: center;
+  gap: var(--choice-space-2);
+  flex-wrap: wrap;
+}
+
+.choice-inline-gen-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--choice-space-1);
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-secondary);
+}
+
+.choice-inline-entries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--choice-space-2);
+  max-height: 250px;
+  overflow-y: auto;
+  border: 1px solid var(--choice-border);
+  border-radius: var(--choice-radius-sm);
+  padding: var(--choice-space-2);
+}
+
+.choice-inline-entry {
+  border-radius: var(--choice-radius-sm);
+  border: 1px solid var(--choice-border);
+  background: var(--choice-bg-card);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 停用条目：整行半透明+去饱和，与 FilterGroupPanel 非当前生效分组的视觉语言一致 */
+.choice-inline-entry--disabled {
+  opacity: 0.45;
+  filter: grayscale(30%);
+}
+
+.choice-inline-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* 手机小屏单行压缩：不换行，靠收窄固定元素给条目类型标题让位。
+   隐藏的元素都保留语义出口——固定 checkbox 有 label title、权重输入有 input title、
+   展开靠点击标题本身（箭头是纯视觉冗余）。桌面宽度下全部原样显示 */
+@media (pointer: coarse) and (max-width: 480px) {
+  .choice-inline-entry-row .choice-drag-handle {
+    width: 32px;
+  }
+
+  /* 展开按钮在窄屏行内被收掉：条目标题本身仍可点展开，按钮只是冗余视觉 */
+  .choice-expand-btn {
+    display: none;
+  }
+
+  .choice-inline-entry-fields .choice-check-text {
+    display: none;
+  }
+
+  .choice-inline-entry-fields .choice-inline-field-label {
+    display: none;
+  }
+
+  .choice-inline-entry-fields .choice-icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .choice-inline-field-item .choice-small-input {
+    width: 48px;
+  }
+
+  .choice-inline-entry-fields {
+    gap: var(--choice-space-1);
+    padding-right: var(--choice-space-1);
+  }
+
+  .choice-inline-entry-text {
+    padding: var(--choice-space-1) var(--choice-space-1) var(--choice-space-1) 0;
+  }
+
+  .choice-inline-cat-badge {
+    padding: 1px 4px;
+  }
+}
+
+.choice-inline-entry-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  padding: var(--choice-space-2) var(--choice-space-2);
+  font-size: var(--choice-text-sm);
+  color: var(--choice-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--choice-space-2);
+  cursor: pointer;
+}
+
+.choice-inline-entry-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--choice-space-1);
+  padding: var(--choice-space-1) var(--choice-space-2) var(--choice-space-2) var(--choice-space-4);
+  border-top: 1px solid var(--choice-border);
+}
+
+.choice-inline-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.choice-inline-detail-label {
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-muted);
+}
+
+.choice-inline-detail-text {
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.choice-inline-detail-empty {
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-muted);
+}
+
+.choice-inline-entry-fields {
+  display: flex;
+  align-items: center;
+  gap: var(--choice-space-2);
+  padding: var(--choice-space-2) var(--choice-space-2) var(--choice-space-2) 0;
+  flex-wrap: nowrap;
+  border-left: 1px solid var(--choice-border);
+}
+
+.choice-inline-field-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--choice-space-1);
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-muted);
+}
+
+.choice-inline-field-label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 配置级规则/示例编辑区：head 行 = 标签 + 右侧提示 */
+.choice-inline-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--choice-space-2);
+}
+
+.choice-inline-hint {
+  font-size: var(--choice-text-xs);
+  color: var(--choice-text-muted);
+  text-align: right;
+}
+
+/* 规则/示例文本框：纵向留白，仅覆盖宽高/缩放；底色边框聚焦态由 global.css .choice-textarea 提供 */
+.choice-inline-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+}
+
+/* 小号输入框：仅覆盖宽度，底色/边框/聚焦态由 global.css 的 .choice-input 提供 */
+.choice-small-input {
+  width: 40px;
+}
+</style>

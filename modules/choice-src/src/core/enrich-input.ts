@@ -1,0 +1,93 @@
+import { callSecondaryApiWithRetry } from './api-client';
+import {
+  buildMessages,
+  resolveCustomApi,
+  applyWIExcl,
+  parseOptions,
+  resolveCount,
+  resolveWIParticipation,
+} from './generator';
+import type { Ctx } from './generator';
+import { useGlobalSettingsStore } from '@/store/global-settings';
+import { useChatSettingsStore } from '@/store/chat-settings';
+import { pinia } from '@/pinia';
+import { DEFAULT_MODULES } from '@/type/settings';
+
+let enrichController: AbortController | null = null;
+
+export function cancelEnrich() {
+  enrichController?.abort();
+  enrichController = null;
+}
+
+/** 调用副 API 润色用户输入，返回解析后的选项文本数组。
+ *  复用 buildMessages 模块管线，包含聊天历史、世界书、角色描述等上下文。
+ *  用户输入通过 {{input}} 变量在 enrich_prompt 模块中占位，由 buildMessages 自动替换。 */
+export async function enrichUserInput(input: string): Promise<string[]> {
+  const gs = useGlobalSettingsStore(pinia);
+  const cs = useChatSettingsStore(pinia);
+  const api = resolveCustomApi(gs.settings.active_api_id, gs.settings.apis);
+  if (!api) {
+    throw new Error('未配置生成 API');
+  }
+
+  const sourceModules = gs.sortedEnabledModules.length > 0 ? gs.sortedEnabledModules : DEFAULT_MODULES;
+  let modules = sourceModules;
+
+  // 若 enrich_prompt 模块被禁用或不存在，从 DEFAULT_MODULES 临时注入其 JSON 默认内容。
+  // 不再用代码常量覆盖 content：JSON 是模块内容的单一事实源（choice-prompts-optimized.json），
+  // 代码常量会让此路径回退到早已演进的旧文案，与编辑器/生成链路出现双来源漂移
+  if (!modules.some(m => m.id === 'enrich_prompt')) {
+    const defaultEnrich = DEFAULT_MODULES.find(m => m.id === 'enrich_prompt');
+    if (defaultEnrich) {
+      modules = [...modules, { ...defaultEnrich }];
+    }
+  }
+
+  const enrichCount = resolveCount(gs.settings.ui.enrich_count);
+  const pr = gs.settings.prompt_rules;
+  const enrichCtx: Ctx = {
+    count: enrichCount,
+    pinnedCount: 0,
+    pinned: '',
+    poolSelected: '',
+    input,
+    minChars: pr.enrich_min_chars,
+    maxChars: pr.enrich_max_chars,
+    enrichPersonStyle:
+      pr.enrich_person_style || (pr.enrich_person ? `统一使用${pr.enrich_person} {{user}} 为主语` : ''),
+    optionPerson: pr.option_person || '第三人称',
+    enrichPerson: pr.enrich_person || '第三人称',
+    prevOptions: '',
+  };
+
+  const gwi = gs.settings.world_info;
+  const cwi = cs.settings.world_info;
+  const { allExcl, enabled } = await resolveWIParticipation(gwi, cwi);
+  const restore = gwi.enabled
+    ? await applyWIExcl(allExcl, enabled, cwi.book_entry_modes, cwi.book_entry_overrides)
+    : null;
+
+  try {
+    const messages = await buildMessages(modules, enrichCtx, gwi, gs.settings.prompt_rules.context_rounds, true);
+
+    enrichController = new AbortController();
+    const signal = enrichController.signal;
+
+    const raw = await callSecondaryApiWithRetry(
+      messages,
+      api,
+      gs.settings.retry_count,
+      gs.settings.retry_interval,
+      signal,
+    );
+    return parseOptions(raw, enrichCount);
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') return [];
+    console.error('[Choice] 润色失败', e);
+    throw e;
+  } finally {
+    if (restore) restore.restore();
+    enrichController = null;
+  }
+}

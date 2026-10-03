@@ -1,0 +1,36 @@
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@typescript-eslint/eslint-plugin@8.68.0'
+  - '@typescript-eslint/parser@8.68.0'
+  - '@typescript-eslint/project-service@8.68.0'
+  - '@typescript-eslint/scope-manager@8.68.0'
+  - '@typescript-eslint/tsconfig-utils@8.68.0'
+  - '@typescript-eslint/type-utils@8.68.0'
+  - '@typescript-eslint/types@8.68.0'
+  - '@typescript-eslint/typescript-estree@8.68.0'
+  - '@typescript-eslint/utils@8.68.0'
+  - '@typescript-eslint/visitor-keys@8.68.0'
+  - typescript-eslint@8.68.0
+  - '@typescript-eslint/eslint-plugin@8.69.0'
+  - '@typescript-eslint/parser@8.69.0'
+  - '@typescript-eslint/project-service@8.69.0'
+  - '@typescript-eslint/scope-manager@8.69.0'
+  - '@typescript-eslint/tsconfig-utils@8.69.0'
+  - '@typescript-eslint/type-utils@8.69.0'
+  - '@typescript-eslint/types@8.69.0'
+  - '@typescript-eslint/typescript-estree@8.69.0'
+  - '@typescript-eslint/utils@8.69.0'
+  - '@typescript-eslint/visitor-keys@8.69.0'
+  - typescript-eslint@8.69.0
+  - '@alloc/quick-lru@5.3.0'
+  - electron-to-chromium@1.5.418
+  - confbox@0.3.1
+  - pkg-types@2.3.2
+  - postcss@8.5.28
+  - postcss-selector-parser@7.1.6
+onlyBuiltDependencies:
+  - '@tailwindcss/oxide'
+  - esbuild
+  - unrs-resolver

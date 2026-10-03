@@ -3,11 +3,13 @@
 //   - 不引 import 插件——nav 对宿主模块（events.js / slash-commands 等）的
 //     逃逸 import 只在 TT 运行时存在，仓内 lint 无从解析，开了只会放行或误报；
 //   - 监听面＝loader + nav + shared；dist（上游构建产物）/ i18n（数据）/
-//     modules/persona（自带独立 lint 门与 dev kit）不入面。
+//     modules/persona（自带独立 lint 门与 dev kit）不入面；
+//     modules/choice-src＝上游 AFPL 硬分叉源码（TS/Vue，自带 lint 门），
+//     不进本门监听面——改动正确性由构建等价＋typecheck 把关。
 // globals 按实测 no-undef 报错补全：浏览器 + TT 宿主注入全局。
 export default [
     {
-        ignores: ["dist/**", "i18n/**", "modules/persona/**", "node_modules/**", "prompts/**"],
+        ignores: ["dist/**", "i18n/**", "modules/persona/**", "modules/choice-src/**", "node_modules/**", "prompts/**"],
     },
     {
         files: ["index.js", "modules/nav/**/*.js", "shared/**/*.js"],
