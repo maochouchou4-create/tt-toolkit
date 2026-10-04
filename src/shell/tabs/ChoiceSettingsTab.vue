@@ -107,7 +107,8 @@
       <div class="tt-card-title">剧情走向</div>
       <div class="tt-card-sub">
         走向答「剧情往哪走」（随当前聊天保存）；「放任自流」＝不注入走向。
-        选项怎么写的规则在提示词编辑器里改（本批不含旧 rules 概念）。
+        选项怎么写的通用约束在提示词编辑器的「写作规则」模块里改；旧池配置的
+        rules（用户手写的池级规则）是另一层，批C 导入后作为独立的池配置规则注入层生效，不与模板写作规则混写。
       </div>
       <div class="tt-choice-tags">
         <button
@@ -136,6 +137,7 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import type { ApiConfig, ChoiceGenParams } from '@/modules/choice/api';
 import { STORY_DIRECTION_TAG_DEFS, usePromptsStore } from '@/prompts';
@@ -143,6 +145,27 @@ import { STORY_DIRECTION_TAG_DEFS, usePromptsStore } from '@/prompts';
 const settings = useChoiceSettingsStore();
 const prompts = usePromptsStore();
 const directionTags = STORY_DIRECTION_TAG_DEFS;
+
+// 自由文本防抖：每击键立即 setStoryDirection＝每击键一次 chat 域立即保存
+// （saveMetadata 通道）——保存风暴。停输入 300ms 才落盘；走向标签切换
+// 是单次点击、保持立即保存，不进防抖。
+const DIRECTION_TEXT_DEBOUNCE_MS = 300;
+let directionTextTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onDirectionTextInput(event: Event): void {
+    const value = targetValue(event);
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+    directionTextTimer = setTimeout(() => {
+        directionTextTimer = undefined;
+        prompts.setStoryDirection({ freeText: value });
+    }, DIRECTION_TEXT_DEBOUNCE_MS);
+}
+
+// 防抖挂起期间离开设置页（含切聊天后卸载）：不落盘半截文本——
+// 落盘目标 chat 域可能已随卸载切换，迟到的写会进错聊天
+onBeforeUnmount(() => {
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+});
 
 function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
@@ -162,10 +185,6 @@ function onDraftMaxTokensChange(event: Event): void {
 
 function onBehaviorChange(event: Event): void {
     settings.updateGen({ clickBehavior: targetValue(event) as ChoiceGenParams['clickBehavior'] });
-}
-
-function onDirectionTextInput(event: Event): void {
-    prompts.setStoryDirection({ freeText: targetValue(event) });
 }
 
 function contractLabel(contract: ApiConfig['outputContract']): string {
