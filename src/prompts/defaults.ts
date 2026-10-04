@@ -1,21 +1,23 @@
 /**
- * 选项生成默认模板集（全新制版——方案 §0 病因判定：fork 出厂模板是
- * 上游猫娘 RP 特化演化，文本不搬不抄，按 §2.3 制版原则为「通用 RP +
- * flash 级模型」重写）。
+ * 选项生成默认模板（唯一模板——m03359 拍板砍配置集，单套即真相源；
+ * 方案 §0 病因判定：fork 出厂模板是上游猫娘 RP 特化演化，文本不搬不抄，
+ * 按 §2.3 制版原则为「通用 RP + flash 级模型」重写）。
  *
  * 制版原则落点：
  *   - 结构化分段标签：注入模块由引擎包裹 <persona>/<character>/…
  *     分段标签，文本模块自身保持短小；
  *   - 指令条目化短而刚性：每条规则一行一事，不写长段落；
- *   - 正向示例＋few-shot 为主：few_shot 模块给覆盖三种视角的完整示例
- *     （可关），各规则写「要做什么」而非「不许做什么」；
+ *   - 正向示例＋few-shot 为主：few_shot 模块给覆盖真人反应类型的完整
+ *     示例（可关），各规则写「要做什么」而非「不许做什么」；
  *   - 负向禁令最少化：仅保留第三人称叙述口径这一条结构性约束（选项
  *     视角失控会导致输出系统性跑偏，属结构约束而非风格禁令）；
+ *   - 池规则并入（m03359 整合轮）：旧「池级反 OOC 规则」不再独立注入，
+ *     要点去重后写进 core_rules 第 2 条——同一约束每请求只出现一份；
  *   - 占位符：{{count}}/{{min_chars}}/{{max_chars}}/{{user}}/{{char}}。
  */
 import type { PromptConfig } from './types';
 
-/** 模块 order 分段：注入类 20-95，规则/格式类 100-140（生成指令收尾）。 */
+/** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
     return {
         id: 'default',
@@ -28,7 +30,7 @@ export function createDefaultPromptConfig(): PromptConfig {
                 role: 'system',
                 order: 10,
                 enabled: true,
-                content: '你是沉浸式角色扮演的主持人。用户（{{user}}）与角色（{{char}}）的对话正在进行，你为当前剧情提供下一组可选的推进方向。',
+                content: '你是沉浸式角色扮演的主持人，负责为用户（{{user}}）与角色（{{char}}）的对话提供下一步的行动选项。',
             },
             {
                 kind: 'inject',
@@ -144,7 +146,8 @@ export function createDefaultPromptConfig(): PromptConfig {
             },
             {
                 // 批C：池条目注入。默认参与管线——空池/无绑定自然跳过（trace
-                // 留痕说明原因），不是「默认关」：有池数据就该在场
+                // 留痕说明原因），不是「默认关」：有池数据就该在场。
+                // 池规则模块已删（m03359）：反 OOC 要点并入 core_rules
                 kind: 'inject',
                 id: 'inject_pool_entries',
                 name: '池条目',
@@ -152,17 +155,6 @@ export function createDefaultPromptConfig(): PromptConfig {
                 order: 98,
                 enabled: true,
                 source: 'pool_entries',
-            },
-            {
-                // 批C：池配置规则独立段（与 core_rules 模板写作规则分层）。
-                // 空规则自然跳过
-                kind: 'inject',
-                id: 'inject_pool_rules',
-                name: '池规则',
-                role: 'system',
-                order: 102,
-                enabled: true,
-                source: 'pool_rules',
             },
             {
                 kind: 'text',
@@ -173,11 +165,15 @@ export function createDefaultPromptConfig(): PromptConfig {
                 enabled: true,
                 content: [
                     '<example>',
-                    '输出示例（仅演示格式与写法，内容与当前剧情无关；三种视角各一条：{{user}} 的行动、{{char}} 的主动行为、场景层面的事件）：',
+                    '输出示例（仅演示格式与写法，内容与当前剧情无关；三种视角混合：{{user}} 的行动、{{char}} 的主动行为与反应、场景层面的事件。留意其中「真人感」的写法——迟疑、岔开、回避、小心思，而不是每条都直奔主题）：',
                     '{',
                     '  "options": [',
                     '    {"title": "询问昨夜去向", "content": "{{user}} 压下心头的疑惑，放缓语气问道：「昨天夜里，你到底去了哪里？」"},',
+                    '    {"title": "岔开话题", "content": "{{user}} 注意到她握着杯沿的手收紧了一瞬，却只是笑着把话头带开：「这酒不错——你从哪儿淘来的？」"},',
+                    '    {"title": "沉默回避", "content": "她垂下眼睛，用小勺慢慢搅着咖啡，好一会儿才轻声说：「……让我再想想，怎么回答你。」"},',
+                    '    {"title": "应激收声", "content": "楼道里突然传来脚步声，{{char}} 立刻噤声，一把攥住 {{user}} 的手腕，把两人拉进门后的阴影里。"},',
                     '    {"title": "反客为主", "content": "{{char}} 忽然放下茶杯，直视 {{user}} 的眼睛：「在问别人之前，先解释一下你袖口上沾的口红印吧。」"},',
+                    '    {"title": "幽默化解", "content": "{{user}} 摸着后脑勺笑出了声：「行吧，这回算我栽了——但下一题，换我出。」"},',
                     '    {"title": "骤然断电", "content": "整层楼的灯骤然熄灭，黑暗中传来玻璃碎裂声，电梯井的方向有人惊呼了一句什么。"}',
                     '  ]',
                     '}',
@@ -195,9 +191,11 @@ export function createDefaultPromptConfig(): PromptConfig {
                     '<rules>',
                     '写作规则：',
                     '1. 每条选项是一个具体的剧情推进动作：可以是 {{user}} 的行动，也可以是其他角色（如 {{char}}）的主动行为或反应，还可以是场景层面的事件发展。',
-                    '2. 全部以第三人称叙述书写：用角色名或他／她指代，不用「你」。内容贴合相关角色的人设与当前场景，优先使用场景内已有的对象、人物与线索。',
-                    '3. 恰好 {{count}} 条，各条角度错开（如：推进对话、试探、采取行动、暂且回避）。',
-                    '4. 每条正文 {{min_chars}}～{{max_chars}} 字，写出具体的动作与言语，可含一句直接对白。',
+                    '2. 每条选项由其主体按自身人设发起：说什么、做什么、图什么，都要从这个角色本来会的方式里来，不得出现该角色不会说的话、不会做的事。仅当情境压力极端（生死、重大转折、情绪失控）时允许小幅越线，且核心性格与说话方式不变形。',
+                    '3. 反应要像真人：可以迟疑、回避、答非所问、带一点小心思，不必每条都直奔主题。',
+                    '4. 全部以第三人称叙述书写：用角色名或他／她指代，不用「你」。优先使用场景内已有的对象、人物与线索。',
+                    '5. 恰好 {{count}} 条，各条角度错开（如：推进对话、试探、采取行动、暂且回避）。',
+                    '6. 每条正文 {{min_chars}}～{{max_chars}} 字，写出具体的动作与言语，可含一句直接对白。',
                     '</rules>',
                 ].join('\n'),
             },
@@ -223,19 +221,8 @@ export function createDefaultPromptConfig(): PromptConfig {
                 role: 'user',
                 order: 140,
                 enabled: true,
-                content: '请根据以上设定与 <current_scene> 中的当前场景，为当前剧情提供 {{count}} 条可选的推进方向。',
+                content: '请根据以上设定与 <current_scene> 中的当前场景，生成恰好 {{count}} 条可选的推进方向。',
             },
         ],
-    };
-}
-
-/** 新建配置时的空白骨架：沿用默认模块集但保留全新 id（用户自由改造）。 */
-export function createPromptConfigFromDefault(name: string): PromptConfig {
-    const base = createDefaultPromptConfig();
-    const id = `cfg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    return {
-        id,
-        name,
-        modules: base.modules.map(m => ({ ...m })),
     };
 }

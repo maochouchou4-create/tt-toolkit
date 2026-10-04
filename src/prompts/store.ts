@@ -6,13 +6,14 @@
  * 失效信号；store 不落值快照（快照＝第二真相源）。
  *
  * 存储落点（方案 §2.2）：
- *   - 全局域 extension_settings.ttToolkit：promptConfigs（含 modules）、
- *     promptActiveId、externalInjections（外部注入搬运配置）、
+ *   - 全局域 extension_settings.ttToolkit：promptConfigs（含 modules；
+ *     m03359 起单模板——多套旧档读侧收敛为生效那套）、
+ *     externalInjections（外部注入搬运配置）、
  *     directionPresets（用户自建走向预设列表——G4）；
  *   - 聊天域 chat_metadata.ttToolkit：storyDirection（已应用预设正文
  *     ＋自由文本）——写走 writeChatMetadata 立即保存通道。
- *   - 批C 起读侧对旧存档补插池注入模块（inject_pool_entries/rules，
- *     缺席才补——见 readPromptDomain 的 backfillPoolModules）。
+ *   - 批C 起读侧对旧存档补插池注入模块（inject_pool_entries，缺席才补
+ *     ——见 readPromptDomain 的 backfillPoolModules）。
  */
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
@@ -28,7 +29,9 @@ const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 
 /** 全局域整体结构（批B 落的 prompts 命名空间；choice 侧另有自己的键）。 */
 export interface PromptGlobalDomain {
+    /** m03359 起恒为单元素（单模板；键形状沿用数组＝旧档迁移零改写） */
     promptConfigs: PromptConfig[];
+    /** 已废弃字段位（恒取 promptConfigs[0].id）——保留只为旧档键位兼容 */
     promptActiveId: string;
     externalInjections: ExternalInjectionConfig;
 }
@@ -41,17 +44,33 @@ function readPromptDomain(): PromptGlobalDomain {
     const external = getGlobal<ExternalInjectionConfig>(GLOBAL_EXTERNAL_KEY);
     let list = Array.isArray(configs) ? configs : [];
     if (list.length === 0) {
-        // 首次启动：落默认模板集（一次性写穿；后续不再覆盖）
+        // 首次启动：落默认模板（一次性写穿；后续不再覆盖）
         list = [createDefaultPromptConfig()];
         setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
-    } else if (backfillPoolModules(list)) {
-        // 批C 补建：批C 之前落盘的配置没有池注入模块——补插两枚（照
-        // fork v59/v60 迁移先例语义，自写实现）；已有则幂等跳过
-        setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
+    } else {
+        let changed = false;
+        // m03359 单模板迁移：旧档多套配置收敛为当时生效那套（配置集管理面
+        // 已砍除——用户拍板「懒得配置的，这一套就够了」，历史套数不保留）
+        if (list.length > 1) {
+            list = [list.find(c => c.id === activeId) ?? list[0]];
+            changed = true;
+        }
+        if (backfillPoolModules(list)) changed = true;
+        // 旧档里的 inject_pool_rules 模块剔除（m03359：池规则并入 core_rules，
+        // 'pool_rules' 注入源已从类型层删除——留着会在引擎 switch 不可达）
+        for (const config of list) {
+            if (!Array.isArray(config.modules)) continue;
+            const filtered = config.modules.filter(m => !(m.kind === 'inject' && (m as { source?: unknown }).source === 'pool_rules'));
+            if (filtered.length !== config.modules.length) {
+                config.modules = filtered;
+                changed = true;
+            }
+        }
+        if (changed) setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
     }
     return {
         promptConfigs: list,
-        promptActiveId: typeof activeId === 'string' ? activeId : list[0]?.id ?? '',
+        promptActiveId: list[0]?.id ?? '',
         externalInjections: { ...DEFAULT_EXTERNAL, ...(external ?? {}) },
     };
 }
@@ -61,10 +80,8 @@ function backfillPoolModules(list: PromptConfig[]): boolean {
     let changed = false;
     for (const config of list) {
         if (!Array.isArray(config.modules)) continue;
-        // 双复核 P3 修复：按 source 分别判断——否则任一 source 在场即整条
-        // 跳过，只缺一枚的半补建档永不补齐
-        const has = (source: 'pool_entries' | 'pool_rules') => config.modules.some(m => m.kind === 'inject' && m.source === source);
-        if (!has('pool_entries')) {
+        // 双复核 P3 修复语义保留：按 source 在场判断——缺席才补，幂等
+        if (!config.modules.some(m => m.kind === 'inject' && m.source === 'pool_entries')) {
             config.modules.push({
                 kind: 'inject',
                 id: 'inject_pool_entries',
@@ -73,18 +90,6 @@ function backfillPoolModules(list: PromptConfig[]): boolean {
                 order: 98,
                 enabled: true,
                 source: 'pool_entries',
-            });
-            changed = true;
-        }
-        if (!has('pool_rules')) {
-            config.modules.push({
-                kind: 'inject',
-                id: 'inject_pool_rules',
-                name: '池规则',
-                role: 'system',
-                order: 102,
-                enabled: true,
-                source: 'pool_rules',
             });
             changed = true;
         }
@@ -119,15 +124,10 @@ export const usePromptsStore = defineStore('tt-prompts', {
             void this.revision;
             return readPromptDomain().promptConfigs;
         },
-        activeConfigId(): string {
-            void this.revision;
-            return readPromptDomain().promptActiveId;
-        },
-        /** 当前生效配置（批B 无 chat/character 绑定：activeId 直取；批C 接覆盖式解析） */
+        /** 当前生效配置（m03359 单模板：promptConfigs[0]） */
         effectiveConfig(): PromptConfig | null {
             void this.revision;
-            const d = readPromptDomain();
-            return d.promptConfigs.find(c => c.id === d.promptActiveId) ?? d.promptConfigs[0] ?? null;
+            return readPromptDomain().promptConfigs[0] ?? null;
         },
         externalInjections(): ExternalInjectionConfig {
             void this.revision;
@@ -157,62 +157,34 @@ export const usePromptsStore = defineStore('tt-prompts', {
         },
     },
     actions: {
-        setActiveConfig(id: string) {
-            const d = readPromptDomain();
-            if (!d.promptConfigs.some(c => c.id === id)) return;
-            setGlobal(GLOBAL_PROMPT_ACTIVE_KEY, id);
+        /**
+         * 恢复默认模板（m03359 拍板新增）：单模板的自救口——用户改坏了自己
+         * 也不会修时一键回厂；也是 A/B 盲评的 B 面（改完与默认互相对照）。
+         * 整体替换 modules，不可撤销（UI 侧先 confirm）。
+         */
+        resetToDefault() {
+            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [createDefaultPromptConfig()]);
             this.revision++;
         },
-        createConfig(name: string, base: PromptConfig): string {
-            const id = `cfg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        /** 整体替换当前模板的模块集（编辑器写回——单模板直改） */
+        replaceModules(modules: PromptConfig['modules']) {
             const d = readPromptDomain();
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [...d.promptConfigs, { id, name, modules: base.modules.map(m => ({ ...m })) }]);
-            setGlobal(GLOBAL_PROMPT_ACTIVE_KEY, id);
-            this.revision++;
-            return id;
-        },
-        duplicateConfig(id: string) {
-            const d = readPromptDomain();
-            const src = d.promptConfigs.find(c => c.id === id);
-            if (!src) return;
-            this.createConfig(`${src.name}（副本）`, src);
-        },
-        renameConfig(id: string, name: string) {
-            const d = readPromptDomain();
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, d.promptConfigs.map(c => (c.id === id ? { ...c, name } : c)));
-            this.revision++;
-        },
-        deleteConfig(id: string) {
-            const d = readPromptDomain();
-            if (d.promptConfigs.length <= 1) return; // 最后一套不许删（真相源不能空）
-            const rest = d.promptConfigs.filter(c => c.id !== id);
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, rest);
-            if (d.promptActiveId === id) {
-                setGlobal(GLOBAL_PROMPT_ACTIVE_KEY, rest[0]?.id ?? '');
-            }
-            this.revision++;
-        },
-        /** 整体替换某配置的模块集（编辑器写回——直接编辑当前生效配置） */
-        replaceModules(id: string, modules: PromptConfig['modules']) {
-            const d = readPromptDomain();
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, d.promptConfigs.map(c => (c.id === id ? { ...c, modules } : c)));
+            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, d.promptConfigs.map((c, i) => (i === 0 ? { ...c, modules } : c)));
             this.revision++;
         },
         /** 单模块启停（编辑器高频操作：读-改-写整集） */
-        toggleModule(configId: string, moduleId: string, enabled: boolean) {
-            const d = readPromptDomain();
-            const cfg = d.promptConfigs.find(c => c.id === configId);
+        toggleModule(moduleId: string, enabled: boolean) {
+            const cfg = readPromptDomain().promptConfigs[0];
             if (!cfg) return;
-            this.replaceModules(configId, cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
+            this.replaceModules(cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
         },
         /**
          * 模块排序交换（order 值互换）。编辑器按 G5 三分组渲染，移动的
          * 交换对象限定同组相邻模块——跨组位置由各组分段天然隔开，跨组
          * 交换会让另一组里凭空多/少一行，视觉上＝乱跳。
          */
-        moveModule(configId: string, moduleId: string, direction: -1 | 1) {
-            const d = readPromptDomain();
-            const cfg = d.promptConfigs.find(c => c.id === configId);
+        moveModule(moduleId: string, direction: -1 | 1) {
+            const cfg = readPromptDomain().promptConfigs[0];
             if (!cfg) return;
             const sorted = [...cfg.modules].sort((a, b) => a.order - b.order);
             const idx = sorted.findIndex(m => m.id === moduleId);
@@ -226,24 +198,15 @@ export const usePromptsStore = defineStore('tt-prompts', {
             const orderA = sorted[idx].order;
             sorted[idx] = { ...sorted[idx], order: sorted[target].order };
             sorted[target] = { ...sorted[target], order: orderA };
-            this.replaceModules(configId, sorted);
+            this.replaceModules(sorted);
         },
         /** 编辑文本模块内容（编辑器 textarea 写回） */
-        updateModuleContent(configId: string, moduleId: string, content: string) {
-            const d = readPromptDomain();
-            const cfg = d.promptConfigs.find(c => c.id === configId);
+        updateModuleContent(moduleId: string, content: string) {
+            const cfg = readPromptDomain().promptConfigs[0];
             if (!cfg) return;
             this.replaceModules(
-                configId,
                 cfg.modules.map(m => (m.id === moduleId && m.kind === 'text' ? { ...m, content } : m)),
             );
-        },
-        /** 编辑模块角色 */
-        updateModuleRole(configId: string, moduleId: string, role: PromptConfig['modules'][number]['role']) {
-            const d = readPromptDomain();
-            const cfg = d.promptConfigs.find(c => c.id === configId);
-            if (!cfg) return;
-            this.replaceModules(configId, cfg.modules.map(m => (m.id === moduleId ? { ...m, role } : m)));
         },
         setStoryDirection(patch: Partial<StoryDirection>) {
             const current = this.storyDirection;

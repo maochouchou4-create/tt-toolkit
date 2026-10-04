@@ -19,11 +19,9 @@ export const ASSET_POOL_CONFIG_ID = 'asset-default';
 /** default-pool.json 的静态形状（构建产物，自身可信；normalize 只为防御）。 */
 interface PoolAsset {
     version: number;
-    rules: string;
     entries: Array<{
         type: string;
         content: string;
-        rule?: string;
         category: string;
         pinned?: boolean;
         weight?: number;
@@ -39,12 +37,11 @@ export const ASSET_POOL_VERSION: number = asset.version;
  * asset → 运行时池形状的确定性映射：条目 id=asset-<序号>（顺序即 json 顺序，
  * 不掺时间/随机——同一份 json 永远映射出同一池，幂等重写不产生 diff 噪声）。
  */
-export function buildAssetPool(): Pick<PoolDomainData, 'masterPool' | 'poolConfigs'> & { rules: string } {
+export function buildAssetPool(): Pick<PoolDomainData, 'masterPool' | 'poolConfigs'> {
     const masterPool: PoolEntry[] = asset.entries.map((e, i) => ({
         id: `asset-${i + 1}`,
         type: e.type,
         content: e.content,
-        rule: e.rule ?? '',
         category: e.category,
         pinned: e.pinned ?? false,
         weight: safeWeight(e.weight),
@@ -53,12 +50,11 @@ export function buildAssetPool(): Pick<PoolDomainData, 'masterPool' | 'poolConfi
         id: ASSET_POOL_CONFIG_ID,
         name: '默认配置',
         isDefault: true,
-        rules: asset.rules,
         // 引用层全量镜像（enabled 恒 true，pinned/weight 镜像条目——只读化后
         // 引用层不再承担「挑选子集」职责，保留结构是为 resolver 管线零改动）
         entries: masterPool.map(e => ({ entryId: e.id, enabled: true, pinned: e.pinned, weight: e.weight })),
     }];
-    return { masterPool, poolConfigs, rules: asset.rules };
+    return { masterPool, poolConfigs };
 }
 
 /**

@@ -27,8 +27,7 @@ export type InjectionSource =
     | 'story_direction'
     | 'external_slot'
     | 'baibai'
-    | 'pool_entries'
-    | 'pool_rules';
+    | 'pool_entries';
 
 /** 文本模块：用户可编辑的规则/任务/格式文本。 */
 export interface TextModule {

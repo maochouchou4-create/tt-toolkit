@@ -71,7 +71,7 @@ function mulberry32(seed: number): () => number {
 }
 
 function makeEntry(id: string, weight: number, pinned: boolean, category = '默认'): PoolEntry {
-    return { id, type: `选项${id}`, content: `${id}的行动正文`, rule: '', category, pinned, weight };
+    return { id, type: `选项${id}`, content: `${id}的行动正文`, category, pinned, weight };
 }
 
 /** 1) 抽取分布与数学（种子 PRNG 驱动 resolvePool 纯函数）。 */
@@ -148,18 +148,18 @@ function runAssetPoolChecks(): void {
     const cats = new Set(masterPool.map(e => e.category));
     check('asset：整理后 17 个分类（20−3 合并）', cats.size === 17, `实际 ${cats.size}`);
     const transition = masterPool.find(e => e.type === '转场推进');
-    check('asset：转场推进转固定（pinned 且旧 rule 清空）', !!transition && transition.pinned && transition.rule === '', `pinned=${String(transition?.pinned)} rule=${JSON.stringify(transition?.rule ?? '(缺条目)')}`);
+    check('asset：转场推进转固定（pinned）', !!transition && transition.pinned, `pinned=${String(transition?.pinned)}`);
     check(
         'asset：配置唯一且默认（asset-default）',
         poolConfigs.length === 1 && poolConfigs[0].id === ASSET_POOL_CONFIG_ID && poolConfigs[0].isDefault,
         `configs=${poolConfigs.length} id=${poolConfigs[0]?.id}`,
     );
     check('asset：引用层全量镜像', poolConfigs[0].entries.length === masterPool.length, `refs=${poolConfigs[0].entries.length}/${masterPool.length}`);
-    check('asset：池规则非空（反 OOC 规则随仓发布）', poolConfigs[0].rules.length > 0, `${poolConfigs[0].rules.length} 字`);
+    check('asset：池层不再携带规则（v3：反 OOC 要点并入提示词模板 core_rules）', poolConfigs.every(c => !('rules' in c)), `带 rules 配置 ${poolConfigs.filter(c => 'rules' in c).length}`);
     const ids = new Set(masterPool.map(e => e.id));
     check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
-    // v2（m03158 拍板）：条目级 rule 全部移除（「确实用不上」），池级反 OOC 规则保留
-    check('asset：条目规则全部移除（v2，池级规则保留）', masterPool.every(e => e.rule === ''), `带 rule 条目 ${masterPool.filter(e => e.rule !== '').length}`);
+    // v2（m03158 拍板）条目级 rule 移除；v3（m03359 整合轮）连数据形状都不带
+    check('asset：条目规则字段移除（v3，数据形状不再含 rule）', masterPool.every(e => !('rule' in e)), `带 rule 条目 ${masterPool.filter(e => 'rule' in e).length}`);
 
     // ---- 同步行为（存储态驱动）----
     const resetPool = () => {
@@ -180,7 +180,7 @@ function runAssetPoolChecks(): void {
     domain = choiceStorage.readDomain();
     check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
-    upsertPoolEntry({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', rule: '', category: 'x', pinned: false, weight: 1 });
+    upsertPoolEntry({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false, weight: 1 });
     choiceStorage.writeDomain(d => {
         d.pool.assetVersion = 0;
     });
@@ -234,14 +234,14 @@ function runImportRoundTrip(): void {
 
     const { masterPool, poolConfigs } = readPoolData();
     check(
-        '导入：master_pool 3 条全部导入（\\r id 已 trim 规范化）',
-        report.masterPoolImported === 3 && masterPool.length === 3 && masterPool.every(e => !e.id.includes('\r')) && masterPool.some(e => e.id === 'e1' && e.type === '检查酒馆' && e.content === '仔细检查酒馆的每个角落' && e.rule === '保持警惕口吻' && e.weight === 1),
+        '导入：master_pool 3 条全部导入（\\r id 已 trim；条目 rule 按新契约丢弃）',
+        report.masterPoolImported === 3 && masterPool.length === 3 && masterPool.every(e => !e.id.includes('\r')) && masterPool.some(e => e.id === 'e1' && e.type === '检查酒馆' && e.content === '仔细检查酒馆的每个角落' && !('rule' in e) && e.weight === 1) && report.notes.some(n => n.includes('条目级规则已弃')),
         `imported=${report.masterPoolImported}`,
     );
     const cfg = poolConfigs.find(c => c.id === 'c1');
     check(
-        '导入：configs 1 套导入（entry_id 同步规范化；停用引用保留）',
-        report.configsImported === 1 && !!cfg && cfg.isDefault && cfg.rules === fixture.configs[0].rules && cfg.entries.length === 2 && cfg.entries[0].entryId === 'e1' && cfg.entries[0].pinned === true && cfg.entries[0].weight === 2 && cfg.entries[1].entryId === 'e2' && cfg.entries[1].enabled === false,
+        '导入：configs 1 套导入（entry_id 同步规范化；停用引用保留；rules 丢弃）',
+        report.configsImported === 1 && !!cfg && cfg.isDefault && !('rules' in cfg) && cfg.entries.length === 2 && cfg.entries[0].entryId === 'e1' && cfg.entries[0].pinned === true && cfg.entries[0].weight === 2 && cfg.entries[1].entryId === 'e2' && cfg.entries[1].enabled === false,
         `imported=${report.configsImported}`,
     );
     const domain = choiceStorage.readDomain();
@@ -258,8 +258,8 @@ function runImportRoundTrip(): void {
     );
     check('导入：active_api_id 命中直映', domain.activeApiId === 'a2', `activeApiId=${domain.activeApiId}`);
     check(
-        '导入：未识别字段进忽略清单（stats/ui/dedup_*/exclude_params/timeout）',
-        report.ignoredFields.includes('stats') && report.ignoredFields.includes('ui') && report.ignoredFields.some(f => f.startsWith('configs[].generation.dedup_enabled')) && report.ignoredFields.some(f => f.startsWith('apis[].exclude_params')) && report.ignoredFields.some(f => f.startsWith('apis[].timeout')),
+        '导入：未识别字段进忽略清单（stats/ui/dedup_*/exclude_params/timeout/rules）',
+        report.ignoredFields.includes('stats') && report.ignoredFields.includes('ui') && report.ignoredFields.some(f => f.startsWith('configs[].generation.dedup_enabled')) && report.ignoredFields.some(f => f.startsWith('apis[].exclude_params')) && report.ignoredFields.some(f => f.startsWith('apis[].timeout')) && report.ignoredFields.some(f => f.startsWith('configs[].rules')),
         `ignored=${report.ignoredFields.join('、')}`,
     );
 
@@ -271,11 +271,12 @@ function runImportRoundTrip(): void {
         const backup = parsed.data;
         const byId = new Map(backup.masterPool.map(e => [e.id, e]));
         for (const raw of fixture.master_pool) {
+            // 条目 rule 按新契约不保真（导入即丢弃）——往返 diff 不比对 rule
             const entry = byId.get(raw.id.trim());
-            if (!entry || entry.type !== raw.type || entry.content !== raw.content || entry.rule !== raw.rule || entry.category !== raw.category || entry.pinned !== raw.pinned || entry.weight !== raw.weight) roundtripOk = false;
+            if (!entry || entry.type !== raw.type || entry.content !== raw.content || entry.category !== raw.category || entry.pinned !== raw.pinned || entry.weight !== raw.weight) roundtripOk = false;
         }
         const backupCfg = backup.poolConfigs.find(c => c.id === 'c1');
-        if (!backupCfg || backupCfg.rules !== fixture.configs[0].rules || backupCfg.isDefault !== true) roundtripOk = false;
+        if (!backupCfg || ('rules' in backupCfg) || backupCfg.isDefault !== true) roundtripOk = false;
         else {
             const refById = new Map(backupCfg.entries.map(r => [r.entryId, r]));
             for (const raw of fixture.configs[0].entries) {
@@ -308,21 +309,20 @@ function runImportRoundTrip(): void {
     check('导入：畸形备份文本被校验器拒绝', !bad1.ok && !bad2.ok && !bad3.ok && !bad4.ok, `样本结果：${[bad1.ok, bad2.ok, bad3.ok, bad4.ok].join('/')}`);
 }
 
-/** 3) 注入：pool_entries/pool_rules 两模块的分区呈现、分层与空态。 */
+/** 3) 注入：pool_entries 模块的分区呈现与空态（m03359：池规则并入模板，独立段已删）。 */
 function runInjectionChecks(): void {
     const config = createDefaultPromptConfig();
     const supply: PoolInjectionSupply = {
-        pinned: [{ type: '检查酒馆', content: '仔细检查酒馆每个角落', rule: '保持警惕口吻' }],
-        drawn: [{ type: '打听消息', content: '向酒保打听传闻', rule: '' }],
-        rules: '池规则原文：选项必须是角色当前知情范围内可执行的行动。',
+        pinned: [{ type: '检查酒馆', content: '仔细检查酒馆每个角落' }],
+        drawn: [{ type: '打听消息', content: '向酒保打听传闻' }],
     };
     const result = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: supply });
     const allText = result.messages.map(m => m.content).join('\n');
 
     check('池注入：pool_entries 段在场（固定/候选两区标签）', allText.includes('<pool_entries>') && allText.includes('【固定条目】') && allText.includes('【候选条目】'));
     check(
-        '池注入：条目逐条渲染（type：content [规则: rule]，空段省略）',
-        allText.includes('检查酒馆：仔细检查酒馆每个角落 [规则: 保持警惕口吻]') && allText.includes('打听消息：向酒保打听传闻') && !allText.includes('打听消息：向酒保打听传闻 [规则'),
+        '池注入：条目逐条渲染（type：content；规则概念已删，无 [规则: …] 后缀）',
+        allText.includes('检查酒馆：仔细检查酒馆每个角落') && allText.includes('打听消息：向酒保打听传闻') && !allText.includes('[规则'),
     );
     check('池注入：菜单模式语义写进提示词文本（候选多于所需，AI 挑选）', allText.includes('数量多于实际所需') && allText.includes('贴合'));
 
@@ -335,36 +335,34 @@ function runInjectionChecks(): void {
         `含覆盖句=${overText.includes('以固定条目为准')}`,
     );
 
-    const open = allText.indexOf('<pool_rules>');
-    const close = allText.indexOf('</pool_rules>');
-    const inside = open >= 0 && close > open ? allText.slice(open, close) : '';
-    const outside = open >= 0 && close > open ? allText.slice(0, open) + allText.slice(close) : allText;
-    check('池注入：pool_rules 段＝rules 原文', inside.includes('池规则原文：选项必须是角色当前知情范围内可执行的行动。'));
-    check('池注入：池规则与模板写作规则分层（不出现在 pool_rules 段之外）', open >= 0 && close > open && !outside.includes('池规则原文'));
+    // m03359 整合轮：池规则不再独立注入——<pool_rules> 段缺席，反 OOC 要点
+    // 整份写进模板 core_rules（<rules> 段），同一约束每请求只出现一份
+    check(
+        '池规则并入：无 <pool_rules> 独立段，反 OOC 要点在 <rules> 模板段',
+        !allText.includes('<pool_rules>') && allText.includes('<rules>') && allText.includes('不得出现该角色不会说的话'),
+    );
 
     const entTrace = result.trace.find(t => t.moduleId === 'inject_pool_entries');
-    const rulesTrace = result.trace.find(t => t.moduleId === 'inject_pool_rules');
-    check('池注入：trace 留痕（固定 N 条、候选 M 条）', entTrace?.injected === true && entTrace.note.includes('固定 1 条、候选 1 条') && rulesTrace?.injected === true, `note=${entTrace?.note ?? '（无 trace）'}`);
+    check('池注入：trace 留痕（固定 N 条、候选 M 条）', entTrace?.injected === true && entTrace.note.includes('固定 1 条、候选 1 条'), `note=${entTrace?.note ?? '（无 trace）'}`);
+    check('池规则模块已从模板移除（trace 无 inject_pool_rules 条目）', !result.trace.some(t => t.moduleId === 'inject_pool_rules'));
 
-    // 空态：null 供给＝池整体未启用；两区空＝池为空；规则空不注入
+    // 空态：null 供给＝池整体未启用；两区空＝池为空
     const nullResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: null });
     const nullEnt = nullResult.trace.find(t => t.moduleId === 'inject_pool_entries');
-    const nullRules = nullResult.trace.find(t => t.moduleId === 'inject_pool_rules');
-    check('空池跳过＋trace note（无池数据＝池未启用）', nullEnt?.injected === false && nullEnt.note.includes('池未启用') && nullRules?.injected === false, `note=${nullEnt?.note ?? '（无 trace）'}`);
-    const emptyResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: { pinned: [], drawn: [], rules: '' } });
+    check('空池跳过＋trace note（无池数据＝池未启用）', nullEnt?.injected === false && nullEnt.note.includes('池未启用'), `note=${nullEnt?.note ?? '（无 trace）'}`);
+    const emptyResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: { pinned: [], drawn: [] } });
     const emptyEnt = emptyResult.trace.find(t => t.moduleId === 'inject_pool_entries');
-    const emptyRules = emptyResult.trace.find(t => t.moduleId === 'inject_pool_rules');
-    check('空引用跳过＋trace note（池为空/规则为空）', emptyEnt?.injected === false && emptyEnt.note.includes('本聊天池为空') && emptyRules?.injected === false && emptyRules.note.includes('池配置规则为空'), `note=${emptyEnt?.note ?? '（无 trace）'}`);
+    check('空引用跳过＋trace note（池为空）', emptyEnt?.injected === false && emptyEnt.note.includes('本聊天池为空'), `note=${emptyEnt?.note ?? '（无 trace）'}`);
 
-    // dump 全文打印：smoke.mjs 的标记断言（<pool_entries>/<pool_rules>）在此收口
-    console.info('=== 池注入 dump（默认模板集＋池供给）===');
+    // dump 全文打印：smoke.mjs 的标记断言（<pool_entries>）在此收口
+    console.info('=== 池注入 dump（默认模板＋池供给）===');
     console.info(renderDump(result));
 }
 
 /** 4) 绑定级联：chat 覆盖命中→默认回退；effectivePool 两层语义。 */
 function runBindingCascadeChecks(): void {
     // 前置：runImportRoundTrip 已落 c1（默认）＋e1/e2/e3
-    upsertPoolConfig({ id: 'c2', name: '第二套', isDefault: false, rules: '第二套规则', entries: [{ entryId: 'e3', enabled: true, pinned: false, weight: 1 }] });
+    upsertPoolConfig({ id: 'c2', name: '第二套', isDefault: false, entries: [{ entryId: 'e3', enabled: true, pinned: false, weight: 1 }] });
     const configs = readPoolData().poolConfigs;
 
     setChatPoolConfigId('c2');
@@ -459,8 +457,8 @@ async function runAutoGenerateChecks(): Promise<void> {
         await new Promise(r => setTimeout(r, 20));
     }
     check('自动生成：stub 端点回固定 JSON → 解析 4 条（json 主路径）', store.phase === 'idle' && store.options.length === 4 && store.lastParsePath === 'json', `phase=${store.phase} count=${store.options.length} path=${store.lastParsePath} error=${store.error}`);
-    // 生成管线现场抽取池：drawPoolInjection 读导入后的池（e1 必发）
-    check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('检查酒馆：仔细检查酒馆的每个角落 [规则: 保持警惕口吻]'));
+    // 生成管线现场抽取池：drawPoolInjection 读导入后的池（e1 必发；条目渲染无规则后缀）
+    check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('检查酒馆：仔细检查酒馆的每个角落') && !store.lastDump.includes('[规则:'));
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
@@ -501,8 +499,12 @@ function runAssemblyChecks(): string {
     check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件发展') && allText.includes('主动行为或反应'));
     check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
     check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
-    check('few-shot 三条混合视角示例', allText.includes('反客为主') && allText.includes('骤然断电'));
-    check('生成指令口径＝可选的推进方向', allText.includes('为当前剧情提供') && allText.includes('可选的推进方向'));
+    check('few-shot 旧三条仍在（反客为主/骤然断电）', allText.includes('反客为主') && allText.includes('骤然断电'));
+    // m03359 整合轮：few-shot 3→7 条（真人反应类型覆盖）
+    const fewShot = config.modules.find(m => m.id === 'few_shot');
+    const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
+    check('few-shot 扩为 7 条真人反应示例（岔开/回避/反将一军/幽默化解等）', fewShotCount === 7, `条数=${fewShotCount}`);
+    check('生成指令口径＝下一步的行动选项/可选的推进方向（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('可选的推进方向') && !allText.includes('为当前剧情提供'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
 

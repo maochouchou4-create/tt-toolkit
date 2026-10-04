@@ -3,8 +3,8 @@
  *
  * 旧数据实证形状（用户 settings.json 的 extension_settings.choice，导入映射照此设计；
  * 代码与报告不写入真实密钥——密钥只是被搬运的字符串，不落地到本文件）：
- * - master_pool: [{id(部分尾部带 \r), category, type, content, rule, pinned, weight}]
- * - configs: [{id, name, is_default, rules, entries:[{entry_id(部分带 \r), enabled,
+ * - master_pool: [{id(部分尾部带 \r), category, type, content, rule(已弃), pinned, weight}]
+ * - configs: [{id, name, is_default, rules(已弃——池规则并入提示词模板), entries:[{entry_id(部分带 \r), enabled,
  *   pinned, weight}], generation:{categories_enabled, count_mode:"4", dedup_enabled,
  *   dedup_threshold, oversample_pct, pinned_overflow, shuffle_final}}]
  * - apis: [{id, name, apiurl, key, model, stream, temperature, max_tokens,
@@ -98,7 +98,13 @@ export function importLegacyChoice(): PoolImportReport | null {
 
     // 1) master_pool：逐条规范化（id trim 去重）
     const seenEntryIds = new Set<string>();
+    let legacyEntryRuleNoted = false;
     for (const raw of asArray(legacy.master_pool)) {
+        const rawRecord = asRecord(raw);
+        if (!legacyEntryRuleNoted && rawRecord && typeof rawRecord.rule === 'string' && rawRecord.rule.trim()) {
+            legacyEntryRuleNoted = true;
+            report.notes.push('条目级规则已弃（池规则并入提示词模板），导入时丢弃');
+        }
         const entry = normalizePoolEntry(raw);
         if (!entry) {
             report.notes.push('一条池条目缺 id（或形状不对）被丢弃');
@@ -130,7 +136,6 @@ export function importLegacyChoice(): PoolImportReport | null {
             id: record.id,
             name: record.name,
             isDefault: record.is_default,
-            rules: record.rules,
             entries: asArray(record.entries).map(e => {
                 const ref = asRecord(e);
                 // entry_id 与池条目 id 两端一致 trim 规范化（normalizePoolConfigEntry 内做）
@@ -138,6 +143,9 @@ export function importLegacyChoice(): PoolImportReport | null {
             }),
         });
         if (!config) continue;
+        // 池规则已并入提示词模板写作规则（m03359 拍板）——旧档的 rules
+        // 不再是独立注入段，导入时丢弃并报告
+        if ('rules' in record) report.ignoredFields.push('configs[].rules（池规则已并入提示词模板，忽略）');
         // 抽取参数优先取默认配置；旧档若无 is_default 标记，则退回首个带
         // generation 块的配置（兜底落点——旧档实证只有一套全默认配置）
         const isDefault = asBool(record.is_default, false);

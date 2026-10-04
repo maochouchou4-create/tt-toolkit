@@ -55,10 +55,8 @@
         </div>
       </div>
 
-      <!-- 池规则：随仓发布，只读展示（hover 看全文） -->
-      <div v-if="poolRules" class="tt-pool-note" :title="poolRules">
-        池规则（对所有选项生效）：{{ poolRules }}
-      </div>
+      <!-- 池规则已删（m03359 整合轮）：反 OOC 要点并入提示词模板的写作规则，
+           不再随池发布/独立注入 -->
     </div>
   </div>
 </template>
@@ -85,11 +83,6 @@ function onCategoriesToggle(e: Event) {
 const expandedId = ref('');
 
 const categoryCount = computed(() => new Set(pool.masterPool.map(e => e.category.trim() || '未分类')).size);
-
-const poolRules = computed(() => {
-    const rules = pool.poolConfigs.find(c => c.isDefault)?.rules ?? '';
-    return rules.trim();
-});
 
 const groupedEntries = computed(() => {
     // m03158 用户拍板：只读浏览不配搜索框（用不上）——全量分组直出

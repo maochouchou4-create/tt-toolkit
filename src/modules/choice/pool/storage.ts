@@ -34,7 +34,6 @@ export function createPoolEntry(): PoolEntry {
         id: newId('entry'),
         type: '',
         content: '',
-        rule: '',
         category: '',
         pinned: false,
         weight: 1,
@@ -67,7 +66,6 @@ export function createPoolConfig(name: string): PoolConfig {
         id: newId('poolcfg'),
         name,
         isDefault: false,
-        rules: '',
         entries: [],
     };
 }
@@ -145,6 +143,5 @@ export function drawPoolInjection(): PoolInjection {
     return {
         pinned: result.pinned,
         drawn: result.drawn,
-        rules: config ? config.rules.trim() : '',
     };
 }

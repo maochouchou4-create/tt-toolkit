@@ -247,8 +247,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 批B 37 条＋批C 37 条（抽取分布 5/导入 9/注入 8/绑定 5/自动生成 10，含
 // stub 在场 1 条）＝74；双复核修复轮 +3（pinned≥count 覆盖语义、
 // safeWeight fork 语义、非数字 messageId 跳过）＝77；批C.2 只读化 +11
-//（asset 静态形状 7＋同步行为 4）＝88；反馈轮 +1（asset v2 条目规则全移除）＝89。
-const CHOICE_PASS_EXPECTED = 89;
+//（asset 静态形状 7＋同步行为 4）＝88；反馈轮 +1（asset v2 条目规则全移除）
+// ＝89；m03359 整合轮 +1（few-shot 7 条计数）＝90（注入区 9 条不变：删
+// pool_rules 分层/空规则两断言，加池规则并入/模块移除两断言）。
+const CHOICE_PASS_EXPECTED = 90;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -262,8 +264,9 @@ if (dumpStart < 0) {
 } else {
     const dumpBody = outputLines.slice(dumpStart).join('\n');
     // 批C 起池注入 dump 打印在批B dump 之后（「池注入 dump」段），标记
-    // 断言对「dumpStart 之后」的全量输出收口——两份 dump 都算数
-    for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<direction>', '<external_memory>', '<pool_entries>', '<pool_rules>']) {
+    // 断言对「dumpStart 之后」的全量输出收口——两份 dump 都算数；
+    // m03359：<pool_rules> 标记删除（池规则并入模板 <rules> 段）
+    for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<direction>', '<external_memory>', '<pool_entries>', '<rules>']) {
         if (!dumpBody.includes(marker)) {
             failures.push(`组装 dump 缺少注入段标记 ${marker}`);
         }
@@ -289,11 +292,11 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
     failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
-// 提示词配置初始化：默认模板集落进全局域 storage（批C 起 19 模块——
-// 17＋inject_pool_entries/inject_pool_rules）
+// 提示词配置初始化：默认模板落进全局域 storage（m03359 整合轮起 18 模块——
+// inject_pool_rules 已删，反 OOC 要点并入 core_rules）
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
-if (!Array.isArray(promptDomain) || promptDomain.length !== 1 || !Array.isArray(promptDomain[0].modules) || promptDomain[0].modules.length !== 19) {
-    failures.push('默认提示词配置未正确初始化（期望 1 套 19 模块）');
+if (!Array.isArray(promptDomain) || promptDomain.length !== 1 || !Array.isArray(promptDomain[0].modules) || promptDomain[0].modules.length !== 18) {
+    failures.push('默认提示词配置未正确初始化（期望 1 套 18 模块）');
 }
 
 if (failures.length > 0) {

@@ -1,10 +1,12 @@
 <template>
   <!--
-    提示词编辑器（G5 信息架构重写）：顶部白话说明＋三分组——①核心模板
-    （文本模块）②上下文注入（现场数据开关＋每项说明）③高级（外部插件
-    内容搬运）。dump/trace 类调试面收进调试 tab，主编辑面不出现。
-    单一真相源：直接编辑当前生效配置的 modules[]（无工作副本——fork 双
-    真相源病不继承）。
+    提示词编辑器（G5 信息架构＋m03359 整合轮）：顶部白话说明＋四段——
+    ①核心模板（文本模块，单模板无配置集——用户拍板「懒得配置」；改坏
+    可「恢复默认」一键回厂）②剧情走向（从「选项生成」tab 挪入：走向
+    是提示词素材，编辑入口应在同一页）③上下文注入（现场数据开关＋
+    每项说明）④高级（外部插件内容搬运）。dump/trace 类调试面收进
+    调试 tab，主编辑面不出现。单一真相源：直接编辑当前生效模板的
+    modules[]（无工作副本——fork 双真相源病不继承）。
   -->
   <div class="tt-prompt-editor-tab">
     <div class="tt-prompt-intro">
@@ -12,37 +14,11 @@
     </div>
 
     <div class="tt-prompt-section-title">核心模板</div>
-    <div class="tt-card">
-      <div class="tt-card-title">配置集</div>
-      <div class="tt-card-sub">可保存多套模板并随时切换；下方所有编辑都落在当前生效的这套里。</div>
-      <div class="tt-actions">
-        <button type="button" @click="createConfig">新建（复制当前）</button>
-      </div>
-      <ul class="tt-prompt-config-list">
-        <li v-for="cfg in prompts.configs" :key="cfg.id" class="tt-prompt-config-row" :class="{ 'tt-prompt-config-row--active': cfg.id === prompts.activeConfigId }">
-          <button type="button" class="tt-prompt-config-activate" :title="cfg.id === prompts.activeConfigId ? '当前生效配置' : '点选为生效配置'" @click="prompts.setActiveConfig(cfg.id)">
-            {{ cfg.id === prompts.activeConfigId ? '生效中' : '启用' }}
-          </button>
-          <span class="tt-prompt-config-name" :title="cfg.name">{{ cfg.name }}</span>
-          <span class="tt-prompt-config-count">{{ cfg.modules.length }} 模块</span>
-          <span class="tt-prompt-config-ops">
-            <button type="button" title="重命名" @click="renameConfig(cfg)">改名</button>
-            <button type="button" title="复制为新配置" @click="prompts.duplicateConfig(cfg.id)">复制</button>
-            <button type="button" title="导出 JSON" @click="exportConfig(cfg)">导出</button>
-            <button v-if="prompts.configs.length > 1" type="button" class="tt-prompt-config-op-danger" title="删除" @click="confirmDelete(cfg)">删除</button>
-          </span>
-        </li>
-      </ul>
-      <div class="tt-actions" style="margin-top: 6px">
-        <button type="button" @click="importConfig">导入 JSON</button>
-        <input ref="importFileInput" type="file" accept=".json,application/json" style="display: none" @change="onImportFile">
-      </div>
-    </div>
-
     <div v-if="effective" class="tt-card">
-      <div class="tt-card-title">指令文本（{{ effective.name }}）</div>
+      <div class="tt-card-title">指令文本</div>
       <div class="tt-card-sub">
-        任务、示例、写作规则、输出格式这类可改写的指令文本。勾选＝参与组装，点「编辑」改正文。
+        任务、示例、写作规则、输出格式这类可改写的指令文本。勾选＝参与组装，点「编辑」改正文；
+        改坏了点下方「恢复默认模板」一键回厂。
       </div>
       <div
         v-for="mod in textModules"
@@ -52,14 +28,14 @@
       >
         <div class="tt-prompt-module-head">
           <label class="tt-prompt-module-toggle" :title="mod.enabled ? '点击停用' : '点击启用'">
-            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(effective.id, mod.id, ($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
           <!-- 角色不设下拉：system/user 是消息内部概念，由引擎按默认模板固定。
                旧版（fork）同样不暴露此字段，用户实测无需可调。 -->
           <span class="tt-prompt-module-ops">
-            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
-            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
+            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
+            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
             <button type="button" @click="toggleEdit(mod)">{{ editingId === mod.id ? '收起' : '编辑' }}</button>
           </span>
         </div>
@@ -69,8 +45,55 @@
           :value="mod.content"
           rows="10"
           spellcheck="false"
-          @change="prompts.updateModuleContent(effective.id, mod.id, ($event.target as HTMLTextAreaElement).value)"
+          @change="prompts.updateModuleContent(mod.id, ($event.target as HTMLTextAreaElement).value)"
         />
+      </div>
+      <div class="tt-actions" style="margin-top: 6px">
+        <button type="button" class="tt-prompt-reset-btn" @click="resetTemplate">恢复默认模板</button>
+      </div>
+    </div>
+
+    <div class="tt-prompt-section-title">剧情走向</div>
+    <div class="tt-card">
+      <div class="tt-card-title">走向指引</div>
+      <div class="tt-card-sub">
+        走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）；
+        留空＝不注入走向。
+      </div>
+      <label class="tt-prompt-field--block">
+        <span>自由文本（主位）</span>
+        <textarea
+          :value="prompts.storyDirection.freeText"
+          rows="3"
+          placeholder="如：让林霜主动坦白昨夜去向的真相，并暴露她与斗篷人的旧关联"
+          @input="onDirectionTextInput"
+        />
+      </label>
+      <div class="tt-prompt-presets">
+        <div class="tt-prompt-presets-head">
+          <span>我的预设</span>
+          <button type="button" :disabled="!prompts.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
+        </div>
+        <div v-if="prompts.directionPresets.length === 0" class="tt-prompt-empty">
+          还没有预设——写好走向指引后点「存为预设」，以后一条点击应用
+        </div>
+        <div v-else class="tt-prompt-tags">
+          <button
+            v-for="preset in prompts.directionPresets"
+            :key="preset.id"
+            type="button"
+            class="tt-prompt-tag"
+            :class="{ 'tt-prompt-tag--active': prompts.storyDirection.presetText === preset.text }"
+            :title="preset.text"
+            @click="togglePreset(preset)"
+          >
+            {{ presetLabel(preset) }}
+            <span class="tt-prompt-tag-del" title="删除该预设（不影响已应用的聊天）" @click.stop="removePreset(preset)">×</span>
+          </button>
+        </div>
+        <div v-if="prompts.storyDirection.presetText" class="tt-prompt-note">
+          已应用预设：{{ prompts.storyDirection.presetText }}（再点同一预设可取消应用）
+        </div>
       </div>
     </div>
 
@@ -87,14 +110,14 @@
       >
         <div class="tt-prompt-module-head">
           <label class="tt-prompt-module-toggle" :title="mod.enabled ? '点击停用' : '点击启用'">
-            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(effective.id, mod.id, ($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
           <!-- chat_history 的楼层角色由聊天本身决定（user/assistant）；
                其余注入模块角色由引擎固定。UI 不暴露角色概念（旧版同样如此）。 -->
           <span class="tt-prompt-module-ops">
-            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
-            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
+            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
+            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
           </span>
         </div>
         <div class="tt-prompt-module-desc">{{ sourceDescription(mod) }}</div>
@@ -132,8 +155,8 @@
           <div class="tt-prompt-module-head">
             <span class="tt-prompt-module-name">{{ mod.name }}</span>
             <span class="tt-prompt-module-ops">
-              <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
-              <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
+              <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
+              <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
             </span>
           </div>
           <div class="tt-prompt-module-desc">{{ sourceDescription(mod) }}</div>
@@ -144,14 +167,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
-import { createPromptConfigFromDefault, listSlotPreviews, moduleGroupOf, usePromptsStore, validatePromptModules, type InjectModule, type InjectionSource, type PromptModule, type SlotPreview, type TextModule } from '@/prompts';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { listSlotPreviews, moduleGroupOf, usePromptsStore, type DirectionPreset, type InjectModule, type InjectionSource, type PromptModule, type SlotPreview, type TextModule } from '@/prompts';
 
 const prompts = usePromptsStore();
 
 const editingId = ref('');
 const slots = ref<SlotPreview[]>([]);
-const importFileInput = ref<HTMLInputElement | null>(null);
 
 const effective = computed(() => prompts.effectiveConfig);
 // G5 三分组共用同一条 order 管线：各组按 order 截取子序列呈现
@@ -183,9 +205,8 @@ const SOURCE_DESCRIPTIONS: Record<InjectionSource, string> = {
     wi_depth_before: '世界书：按对话深度插入到历史中段的条目。',
     wi_depth_after: '世界书：按对话深度插入到历史后段的条目。',
     chat_history: '聊天历史：最近几轮对话（层数在「选项生成」页设置）；最新一条 AI 回复会标为当前场景。',
-    story_direction: '剧情走向：「选项生成」页写的方向文本与已应用预设。',
+    story_direction: '剧情走向：本页「走向指引」里写的自由文本与已应用预设（随当前聊天保存）。',
     pool_entries: '条目池：池条目按固定必发（pinned）＋抽签候选两区注入，每次生成现场重抽（「条目池」页管理）。',
-    pool_rules: '池规则：当前生效池配置的规则原文，作为独立段落与模板写作规则分开注入。',
     external_slot: '其他插件注入到酒馆通用槽位的内容，按上方勾选搬入。',
     baibai: 'STBaiBaiBook（柏宝书）插件生成的剧情摘要。',
 };
@@ -214,63 +235,63 @@ function toggleEdit(mod: PromptModule): void {
     editingId.value = editingId.value === mod.id ? '' : mod.id;
 }
 
-function createConfig(): void {
-    const name = prompt('新配置名称：');
-    if (!name?.trim()) return;
-    const base = effective.value ?? createPromptConfigFromDefault(name.trim());
-    prompts.createConfig(name.trim(), base);
+/** 恢复默认模板（m03359）：单模板无备份面——改坏了的自救口。整体覆盖，先确认。 */
+function resetTemplate(): void {
+    if (!confirm('恢复默认模板？当前模板的所有修改会被出厂版本覆盖（不可撤销）。')) return;
+    prompts.resetToDefault();
+    editingId.value = '';
 }
 
-function renameConfig(cfg: { id: string; name: string }): void {
-    const name = prompt('配置名称：', cfg.name);
-    if (!name?.trim()) return;
-    prompts.renameConfig(cfg.id, name.trim());
+// ---- 剧情走向（m03359 整合轮从「选项生成」tab 挪入——走向是提示词素材，
+//      编辑入口与模板同页；数据域与写入通道零改动） ----
+
+// 自由文本防抖：每击键立即 setStoryDirection＝每击键一次 chat 域立即保存
+// （saveMetadata 通道）——保存风暴。停输入 300ms 才落盘；预设应用/取消
+// 是单次点击、保持立即保存，不进防抖。
+const DIRECTION_TEXT_DEBOUNCE_MS = 300;
+let directionTextTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onDirectionTextInput(event: Event): void {
+    const value = (event.target as HTMLTextAreaElement).value;
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+    directionTextTimer = setTimeout(() => {
+        directionTextTimer = undefined;
+        prompts.setStoryDirection({ freeText: value });
+    }, DIRECTION_TEXT_DEBOUNCE_MS);
 }
 
-function confirmDelete(cfg: { id: string; name: string }): void {
-    if (!confirm(`删除配置「${cfg.name}」？（不可恢复）`)) return;
-    prompts.deleteConfig(cfg.id);
+function presetLabel(preset: DirectionPreset): string {
+    // 预设无独立名字段（G4 最小形态：预设＝文本本体）——标签条显示
+    // 截断文本，完整内容在 title 悬浮
+    const text = preset.text.trim();
+    return text.length > 12 ? `${text.slice(0, 12)}…` : text;
 }
 
-function exportConfig(cfg: { id: string; name: string; modules: unknown[] }): void {
-    const payload = JSON.stringify({ name: cfg.name, modules: cfg.modules }, null, 2);
-    const blob = new Blob([payload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tt-prompt-config-${cfg.name || cfg.id}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function importConfig(): void {
-    importFileInput.value?.click();
-}
-
-async function onImportFile(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    try {
-        const text = await file.text();
-        let data: { name?: unknown; modules?: unknown };
-        try {
-            data = JSON.parse(text) as { name?: unknown; modules?: unknown };
-        } catch (e) {
-            throw new Error(`文件不是合法 JSON：${e instanceof Error ? e.message : String(e)}`);
-        }
-        if (!Array.isArray(data.modules)) throw new Error('JSON 缺少 modules 数组');
-        // 导入边界契约校验（Parse, don't validate）：外部文件逐字段过显式
-        // 契约，任一不合约整份拒绝（可读错误定位到模块与字段，不部分落盘）
-        const validation = validatePromptModules(data.modules);
-        if (!validation.ok) throw new Error(`模块契约不符：${validation.error}`);
-        const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '导入配置';
-        prompts.createConfig(name, { id: '', name, modules: validation.modules });
-    } catch (e) {
-        alert(`导入失败：${e instanceof Error ? e.message : String(e)}`);
+/** 点击预设＝应用（写入 presetText 快照）；再点同一预设＝取消应用。 */
+function togglePreset(preset: DirectionPreset): void {
+    if (prompts.storyDirection.presetText === preset.text) {
+        prompts.setStoryDirection({ presetText: '' });
+    } else {
+        prompts.setStoryDirection({ presetText: preset.text });
     }
 }
+
+function saveCurrentTextAsPreset(): void {
+    const text = prompts.storyDirection.freeText.trim();
+    if (!text) return;
+    prompts.addDirectionPreset(text);
+}
+
+function removePreset(preset: DirectionPreset): void {
+    if (!confirm(`删除预设「${presetLabel(preset)}」？（已应用该预设的聊天不受影响）`)) return;
+    prompts.deleteDirectionPreset(preset.id);
+}
+
+// 防抖挂起期间离开设置页（含切聊天后卸载）：不落盘半截文本——
+// 落盘目标 chat 域可能已随卸载切换，迟到的写会进错聊天
+onBeforeUnmount(() => {
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+});
 
 // 挂载时预扫一次槽位；运行期插件动态写入由「重新扫描」按钮重扫
 // （宿主槽位表非响应式，无法自动追踪）
@@ -294,67 +315,103 @@ onMounted(() => {
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #666) 55%, transparent);
 }
 
-.tt-prompt-config-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.tt-prompt-config-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 2px;
-    border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor, #666) 40%, transparent);
-}
-
-.tt-prompt-config-row--active .tt-prompt-config-name {
-    font-weight: bold;
-}
-
-.tt-prompt-config-activate {
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.15));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 2px 8px;
-    font-size: 0.78em;
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.tt-prompt-config-name {
-    font-size: 0.88em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 12em;
-}
-
-.tt-prompt-config-count {
-    font-size: 0.75em;
-    opacity: 0.55;
-}
-
-.tt-prompt-config-ops {
-    margin-left: auto;
-    display: flex;
-    gap: 4px;
-    flex-shrink: 0;
-}
-
-.tt-prompt-config-ops button {
+/* 恢复默认按钮（m03359：单模板自救口） */
+.tt-prompt-reset-btn {
     background: transparent;
     color: var(--SmartThemeBodyColor, inherit);
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 5px;
-    padding: 2px 8px;
-    font-size: 0.75em;
+    padding: 2px 10px;
+    font-size: 0.78em;
     cursor: pointer;
 }
 
-.tt-prompt-config-op-danger:hover {
+.tt-prompt-reset-btn:hover {
     color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
+/* 剧情走向卡（m03359 从「选项生成」tab 挪入；类名换 tt-prompt- 前缀自持，
+   不依赖 ChoiceSettingsTab 的 tt-choice- 样式块） */
+.tt-prompt-field--block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}
+
+.tt-prompt-field--block textarea {
+    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 18%, transparent);
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-family: inherit;
+    font-size: 0.9em;
+    resize: vertical;
+}
+
+.tt-prompt-presets-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85em;
+    opacity: 0.8;
+    margin-bottom: 4px;
+}
+
+.tt-prompt-presets-head button {
+    background: transparent;
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: 2px 10px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.tt-prompt-presets-head button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.tt-prompt-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.tt-prompt-tag {
+    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 25%, transparent);
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.tt-prompt-tag--active {
+    border-color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
+.tt-prompt-tag-del {
+    /* 删除叉与标签文本同为按钮内容——独立悬浮态只归删除叉 */
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 2px;
+    opacity: 0.55;
+}
+
+.tt-prompt-tag-del:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
+.tt-prompt-note {
+    font-size: 0.75em;
+    opacity: 0.6;
+    padding: 4px 0 0;
 }
 
 .tt-prompt-module {

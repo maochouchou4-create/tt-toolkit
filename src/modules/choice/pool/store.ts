@@ -80,7 +80,6 @@ export const usePoolStore = defineStore('tt-pool', {
         duplicateConfig(base: PoolConfig): PoolConfig {
             // 复制语义：内容与引用全量拷贝，id 换新、去掉默认身份（默认必须唯一）
             const copy = createPoolConfig(`${base.name} 副本`);
-            copy.rules = base.rules;
             copy.entries = base.entries.map(ref => ({ ...ref }));
             return copy;
         },

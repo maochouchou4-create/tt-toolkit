@@ -57,7 +57,6 @@ export function normalizePoolEntry(raw: unknown): PoolEntry | null {
         id,
         type: asString(r.type),
         content: asString(r.content),
-        rule: asString(r.rule),
         category: asString(r.category),
         pinned: asBool(r.pinned, false),
         weight: safeWeight(r.weight),
@@ -88,7 +87,6 @@ export function normalizePoolConfig(raw: unknown): PoolConfig | null {
         id,
         name: asString(r.name, '未命名配置'),
         isDefault: asBool(r.isDefault, false),
-        rules: asString(r.rules),
         entries: asArray(r.entries)
             .map(normalizePoolConfigEntry)
             .filter((e): e is PoolConfigEntry => e !== null),
