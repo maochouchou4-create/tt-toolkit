@@ -41,8 +41,6 @@ export interface TavernContextLike {
     getRequestHeaders?: () => Record<string, string>;
     /** 宿主通用注入槽位表转发（st-context.js:158：extensionPrompts: extension_prompts） */
     extensionPrompts?: Record<string, unknown>;
-    /** 主 API 原始生成通道（script.js:5092 generateRaw 转发；批D persona 主 API 模式） */
-    generateRaw?: (options: { prompt?: unknown }) => Promise<unknown>;
     /** oai_settings 转发（st-context.js:233；当前激活 openai 预设名读取） */
     chatCompletionSettings?: Record<string, unknown>;
     /** 全量世界书名快照（st-context.js:289） */

@@ -36,3 +36,4 @@ export function initPersonaMinimal(): void {
 }
 
 export { runPersonaSmoke } from './smoke';
+export { dumpPersonaTask } from './generation';

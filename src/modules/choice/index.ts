@@ -8,7 +8,8 @@
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import { eventBus, event_types } from '@/host';
-import { ensurePromptConfigs } from '@/prompts';
+import { ensurePromptConfigs, TASK_KEYS, type TaskKey } from '@/prompts';
+import { dumpPersonaTask } from '@/modules/persona';
 import { version } from '@/version';
 import { installAutoGenerate } from './auto';
 import { assembleCurrent } from './generator';
@@ -54,17 +55,29 @@ function mountBarWithRetry(): void {
 /**
  * 全局口 __TTK_PROMPTS__：dump / assemble / parseOptions。
  * 用户浏览器验收与排障共用（与编辑器 tab 的 dump 展示同一条组装路径）。
+ * 整合轮II 起 dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
  */
 function installGlobalPort(): void {
     const port = {
         version,
-        /** 全量组装 dump（宿主真实数据；async——世界书扫描是异步的） */
-        async dump(): Promise<string> {
-            const { dumpText } = await assembleCurrent();
+        /**
+         * 全量组装 dump（宿主真实数据；async——世界书扫描是异步的）。
+         * task＝'choice'（默认）走选项生成组装；persona 三任务走
+         * dumpPersonaTask（运行时任务态以空呈现，模板与注入全文可见）。
+         */
+        async dump(task?: string | { task?: string }): Promise<string> {
+            const raw = typeof task === 'string' ? task : task?.task;
+            const key = TASK_KEYS.includes(raw as TaskKey) ? (raw as TaskKey) : raw === undefined ? 'choice' : undefined;
+            if (!key) {
+                throw new Error(`未知任务键 ${String(raw)}——可选值：${TASK_KEYS.join(' / ')}`);
+            }
+            const dumpText = key === 'choice'
+                ? (await assembleCurrent()).dumpText
+                : await dumpPersonaTask(key);
             console.info(dumpText);
             return dumpText;
         },
-        /** 组装结果原始形态（消息数组＋trace） */
+        /** 组装结果原始形态（消息数组＋trace；choice 任务专用口） */
         assemble: assembleCurrent,
         /** 解析纯函数（畸形输出回退路径的确定性探针） */
         parseOptions,

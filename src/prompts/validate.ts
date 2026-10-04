@@ -24,6 +24,14 @@ const INJECTION_SOURCES: readonly InjectionSource[] = [
     'external_slot',
     'baibai',
     'pool_entries',
+    // persona 任务注入源（整合轮II）
+    'persona_preset',
+    'persona_wi',
+    'char_info',
+    'greetings',
+    'user_request',
+    'curated_schema',
+    'current_persona',
 ];
 
 export type PromptModulesValidation =

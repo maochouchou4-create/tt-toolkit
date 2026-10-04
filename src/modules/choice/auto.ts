@@ -2,7 +2,7 @@
  * 自动生成（批C）：MESSAGE_RECEIVED 监听守卫链。
  *
  * 守卫顺序（越早越便宜）：quiet 静默生成跳过 → 消息文本空跳过 →
- * messageId===0 跳过 → autoGenerate 关跳过 → 生成中跳过 → API 未配
+ * messageId===0 跳过 → autoGenerate 关跳过 → 生成中跳过 → 未选端点
  * console.warn 跳过。全部通过后 fire-and-forget 触发生成。
  *
  * 监听器内不得 await（重活脱钩）：宿主 eventSource.emit 串行 await 每个
@@ -15,7 +15,7 @@
  */
 
 import { eventBus, event_types, getChatMessages } from '@/host';
-import { choiceStorage, resolveActiveApi } from './api';
+import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { generateOptions, isGenerating } from './generator';
 
 /** 幂等安装标记（浏览器/node 两路 init 都可能调用）。 */
@@ -57,10 +57,10 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
 
     if (isGenerating()) return false;
 
-    const api = resolveActiveApi();
-    if (!api || !api.apiurl.trim() || !api.model.trim()) {
+    const endpoint = resolveChoiceEndpoint();
+    if (!endpoint) {
         // 不弹 UI（理由见文件头）；留 console 线索供排障
-        console.warn('[tt-toolkit][choice] 自动生成跳过：API 未配置或未填写完整');
+        console.warn('[tt-toolkit][choice] 自动生成跳过：未选择生成端点');
         return false;
     }
 

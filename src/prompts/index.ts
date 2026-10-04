@@ -3,22 +3,25 @@
  */
 export type {
     AssemblyMessage,
+    ChoiceInjectionSource,
     DirectionPreset,
     ExternalInjectionConfig,
     InjectModule,
     InjectionSource,
     ModuleGroupId,
     ModuleTrace,
+    PersonaInjectionSource,
     PromptConfig,
     PromptModule,
     PromptRole,
     StoryDirection,
+    TaskKey,
     TextModule,
 } from './types';
-export { moduleGroupOf } from './types';
-export { assembleMessages, historyToMessages, type AssemblySources, type AssemblyResult, type HistoryEntry, type PoolEntryLine, type PoolInjectionSupply } from './engine';
+export { moduleGroupOf, TASK_KEYS } from './types';
+export { assembleMessages, historyToMessages, type AssemblySources, type PersonaAssemblySources, type AssemblyResult, type HistoryEntry, type PoolEntryLine, type PoolInjectionSupply } from './engine';
 export { collectAssemblySources } from './sources';
-export { createDefaultPromptConfig } from './defaults';
+export { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
 export { getBaibaiSummary, listSlotPreviews, type SlotPreview } from './external';
 export { usePromptsStore, externalInjectionConfig, ensurePromptConfigs, type PromptGlobalDomain } from './store';
 export { validatePromptModules, type PromptModulesValidation } from './validate';

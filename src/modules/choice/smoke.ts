@@ -7,7 +7,9 @@
  * scripts/smoke.mjs 收口断言。
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
-import { buildGenerateBody, extension_settings } from '@/host';
+import { extension_settings } from '@/host';
+import { buildGenerateBody } from '@/modules/apis/client';
+import { readApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
@@ -245,10 +247,10 @@ function runImportRoundTrip(): void {
         `imported=${report.configsImported}`,
     );
     const domain = choiceStorage.readDomain();
-    const apiA1 = domain.apis.find(a => a.id === 'a1');
+    const endpointA1 = readApiDomain().find(e => e.id === 'a1');
     check(
-        '导入：apis 2 个直映（outputContract/reasoningEffort 缺省填）',
-        report.apisImported === 2 && !!apiA1 && apiA1.name === '旧端点一' && apiA1.apiurl === 'https://fake.example.com/v1' && apiA1.key === 'sk-fake-0001' && apiA1.model === 'fake-model-a' && apiA1.stream === false && apiA1.temperature === 0.5 && apiA1.maxTokens === 1024 && apiA1.outputContract === 'json_object' && apiA1.reasoningEffort === 'off',
+        '导入：apis 2 个直映统一端点表（身份四字段；exclude_params/timeout 进忽略清单）',
+        report.apisImported === 2 && !!endpointA1 && endpointA1.name === '旧端点一' && endpointA1.url === 'https://fake.example.com/v1' && endpointA1.key === 'sk-fake-0001' && endpointA1.model === 'fake-model-a',
         `imported=${report.apisImported}`,
     );
     check(
@@ -256,7 +258,11 @@ function runImportRoundTrip(): void {
         domain.gen.count === 4 && domain.gen.oversamplePct === 80 && domain.gen.autoGenerate === true && domain.gen.categoriesEnabled === false && domain.gen.pinnedOverflow === 'send_all' && domain.gen.shuffleFinal === true,
         `count=${domain.gen.count} pct=${domain.gen.oversamplePct}`,
     );
-    check('导入：active_api_id 命中直映', domain.activeApiId === 'a2', `activeApiId=${domain.activeApiId}`);
+    check(
+        '导入：active_api_id 命中→activeEndpointId＋选中端点任务参数入任务域',
+        domain.activeEndpointId === 'a2' && domain.task.stream === false && domain.task.temperature === 1 && domain.task.maxTokens === 512 && domain.task.outputContract === 'json_object' && domain.task.reasoningEffort === 'off',
+        `activeEndpointId=${domain.activeEndpointId}`,
+    );
     check(
         '导入：未识别字段进忽略清单（stats/ui/dedup_*/exclude_params/timeout/rules）',
         report.ignoredFields.includes('stats') && report.ignoredFields.includes('ui') && report.ignoredFields.some(f => f.startsWith('configs[].generation.dedup_enabled')) && report.ignoredFields.some(f => f.startsWith('apis[].exclude_params')) && report.ignoredFields.some(f => f.startsWith('apis[].timeout')) && report.ignoredFields.some(f => f.startsWith('configs[].rules')),
@@ -284,14 +290,37 @@ function runImportRoundTrip(): void {
                 if (!ref || ref.enabled !== raw.enabled || ref.pinned !== raw.pinned || ref.weight !== raw.weight) roundtripOk = false;
             }
         }
-        const apiById = new Map(backup.apis.map(a => [a.id, a]));
+        const apiById = new Map(backup.endpoints.map(a => [a.id, a]));
         for (const raw of fixture.apis) {
             const api = apiById.get(raw.id);
-            if (!api || api.name !== raw.name || api.apiurl !== raw.apiurl || api.key !== raw.key || api.model !== raw.model || api.stream !== raw.stream || api.temperature !== raw.temperature || api.maxTokens !== raw.max_tokens) roundtripOk = false;
+            if (!api || api.name !== raw.name || api.url !== raw.apiurl || api.key !== raw.key || api.model !== raw.model) roundtripOk = false;
         }
-        if (backup.gen.count !== 4 || backup.gen.oversamplePct !== 80 || backup.gen.autoGenerate !== true || backup.activeApiId !== 'a2') roundtripOk = false;
+        if (backup.gen.count !== 4 || backup.gen.oversamplePct !== 80 || backup.gen.autoGenerate !== true || backup.activeEndpointId !== 'a2'
+            || backup.choiceTask.stream !== false || backup.choiceTask.temperature !== 1 || backup.choiceTask.maxTokens !== 512) roundtripOk = false;
     }
     check('导入往返：导出→解析→字段级零丢失', roundtripOk, parsed.ok ? '' : `error=${parsed.error}`);
+
+    // v1 自备份升格：旧形状（apis[] 为 choice 域 ApiConfig）解析即升 v2——
+    // 端点身份进统一表形状，任务参数从选中条目派生
+    const v1Text = JSON.stringify({
+        kind: 'tt-toolkit-pool-backup',
+        version: 1,
+        masterPool: [],
+        poolConfigs: [],
+        gen: {},
+        apis: [
+            { id: 'v1a', name: '旧自备份', apiurl: 'https://v1.example.com/v1', key: 'sk-v1', model: 'v1-model', stream: true, temperature: 0.8, maxTokens: 333, outputContract: 'json_object', reasoningEffort: 'medium' },
+            { id: 'v1b', name: '旁路端点', apiurl: 'https://v1.example.org/v1', key: 'sk-v1b', model: 'v1-model-b', stream: false, temperature: 0.5, maxTokens: 128, outputContract: 'prompt_only', reasoningEffort: 'off' },
+        ],
+        activeApiId: 'v1a',
+    });
+    const v1Parsed = parsePoolBackup(v1Text);
+    const v1Ok = v1Parsed.ok && v1Parsed.data.version === 2
+        && v1Parsed.data.endpoints.length === 2
+        && v1Parsed.data.endpoints[0].url === 'https://v1.example.com/v1' && v1Parsed.data.endpoints[0].key === 'sk-v1' && v1Parsed.data.endpoints[0].model === 'v1-model'
+        && v1Parsed.data.choiceTask.stream === true && v1Parsed.data.choiceTask.temperature === 0.8 && v1Parsed.data.choiceTask.maxTokens === 333 && v1Parsed.data.choiceTask.outputContract === 'json_object' && v1Parsed.data.choiceTask.reasoningEffort === 'medium'
+        && v1Parsed.data.activeEndpointId === 'v1a';
+    check('v1 备份升格：解析即 v2（端点身份四字段＋选中条目任务参数派生）', v1Ok, v1Parsed.ok ? '' : `error=${v1Parsed.error}`);
 
     // 幂等：重复导入零新增
     const second = importLegacyChoice();
@@ -432,9 +461,9 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);
     choiceStorage.updateGenParams({ autoGenerate: true });
 
-    // 无 API：悬空 activeApiId → resolveActiveApi null → console.warn（不弹 UI）
-    const savedActiveApi = choiceStorage.readDomain().activeApiId;
-    choiceStorage.setActiveApi('no-such-api');
+    // 无端点：悬空 activeEndpointId → resolveChoiceEndpoint null → console.warn（不弹 UI）
+    const savedActiveEndpointId = choiceStorage.readDomain().activeEndpointId;
+    choiceStorage.setActiveEndpoint('no-such-endpoint');
     const warns: string[] = [];
     const origWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -442,8 +471,8 @@ async function runAutoGenerateChecks(): Promise<void> {
     };
     emitReceived(2, 'normal');
     console.warn = origWarn;
-    check('自动生成：API 未配 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('API 未配置')), `warns=${warns.length}`);
-    choiceStorage.setActiveApi(savedActiveApi);
+    check('自动生成：端点未选 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('未选择生成端点')), `warns=${warns.length}`);
+    choiceStorage.setActiveEndpoint(savedActiveEndpointId);
 
     // happy path：同步返回（emit 返回时生成已启动但远未完成——fire-and-forget 实证）
     const returned = emitReceived(2, 'normal');

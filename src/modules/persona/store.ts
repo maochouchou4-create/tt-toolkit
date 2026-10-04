@@ -22,12 +22,12 @@ import {
     getWorldBookEntries,
     hostWindow,
     listWorldInfoNames,
-    resolvePresetSystemPrompt,
     upsertPersona,
     type WorldBookEntrySummary,
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
-import { fetchModels, testConnection } from './api';
+import { testConnection } from '@/modules/apis/client';
+import { resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
 import { computeDiffBlocks, assembleDiffResult, type DiffBlock } from './diff';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
@@ -37,7 +37,6 @@ import {
     loadWiSelectionFor,
     readPersonaDomain,
     writePersonaDomain,
-    type ApiProfile,
     type LocalConfig,
 } from './storage';
 
@@ -65,10 +64,21 @@ interface LastRunDescriptor {
 }
 
 function snapshotLocalConfig(config: LocalConfig): LocalConfig {
+    return { ...config, extraBooks: [...config.extraBooks] };
+}
+
+/**
+ * 生成调用面配置解析：endpointId → 统一端点表实体。端点缺失（未配置或
+ * 已被删除）返回 null，由 generate/refine/reroll 统一 fail fast。
+ */
+function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
+    const endpoint = resolveEndpointById(config.endpointId);
+    if (!endpoint) return null;
     return {
-        ...config,
-        extraBooks: [...config.extraBooks],
-        apiProfiles: config.apiProfiles.map(p => ({ ...p })),
+        endpoint,
+        stream: config.stream,
+        thinkingEffort: config.thinkingEffort,
+        timeoutSec: clampTimeout(config.timeoutSec),
     };
 }
 
@@ -96,8 +106,7 @@ export const usePersonaStore = defineStore('tt-persona', {
         checkedByBook: {} as Record<string, string[]>,
         greetings: [] as Array<{ label: string; content: string }>,
         selectedGreetingIndex: null as number | null,
-        /** API 分区：取模型结果与测连状态。 */
-        modelOptions: [] as string[],
+        /** 生成通道分区：测连状态。 */
         connectionStatus: '',
         /** 载入世界书条目的候选清单（onActivate 时刷新）。 */
         loadCandidates: [] as Array<{ book: string; entry: WorldBookEntrySummary }>,
@@ -114,31 +123,12 @@ export const usePersonaStore = defineStore('tt-persona', {
         presetHint(): string {
             return getPresetHintText(this.generationPreset);
         },
-        /** 提示词对照分区的 preset 系统段抽取展示（当前选择的系统段）。 */
-        systemPromptPreview(): string {
-            return resolvePresetSystemPrompt(this.generationPreset);
-        },
         /** preset 下拉选项（current/pure 两默认项+具名预设；:value 绑定消旧 option 注入风险）。 */
         presetOptions(): Array<{ value: string; label: string }> {
             return buildPresetOptions().map(name => ({
                 value: name,
                 label: name === 'current' ? '当前预设' : name === 'pure' ? '纯净模式（无系统段）' : name,
             }));
-        },
-        activeProfile(): ApiProfile | null {
-            return this.config.apiProfiles.find(p => p.id === this.config.activeApiProfileId) ?? null;
-        },
-        /** 生成调用面配置（超时钳制 30..1800）。 */
-        apiConfig(): GenerationApiConfig {
-            return {
-                apiSource: this.config.apiSource,
-                url: this.config.indepApiUrl,
-                apiKey: this.config.indepApiKey,
-                model: this.config.indepApiModel,
-                stream: this.config.indepStream,
-                thinkingEffort: this.config.thinkingEffort,
-                timeoutSec: clampTimeout(this.config.indepTimeout),
-            };
         },
     },
 
@@ -192,20 +182,13 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 显式保存点 ----------------
 
-        /** 保存 API 配置＋预设选择（热存进当前选中配置档，旧语义）。 */
+        /** 保存 API 配置＋预设选择。 */
         persistConfig() {
             writePersonaDomain(domain => {
                 domain.localConfig = snapshotLocalConfig(this.config);
                 domain.uiState.generationPreset = this.generationPreset;
                 // 钉选常驻书与 extraBooks 同源（旧版两键合一的写侧收敛）
                 domain.pinnedBooks = [...this.config.extraBooks];
-                // 自动热保存到当前选中配置档（name/url/key/model 四字段）
-                const profile = domain.localConfig.apiProfiles.find(p => p.id === domain.localConfig.activeApiProfileId);
-                if (profile) {
-                    profile.url = domain.localConfig.indepApiUrl;
-                    profile.key = domain.localConfig.indepApiKey;
-                    profile.model = domain.localConfig.indepApiModel;
-                }
             });
         },
 
@@ -261,63 +244,29 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.persistConfig();
         },
 
-        // ---------------- API 分区交互 ----------------
+        // ---------------- 生成通道分区交互 ----------------
 
-        /** 保存 API 配置按钮。 */
+        /** 保存生成通道配置（端点引用＋任务参数）。 */
         saveConfig() {
             this.persistConfig();
-            const profile = this.activeProfile;
-            toast(TEXT.TOAST_PROFILE_SAVED(profile?.name ?? '当前配置'));
+            toast(TEXT.TOAST_CONFIG_SAVED);
         },
 
-        /** 新建配置档：当前表单收进新档并选中（不清空表单）。 */
-        createProfile() {
-            const profile: ApiProfile = {
-                id: `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-                name: `配置 ${this.config.apiProfiles.length + 1}`,
-                url: this.config.indepApiUrl,
-                key: this.config.indepApiKey,
-                model: this.config.indepApiModel,
-            };
-            this.config.apiProfiles = [...this.config.apiProfiles, profile];
-            this.config.activeApiProfileId = profile.id;
+        /** 切换统一端点（立即落域；端点实体在 API 页维护）。 */
+        setEndpointId(id: string) {
+            this.config.endpointId = id;
             this.persistConfig();
-            toast(TEXT.TOAST_PROFILE_SAVED(profile.name));
-        },
-
-        /** 切换配置档：表单填充＋localConfig 同步（旧语义）。 */
-        selectProfile(id: string) {
-            const profile = this.config.apiProfiles.find(p => p.id === id);
-            if (!profile) return;
-            this.config.activeApiProfileId = id;
-            this.config.indepApiUrl = profile.url;
-            this.config.indepApiKey = profile.key;
-            this.config.indepApiModel = profile.model;
-            this.persistConfig();
-        },
-
-        /** 删除配置档（UI 层 confirm；activeId 兜底 'custom'）。 */
-        deleteProfile(id: string) {
-            this.config.apiProfiles = this.config.apiProfiles.filter(p => p.id !== id);
-            if (this.config.activeApiProfileId === id) {
-                this.config.activeApiProfileId = this.config.apiProfiles[0]?.id ?? 'custom';
-            }
-            this.persistConfig();
-            toast(TEXT.TOAST_PROFILE_DELETED);
-        },
-
-        async fetchModelList() {
-            try {
-                this.modelOptions = await fetchModels(this.config.indepApiUrl, this.config.indepApiKey);
-                toast(TEXT.TOAST_MODELS_LOADED(this.modelOptions.length));
-            } catch (err) {
-                toast(err instanceof Error ? err.message : String(err), 'error');
-            }
         },
 
         async runTestConnection() {
+            const endpoint = resolveEndpointById(this.config.endpointId);
+            if (!endpoint) {
+                this.connectionStatus = TEXT.TOAST_NO_ENDPOINT;
+                toast(TEXT.TOAST_NO_ENDPOINT, 'warning');
+                return;
+            }
             try {
-                const res = await testConnection(this.config.indepApiUrl, this.config.indepApiKey, this.config.indepApiModel);
+                const res = await testConnection(endpoint.url, endpoint.key, endpoint.model);
                 this.connectionStatus = res.ok ? TEXT.TOAST_CONN_OK : TEXT.TOAST_CONN_STATUS(String(res.status));
                 toast(this.connectionStatus, res.ok ? 'success' : 'error');
             } catch (err) {
@@ -331,6 +280,11 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 生成（首次两段链）。互斥：isProcessing 期间静默忽略。 */
         async generate() {
             if (this.isProcessing) return;
+            const api = buildApiConfig(this.config);
+            if (!api) {
+                toast(TEXT.TOAST_NO_ENDPOINT, 'error');
+                return;
+            }
             this.isProcessing = true;
             this.processingLabel = '生成中…';
             this.refineText = '';
@@ -355,7 +309,7 @@ export const usePersonaStore = defineStore('tt-persona', {
                 };
                 this.lastRun = run;
                 const result = await runGeneration({
-                    ...this.apiConfig,
+                    ...api,
                     mode: 'initial',
                     request: run.request,
                     currentText: '',
@@ -378,6 +332,11 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 润色（单段 + diff 取舍视图）。 */
         async refine() {
             if (this.isProcessing) return;
+            const api = buildApiConfig(this.config);
+            if (!api) {
+                toast(TEXT.TOAST_NO_ENDPOINT, 'error');
+                return;
+            }
             if (!this.refineText.trim()) {
                 toast(TEXT.TOAST_REFINE_EMPTY, 'warning');
                 return;
@@ -406,7 +365,7 @@ export const usePersonaStore = defineStore('tt-persona', {
                 };
                 this.lastRun = run;
                 const newText = await runGeneration({
-                    ...this.apiConfig,
+                    ...api,
                     mode: 'refine',
                     request: run.request,
                     currentText: run.currentText,
@@ -433,6 +392,11 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_LAST_REQUEST, 'warning');
                 return;
             }
+            const api = buildApiConfig(this.config);
+            if (!api) {
+                toast(TEXT.TOAST_NO_ENDPOINT, 'error');
+                return;
+            }
             const run = this.lastRun;
             this.isProcessing = true;
             this.processingLabel = run.mode === 'refine' ? '润色中…' : '生成中…';
@@ -440,7 +404,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.showDiff = false;
             try {
                 const newText = await runGeneration({
-                    ...this.apiConfig,
+                    ...api,
                     mode: run.mode,
                     request: run.request,
                     currentText: run.currentText,

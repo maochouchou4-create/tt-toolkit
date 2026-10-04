@@ -9,7 +9,10 @@
 
 import type {
     AssemblyMessage,
+    ChoiceInjectionSource,
+    InjectionSource,
     ModuleTrace,
+    PersonaInjectionSource,
     PromptModule,
     StoryDirection,
 } from './types';
@@ -79,6 +82,114 @@ export interface AssemblyResult {
     trace: ModuleTrace[];
 }
 
+/**
+ * persona 三任务的组装供给（整合轮II）。与 AssemblySources 平行的独立
+ * 接口：persona 管线的注入面与 choice 完全不同（角色卡全量文本/世界书
+ * 参考/用户请求/schema——不是 choice 的分段标签注入），共用一个接口
+ * 会让两边互相背对方不需要的字段。收集由 persona 调用方完成（宿主数据
+ * 与任务运行态——策展 schema、用户请求都是运行时才知道的）。
+ */
+export interface PersonaAssemblySources {
+    /** 生成用预设 system 段（已解析+宏清洗；空串＝纯净模式/无预设） */
+    presetSystemPrompt: string;
+    /** 世界书参考（XiTa 式围栏包装后的文本；空＝无世界书） */
+    wiText: string;
+    /** 角色卡全量信息（包装后；{{charInfo}} 占位符同源） */
+    charInfo: string;
+    /** 开场白参考（包装后；{{greetings}} 占位符同源） */
+    greetings: string;
+    /** 用户请求/修补指令包装块（{{input}} 与 {{userRequirements}} 同源） */
+    userRequest: string;
+    /** 策展产出 schema（包装后；refine 或策展失败回退时为空串） */
+    curatedSchema: string;
+    /** 当前人设文本（refine 修补基线；空＝无现有人设） */
+    currentPersona: string;
+    /** 占位符值（{{user}}/{{char}}） */
+    userName: string;
+    charName: string;
+}
+
+/** sources 联合的判别（AssemblySources 无 charInfo 字段——in 收窄可靠）。 */
+function isPersonaSources(sources: AssemblySources | PersonaAssemblySources): sources is PersonaAssemblySources {
+    return 'charInfo' in sources;
+}
+
+/** persona 注入源集合（判别用；与 types.ts 注释段保持同步）。 */
+const PERSONA_SOURCES: ReadonlySet<string> = new Set([
+    'persona_preset',
+    'persona_wi',
+    'char_info',
+    'greetings',
+    'user_request',
+    'curated_schema',
+    'current_persona',
+]);
+
+/** 类型谓词形态的判别（Set.has 本身不带收窄——组装分流两处守门共用）。 */
+function isPersonaSource(source: InjectionSource): source is PersonaInjectionSource {
+    return PERSONA_SOURCES.has(source);
+}
+
+/**
+ * persona 文本模块占位符替换。fork 提示词正文的占位符键名是组装契约
+ * （{{charInfo}}/{{greetings}}/{{template}}/{{input}}/{{userRequirements}}），
+ * 原样保留——键名即管线接口，改名＝破坏模板兼容。
+ */
+function fillPersonaPlaceholders(content: string, sources: PersonaAssemblySources): string {
+    return content
+        .replaceAll('{{user}}', sources.userName || '用户')
+        .replaceAll('{{char}}', sources.charName || '角色')
+        .replaceAll('{{charInfo}}', sources.charInfo)
+        .replaceAll('{{greetings}}', sources.greetings)
+        .replaceAll('{{template}}', sources.curatedSchema)
+        .replaceAll('{{input}}', sources.userRequest)
+        .replaceAll('{{userRequirements}}', sources.userRequest);
+}
+
+/**
+ * persona 注入源→内容解析。与 choice 的 resolveInjectContent 平行：内容
+ * 已由调用方包装（XiTa 围栏/SYSTEM_OP 块），引擎不再包分段标签——persona
+ * 提示词正文自带 <source_materials>/<target_schema> 结构，再包一层会双重
+ * 嵌套。空内容＝模块跳过（trace 留痕）。
+ */
+function resolvePersonaInjectContent(
+    source: string,
+    sources: PersonaAssemblySources,
+): { content: string; note: string } {
+    switch (source) {
+        case 'persona_preset':
+            return sources.presetSystemPrompt.trim()
+                ? { content: sources.presetSystemPrompt, note: '预设 system 段' }
+                : { content: '', note: '未选择预设（纯净模式）' };
+        case 'persona_wi':
+            return sources.wiText.trim()
+                ? { content: sources.wiText, note: '世界书参考' }
+                : { content: '', note: '世界书参考为空' };
+        case 'char_info':
+            return sources.charInfo.trim()
+                ? { content: sources.charInfo, note: '角色卡信息' }
+                : { content: '', note: '角色卡信息为空' };
+        case 'greetings':
+            return sources.greetings.trim()
+                ? { content: sources.greetings, note: '开场白参考' }
+                : { content: '', note: '开场白参考为空' };
+        case 'user_request':
+            return sources.userRequest.trim()
+                ? { content: sources.userRequest, note: '用户请求' }
+                : { content: '', note: '无用户请求' };
+        case 'curated_schema':
+            return sources.curatedSchema.trim()
+                ? { content: sources.curatedSchema, note: '策展 schema' }
+                : { content: '', note: '无策展 schema（润色模式或策展回退）' };
+        case 'current_persona':
+            return sources.currentPersona.trim()
+                ? { content: sources.currentPersona, note: '当前人设文本' }
+                : { content: '', note: '无当前人设文本' };
+        default:
+            return { content: '', note: `未知 persona 注入源 ${source}` };
+    }
+}
+
 /** 组装管线占位符替换（确定性：值全部来自 sources）。 */
 function fillPlaceholders(content: string, sources: AssemblySources): string {
     return content
@@ -115,10 +226,10 @@ export function historyToMessages(history: HistoryEntry[]): Array<{ role: 'user'
 
 /** 注入源→内容解析（模块注入与否在此判定，trace 记录跳过原因）。 */
 function resolveInjectContent(
-    module: PromptModule & { kind: 'inject' },
+    source: ChoiceInjectionSource,
     sources: AssemblySources,
 ): { content: string; note: string } {
-    switch (module.source) {
+    switch (source) {
         case 'persona':
             return sources.persona.trim()
                 ? { content: wrapTag('persona', `以下是用户本人（{{user}}）的人物设定，是行为动机的依据：\n${sources.persona.trim()}`, sources), note: '' }
@@ -232,7 +343,7 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
 }
 
 /**
- * 组装消息数组（模块管线主入口）。
+ * 组装消息数组（模块管线主入口；choice 与 persona 任务共用）。
  *
  * 消息序列规则：
  *   - 模块按 order 升序逐个求值；chat_history 展开为多条 user/assistant
@@ -241,8 +352,14 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
  *   - 相邻同 role 合并（system/assistant；user 不互相合并——聊天历史末
  *     条 user 与任务指令同为 user 时，合并会把「任务指令」混进历史正文，
  *     user 消息在提示词里是独立输入边界）。
+ *   - persona sources 时走 persona 占位符/注入源；任务源与 sources 形态
+ *     不匹配的模块跳过并留痕（手改存档才会出现，不做静默吞）。
  */
-export function assembleMessages(modules: PromptModule[], sources: AssemblySources): AssemblyResult {
+export function assembleMessages(
+    modules: PromptModule[],
+    sources: AssemblySources | PersonaAssemblySources,
+): AssemblyResult {
+    const personaMode = isPersonaSources(sources);
     const sorted = [...modules].sort((a, b) => a.order - b.order);
     const messages: AssemblyMessage[] = [];
     const trace: ModuleTrace[] = [];
@@ -253,7 +370,10 @@ export function assembleMessages(modules: PromptModule[], sources: AssemblySourc
             continue;
         }
         if (mod.kind === 'text') {
-            const content = fillPlaceholders(mod.content, sources).trim();
+            const content = (personaMode
+                ? fillPersonaPlaceholders(mod.content, sources)
+                : fillPlaceholders(mod.content, sources)
+            ).trim();
             if (!content) {
                 trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'text', injected: false, note: '文本为空' });
                 continue;
@@ -262,7 +382,25 @@ export function assembleMessages(modules: PromptModule[], sources: AssemblySourc
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'text', injected: true, note: '' });
             continue;
         }
-        // inject 模块
+        // inject 模块：persona 形态先分流（persona 源解析；choice 源无数据跳过）
+        if (personaMode) {
+            if (!isPersonaSource(mod.source)) {
+                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于选项生成任务（本次 persona 组装无此数据）' });
+                continue;
+            }
+            const { content, note } = resolvePersonaInjectContent(mod.source, sources);
+            if (!content.trim()) {
+                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
+                continue;
+            }
+            pushMessage(messages, { role: mod.role, content: content.trim() });
+            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
+            continue;
+        }
+        if (isPersonaSource(mod.source)) {
+            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于人设任务（选项生成组装无此数据）' });
+            continue;
+        }
         if (mod.source === 'chat_history') {
             if (sources.history.length === 0) {
                 trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: 'chat_history', injected: false, note: '聊天历史为空' });
@@ -274,7 +412,7 @@ export function assembleMessages(modules: PromptModule[], sources: AssemblySourc
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: 'chat_history', injected: true, note: `${sources.history.length} 条楼层，末条 AI 楼层已用 <current_scene> 包裹` });
             continue;
         }
-        const { content, note } = resolveInjectContent(mod, sources);
+        const { content, note } = resolveInjectContent(mod.source, sources);
         if (!content.trim()) {
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
             continue;

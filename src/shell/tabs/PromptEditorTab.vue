@@ -1,17 +1,28 @@
 <template>
   <!--
-    提示词编辑器（G5 信息架构＋m03359 整合轮）：顶部白话说明＋四段——
-    ①核心模板（文本模块，单模板无配置集——用户拍板「懒得配置」；改坏
-    可「恢复默认」一键回厂）②剧情走向（从「选项生成」tab 挪入：走向
-    是提示词素材，编辑入口应在同一页）③上下文注入（现场数据开关＋
-    每项说明）④高级（外部插件内容搬运）。dump/trace 类调试面收进
-    调试 tab，主编辑面不出现。单一真相源：直接编辑当前生效模板的
-    modules[]（无工作副本——fork 双真相源病不继承）。
+    提示词编辑器（G5 信息架构＋m03359 整合轮＋整合轮II 多任务）：顶部
+    任务切换条（四任务各自一套模板）＋白话说明＋四段——①核心模板（文本
+    模块，单模板无配置集——用户拍板「懒得配置」；改坏可「恢复默认」
+    按任务一键回厂）②剧情走向（仅选项生成任务：走向是提示词素材，
+    编辑入口应在同一页）③上下文注入（现场数据开关＋每项说明）
+    ④高级（外部插件内容搬运，仅选项生成任务）。dump/trace 类调试面
+    收进调试 tab，主编辑面不出现。单一真相源：直接编辑当前任务生效
+    模板的 modules[]（无工作副本——fork 双真相源病不继承）。
   -->
   <div class="tt-prompt-editor-tab">
-    <div class="tt-prompt-intro">
-      这里编辑的是选项生成时发给 AI 的完整指令模板——改任何一块，下一次生成就生效。
+    <!-- 任务切换条：四个任务各自一套模板（整合轮II）。persona 三任务
+         与选项生成共用同一条模块管线，只是注入面不同。 -->
+    <div class="tt-prompt-taskbar">
+      <button
+        v-for="t in TASKS"
+        :key="t.key"
+        type="button"
+        class="tt-prompt-task"
+        :class="{ 'tt-prompt-task--active': task === t.key }"
+        @click="switchTask(t.key)"
+      >{{ t.label }}</button>
     </div>
+    <div class="tt-prompt-intro">{{ taskIntro }}</div>
 
     <div class="tt-prompt-section-title">核心模板</div>
     <div v-if="effective" class="tt-card">
@@ -28,14 +39,14 @@
       >
         <div class="tt-prompt-module-head">
           <label class="tt-prompt-module-toggle" :title="mod.enabled ? '点击停用' : '点击启用'">
-            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(mod.id, ($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(task, mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
           <!-- 角色不设下拉：system/user 是消息内部概念，由引擎按默认模板固定。
                旧版（fork）同样不暴露此字段，用户实测无需可调。 -->
           <span class="tt-prompt-module-ops">
-            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
-            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
+            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(task, mod.id, -1)">↑</button>
+            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(task, mod.id, 1)">↓</button>
             <button type="button" @click="toggleEdit(mod)">{{ editingId === mod.id ? '收起' : '编辑' }}</button>
           </span>
         </div>
@@ -45,7 +56,7 @@
           :value="mod.content"
           rows="10"
           spellcheck="false"
-          @change="prompts.updateModuleContent(mod.id, ($event.target as HTMLTextAreaElement).value)"
+          @change="prompts.updateModuleContent(task, mod.id, ($event.target as HTMLTextAreaElement).value)"
         />
       </div>
       <div class="tt-actions" style="margin-top: 6px">
@@ -53,8 +64,8 @@
       </div>
     </div>
 
-    <div class="tt-prompt-section-title">剧情走向</div>
-    <div class="tt-card">
+    <div v-if="task === 'choice'" class="tt-prompt-section-title">剧情走向</div>
+    <div v-if="task === 'choice'" class="tt-card">
       <div class="tt-card-title">走向指引</div>
       <div class="tt-card-sub">
         走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）；
@@ -100,7 +111,7 @@
     <div class="tt-prompt-section-title">上下文注入</div>
     <div v-if="effective" class="tt-card">
       <div class="tt-card-sub">
-        这些开关决定把哪些现场信息带给生成选项的 AI：勾选＝注入，取消＝不带。
+        这些开关决定把哪些现场信息带给当前任务的 AI：勾选＝注入，取消＝不带。
       </div>
       <div
         v-for="mod in contextModules"
@@ -110,22 +121,22 @@
       >
         <div class="tt-prompt-module-head">
           <label class="tt-prompt-module-toggle" :title="mod.enabled ? '点击停用' : '点击启用'">
-            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(mod.id, ($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(task, mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
           <!-- chat_history 的楼层角色由聊天本身决定（user/assistant）；
                其余注入模块角色由引擎固定。UI 不暴露角色概念（旧版同样如此）。 -->
           <span class="tt-prompt-module-ops">
-            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
-            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
+            <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(task, mod.id, -1)">↑</button>
+            <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(task, mod.id, 1)">↓</button>
           </span>
         </div>
         <div class="tt-prompt-module-desc">{{ sourceDescription(mod) }}</div>
       </div>
     </div>
 
-    <div class="tt-prompt-section-title">高级</div>
-    <div class="tt-card">
+    <div v-if="task === 'choice'" class="tt-prompt-section-title">高级</div>
+    <div v-if="task === 'choice'" class="tt-card">
       <div class="tt-card-title">外部插件内容搬运（可选）</div>
       <div class="tt-card-sub">
         勾选后，其他插件（如记忆摘要类）注入到酒馆的内容会被一并带给生成选项的 AI。默认全关。
@@ -155,8 +166,8 @@
           <div class="tt-prompt-module-head">
             <span class="tt-prompt-module-name">{{ mod.name }}</span>
             <span class="tt-prompt-module-ops">
-              <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(mod.id, -1)">↑</button>
-              <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(mod.id, 1)">↓</button>
+              <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(task, mod.id, -1)">↑</button>
+              <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(task, mod.id, 1)">↓</button>
             </span>
           </div>
           <div class="tt-prompt-module-desc">{{ sourceDescription(mod) }}</div>
@@ -168,14 +179,36 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { listSlotPreviews, moduleGroupOf, usePromptsStore, type DirectionPreset, type InjectModule, type InjectionSource, type PromptModule, type SlotPreview, type TextModule } from '@/prompts';
+import { listSlotPreviews, moduleGroupOf, usePromptsStore, type DirectionPreset, type InjectModule, type InjectionSource, type PromptModule, type SlotPreview, type TaskKey, type TextModule } from '@/prompts';
 
 const prompts = usePromptsStore();
 
 const editingId = ref('');
 const slots = ref<SlotPreview[]>([]);
 
-const effective = computed(() => prompts.effectiveConfig);
+// ---- 任务切换条（整合轮II）：四任务各自一套模板，互不串改 ----
+const task = ref<TaskKey>('choice');
+const TASKS: { key: TaskKey; label: string }[] = [
+    { key: 'choice', label: '选项生成' },
+    { key: 'persona_curator', label: '人设·策展' },
+    { key: 'persona_gen', label: '人设·填充' },
+    { key: 'persona_refine', label: '人设·润色' },
+];
+const TASK_INTROS: Record<TaskKey, string> = {
+    choice: '这里编辑的是选项生成时发给 AI 的完整指令模板——改任何一块，下一次生成就生效。',
+    persona_curator: '这里编辑的是人设生成第一步「策展」的指令模板——它让 AI 先定人设的字段骨架（只定字段，不填内容）。',
+    persona_gen: '这里编辑的是人设生成第二步「填充」的指令模板——它让 AI 按策展出的骨架写出完整人设。',
+    persona_refine: '这里编辑的是「润色」现有人设时发给 AI 的指令模板——保留原意，只修表达。',
+};
+const taskIntro = computed(() => TASK_INTROS[task.value]);
+function switchTask(key: TaskKey): void {
+    if (task.value === key) return;
+    task.value = key;
+    // 任务各自一套模块，编辑中的展开态不跨任务保留
+    editingId.value = '';
+}
+
+const effective = computed(() => prompts.configFor(task.value));
 // G5 三分组共用同一条 order 管线：各组按 order 截取子序列呈现
 // （filter 谓词收窄到 TextModule/InjectModule——组内模板用得到 kind 字段）
 const textModules = computed(() => {
@@ -209,6 +242,13 @@ const SOURCE_DESCRIPTIONS: Record<InjectionSource, string> = {
     pool_entries: '条目池：池条目按固定必发（pinned）＋抽签候选两区注入，每次生成现场重抽（「条目池」页管理）。',
     external_slot: '其他插件注入到酒馆通用槽位的内容，按上方勾选搬入。',
     baibai: 'STBaiBaiBook（柏宝书）插件生成的剧情摘要。',
+    persona_preset: '人设生成预设：「人设」页选中的预设系统提示词（占位符不经过它，它整段注入）。',
+    persona_wi: '世界书参考：「人设」页勾选的书目内容，现场拼接成参考材料注入。',
+    char_info: '角色卡资料：当前角色的名字与描述（与正文占位符 {{charInfo}} 同源；加入后双份注入，一般不需要）。',
+    greetings: '角色开场白：角色卡的开场白楼层（与正文占位符 {{greetings}} 同源；加入后双份注入，一般不需要）。',
+    user_request: '生成要求：「人设」页生成时填写的要求（与正文占位符同源；加入后双份注入，一般不需要）。',
+    curated_schema: '策展模板：策展段产出的 YAML 字段骨架（与正文占位符 {{template}} 同源；加入后双份注入，一般不需要）。',
+    current_persona: '当前人设文本：正在润色的现有人设正文（润色任务用）。',
 };
 
 function sourceDescription(mod: PromptModule): string {
@@ -235,10 +275,11 @@ function toggleEdit(mod: PromptModule): void {
     editingId.value = editingId.value === mod.id ? '' : mod.id;
 }
 
-/** 恢复默认模板（m03359）：单模板无备份面——改坏了的自救口。整体覆盖，先确认。 */
+/** 恢复默认模板（按任务分别恢复）：单模板无备份面——改坏了的自救口。整体覆盖，先确认。 */
 function resetTemplate(): void {
-    if (!confirm('恢复默认模板？当前模板的所有修改会被出厂版本覆盖（不可撤销）。')) return;
-    prompts.resetToDefault();
+    const label = TASKS.find(t => t.key === task.value)?.label ?? '当前任务';
+    if (!confirm(`恢复「${label}」的默认模板？当前模板的所有修改会被出厂版本覆盖（不可撤销）。`)) return;
+    prompts.resetToDefault(task.value);
     editingId.value = '';
 }
 
@@ -301,6 +342,28 @@ onMounted(() => {
 </script>
 
 <style>
+.tt-prompt-taskbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.tt-prompt-task {
+    background: transparent;
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 999px;
+    padding: 3px 12px;
+    font-size: 0.82em;
+    cursor: pointer;
+}
+
+.tt-prompt-task--active {
+    border-color: var(--SmartThemeQuoteColor, #c58a36);
+    color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
 .tt-prompt-intro {
     font-size: 0.85em;
     opacity: 0.85;

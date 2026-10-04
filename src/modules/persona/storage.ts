@@ -1,19 +1,18 @@
 /**
- * PersonaWeaver fork 存储域与旧 localStorage 迁移（批D 平移）。
+ * persona 存储域与旧 localStorage 迁移。
  *
  * 数据落点：extension_settings.ttToolkit.persona 全局域（经 storage 层
  * getGlobal/setGlobal 单通道）。域形状 normalize 纪律照 choice/pool：
  * 未知字段丢弃（显式保真注释），缺字段补默认，反复读写幂等。
  *
+ * 整合轮II：端点身份（url/key/model）移入统一端点表（modules/apis），
+ * localConfig 只保留 persona 任务参数＋选中端点引用 endpointId。旧字段
+ * （apiSource、indepApi 前缀三键、apiProfiles、activeApiProfileId）由 migrateApiDomain
+ * 一次性收编，此后在 normalize 的未知字段丢弃面自然退休。
+ *
  * 迁移纪律（nav 同款幂等）：域不存在→读 5 个旧键搬入新域→保留旧键
  * 作 legacy 快照（回滚旧版本不丢存量；新版本不再写旧键）→退休键
  * removeItem；域已存在→跳过迁移（二次启动零重写）。
- *
- * MODIFICATIONS（相对上游 fork）：
- * - 旧「每键直写 localStorage」改为域写单通道；写时机从 1.2s 防抖热存
- *   改为显式保存点（保存/落地按钮，见 store.ts）。
- * - pw_state_v20 的 localConfig 兼容收进域 localConfig（字段全家平移，
- *   apiProfiles 收档迁移幂等语义保留）。
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
@@ -43,33 +42,17 @@ export const RETIRED_KEYS = [
 /** 思考强度档位（'off'＝不注入 reasoning_effort 字段）。 */
 export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high';
 
-/** API 来源（主 API＝宿主 generateRaw；独立 API＝api.ts 纯 fetch）。 */
-export type ApiSource = 'main' | 'independent';
-
-/** 独立 API 配置档（apiProfiles 数组元素）。 */
-export interface ApiProfile {
-    id: string;
-    name: string;
-    url: string;
-    key: string;
-    model: string;
-}
-
-/** 独立 API 配置（localConfig 的 API 面，默认值同旧 defaultSettings）。 */
+/** persona 任务配置（localConfig v2：端点引用＋任务参数，无端点身份）。 */
 export interface LocalConfig {
-    apiSource: ApiSource;
-    indepApiUrl: string;
-    indepApiKey: string;
-    indepApiModel: string;
-    /** 请求超时秒数（钳制 30..1800）。 */
-    indepTimeout: number;
-    indepStream: boolean;
+    /** 选中统一端点表条目 id（空＝未配置端点）。 */
+    endpointId: string;
+    /** 流式请求（长请求防挂死姿势；旧 indepStream）。 */
+    stream: boolean;
     thinkingEffort: ThinkingEffort;
+    /** 请求超时秒数（钳制 30..1800；旧 indepTimeout）。 */
+    timeoutSec: number;
     /** 追加参考世界书（钉选+本会话手动添加）。 */
     extraBooks: string[];
-    apiProfiles: ApiProfile[];
-    /** 'custom'＝未存档表单值，否则＝配置档 id。 */
-    activeApiProfileId: string;
 }
 
 /** 编辑现场暂存（需求框/结果框；refine 的目标缓冲区即 result）。 */
@@ -96,16 +79,11 @@ export function defaultUserContext(): UserContext {
 
 export function defaultLocalConfig(): LocalConfig {
     return {
-        apiSource: 'main',
-        indepApiUrl: 'https://api.openai.com/v1',
-        indepApiKey: '',
-        indepApiModel: 'gpt-3.5-turbo',
-        indepTimeout: 300,
-        indepStream: true,
+        endpointId: '',
+        stream: true,
         thinkingEffort: 'off',
+        timeoutSec: 300,
         extraBooks: [],
-        apiProfiles: [],
-        activeApiProfileId: 'custom',
     };
 }
 
@@ -124,7 +102,6 @@ export function defaultPersonaDomain(): PersonaDomain {
 // ============================================================================
 
 const THINKING_EFFORTS: readonly string[] = ['off', 'low', 'medium', 'high'];
-const API_SOURCES: readonly string[] = ['main', 'independent'];
 
 /** 超时钳制（旧 clampTimeout 同语义：30..1800 秒）。 */
 export function clampTimeout(sec: number): number {
@@ -139,41 +116,16 @@ function normalizeStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : [];
 }
 
-function normalizeProfiles(value: unknown): ApiProfile[] {
-    if (!Array.isArray(value)) return [];
-    return value.flatMap(item => {
-        if (!item || typeof item !== 'object') return [];
-        const raw = item as Record<string, unknown>;
-        const id = typeof raw.id === 'string' ? raw.id : '';
-        // id 为空＝坏档（旧档 id 是 Date.now().toString()，恒非空）
-        if (!id) return [];
-        return [{
-            id,
-            name: normalizeString(raw.name, '未命名配置'),
-            url: normalizeString(raw.url, ''),
-            key: normalizeString(raw.key, ''),
-            model: normalizeString(raw.model, ''),
-        }];
-    });
-}
-
 function normalizeLocalConfig(value: unknown): LocalConfig {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
-    const defaults = defaultLocalConfig();
-    const timeout = Number(raw.indepTimeout);
+    const timeout = Number(raw.timeoutSec);
     const effort = normalizeString(raw.thinkingEffort, 'off');
-    const source = normalizeString(raw.apiSource, 'main');
     return {
-        apiSource: (API_SOURCES.includes(source) ? source : 'main') as ApiSource,
-        indepApiUrl: normalizeString(raw.indepApiUrl, defaults.indepApiUrl),
-        indepApiKey: normalizeString(raw.indepApiKey, ''),
-        indepApiModel: normalizeString(raw.indepApiModel, defaults.indepApiModel),
-        indepTimeout: clampTimeout(Number.isFinite(timeout) && timeout > 0 ? timeout : defaults.indepTimeout),
-        indepStream: typeof raw.indepStream === 'boolean' ? raw.indepStream : defaults.indepStream,
+        endpointId: normalizeString(raw.endpointId, ''),
+        stream: typeof raw.stream === 'boolean' ? raw.stream : true,
         thinkingEffort: (THINKING_EFFORTS.includes(effort) ? effort : 'off') as ThinkingEffort,
+        timeoutSec: clampTimeout(Number.isFinite(timeout) && timeout > 0 ? timeout : 300),
         extraBooks: normalizeStringArray(raw.extraBooks),
-        apiProfiles: normalizeProfiles(raw.apiProfiles),
-        activeApiProfileId: normalizeString(raw.activeApiProfileId, 'custom'),
     };
 }
 
@@ -249,7 +201,7 @@ function readLegacyJson(key: string): Record<string, unknown> {
     }
 }
 
-/** 迁移报告（smoke 断言二次启动零重写用：migrated=false 即无写）。 */
+/** 迁移报告（smoke 断言二次启动零重写用：skipped=true 即无域写）。 */
 export interface PersonaMigrationReport {
     /** 域已存在（本次未搬任何旧键、未写域）。 */
     skipped: boolean;
@@ -259,10 +211,23 @@ export interface PersonaMigrationReport {
     retiredKeysCleaned: string[];
 }
 
+/** 旧 localConfig 中的端点身份字段（migrateApiDomain 的收编原料）。 */
+const LEGACY_ENDPOINT_FIELDS = [
+    'apiSource',
+    'indepApiUrl',
+    'indepApiKey',
+    'indepApiModel',
+    'apiProfiles',
+    'activeApiProfileId',
+] as const;
+
 /**
- * 幂等迁移：域缺席时搬 5 旧键（含 apiProfiles 收档迁移）+清退休键；
- * 域在场时只清退休键（retired removeItem 本身幂等且零域写）。
+ * 幂等迁移：域缺席时搬 5 旧键＋清退休键；域在场时只清退休键。
  * 旧键保留作 legacy 快照（防回滚旧版本丢存量），此后只读不写。
+ *
+ * 旧 localConfig 的 v2 字段（stream/thinkingEffort/timeoutSec）就地转正；
+ * 端点身份旧字段（apiProfiles/indepApi* 等）以过渡形状透传进域，由同一次
+ * 启动里的 migrateApiDomain（modules/apis/migration.ts）收编进统一端点表。
  */
 export function migratePersonaDomain(): PersonaMigrationReport {
     const report: PersonaMigrationReport = { skipped: false, migratedKeys: [], retiredKeysCleaned: [] };
@@ -288,24 +253,7 @@ export function migratePersonaDomain(): PersonaMigrationReport {
     // ---- 读 5 旧键（只搬实际读到数据的键，报告来源） ----
     const savedState = readLegacyJson(LEGACY_KEYS.state);
     const legacyLocalConfigRaw = savedState.localConfig;
-    const localConfig = normalizeLocalConfig(legacyLocalConfigRaw);
     if (Object.keys(savedState).length > 0) report.migratedKeys.push(LEGACY_KEYS.state);
-
-    // apiProfiles 收档迁移（旧 migrateApiProfiles 同语义，幂等）：旧档无
-    // apiProfiles 时把独立 API 现值收成「默认配置 1」档并选中
-    if (legacyLocalConfigRaw !== undefined && !Array.isArray((legacyLocalConfigRaw as Record<string, unknown>).apiProfiles)) {
-        const existingUrl = localConfig.indepApiUrl || defaultLocalConfig().indepApiUrl;
-        if (existingUrl) {
-            localConfig.apiProfiles = [{
-                id: `legacy-${Date.now().toString()}`,
-                name: '默认配置 1',
-                url: existingUrl,
-                key: localConfig.indepApiKey || '',
-                model: localConfig.indepApiModel || '',
-            }];
-            localConfig.activeApiProfileId = localConfig.apiProfiles[0].id;
-        }
-    }
 
     const wiSelection = normalizeWiSelection(readLegacyJson(LEGACY_KEYS.wiSelection));
     if (Object.keys(wiSelection).length > 0) report.migratedKeys.push(LEGACY_KEYS.wiSelection);
@@ -331,13 +279,37 @@ export function migratePersonaDomain(): PersonaMigrationReport {
     }
     if (pinnedBooks.length > 0) report.migratedKeys.push(LEGACY_KEYS.pinnedBooks);
 
-    setGlobal(PERSONA_DOMAIN_KEY, normalizePersonaDomain({
+    // v2 字段就地转正：旧键名（indepStream/indepTimeout）先归位到 v2 键名
+    // 再 normalize——normalize 只认 v2 形状，且这两个键不在端点透传清单里，
+    // 不先映射用户的流式/超时设置会被丢弃面吞掉
+    const legacyLocal = (legacyLocalConfigRaw && typeof legacyLocalConfigRaw === 'object'
+        ? legacyLocalConfigRaw
+        : {}) as Record<string, unknown>;
+    const legacyFieldPatch: Record<string, unknown> = {};
+    if (legacyLocal.stream === undefined && typeof legacyLocal.indepStream === 'boolean') {
+        legacyFieldPatch.stream = legacyLocal.indepStream;
+    }
+    const legacyTimeout = Number(legacyLocal.indepTimeout);
+    if (legacyLocal.timeoutSec === undefined && Number.isFinite(legacyTimeout) && legacyTimeout > 0) {
+        legacyFieldPatch.timeoutSec = legacyTimeout;
+    }
+    const localConfig = normalizeLocalConfig({ ...legacyLocal, ...legacyFieldPatch });
+    const domain = normalizePersonaDomain({
         localConfig,
         wiSelection,
         uiState,
         userContext,
         pinnedBooks,
-    }));
+    });
+    // 端点身份旧字段过渡透传（进域即脱离 localStorage，供 migrateApiDomain
+    // 收编；收编完成后这些键在 normalize 丢弃面自然消失——所以这里必须在
+    // normalize 之后回填，否则过渡字段会被丢弃面吞掉）
+    for (const field of LEGACY_ENDPOINT_FIELDS) {
+        if (legacyLocal[field] !== undefined) {
+            (domain.localConfig as unknown as Record<string, unknown>)[field] = legacyLocal[field];
+        }
+    }
+    setGlobal(PERSONA_DOMAIN_KEY, domain);
     return report;
 }
 

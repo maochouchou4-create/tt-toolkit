@@ -1,11 +1,12 @@
 /**
- * 选项生成管线（方案 §2.4）：组装（引擎）→ 请求（独立 API 自拼）→
- * 解析（response_format 主路径＋客户端兜底）→ 渲染（store 会话态）。
+ * 选项生成管线（方案 §2.4）：组装（引擎）→ 请求（统一端点表＋共享客户端）
+ * → 解析（response_format 主路径＋客户端兜底）→ 渲染（store 会话态）。
  *
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施（批B 验收断言的
  * 依赖设施——用户靠它核对各注入模块逐项可见）。
  */
-import { callGenerateEndpoint, getSendTextareaValue, sendInputMessage, setSendTextareaValue, type GenerateRequestConfig } from '@/host';
+import { getSendTextareaValue, sendInputMessage, setSendTextareaValue } from '@/host';
+import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -14,7 +15,7 @@ import {
     type PoolInjectionSupply,
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
-import { choiceStorage, resolveActiveApi } from './api';
+import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
@@ -108,23 +109,24 @@ export async function generateOptions(): Promise<void> {
         if (gen.debugForceRaw) {
             rawText = DEBUG_MALFORMED_RAW;
         } else {
-            const api = resolveActiveApi();
-            if (!api || !api.apiurl.trim() || !api.model.trim()) {
-                throw new Error('API 未配置或未填写完整（地址/模型）——在「选项生成」设置页配置后重试');
+            const endpoint = resolveChoiceEndpoint();
+            const task = choiceStorage.readDomain().task;
+            if (!endpoint) {
+                throw new Error('未选择生成端点——在「API」页添加端点后，到「选项生成」设置页选择');
             }
-            outputContract = api.outputContract;
+            outputContract = task.outputContract;
             const requestConfig: GenerateRequestConfig = {
-                baseUrl: api.apiurl,
-                apiKey: api.key,
-                model: api.model,
-                temperature: api.temperature,
-                maxTokens: api.maxTokens,
-                stream: api.stream,
-                outputContract: api.outputContract,
-                reasoningEffort: api.reasoningEffort,
+                baseUrl: endpoint.url,
+                apiKey: endpoint.key,
+                model: endpoint.model,
+                temperature: task.temperature,
+                maxTokens: task.maxTokens,
+                stream: task.stream,
+                outputContract: task.outputContract,
+                reasoningEffort: task.reasoningEffort,
                 // 对象 schema 与提示词契约同步（顶层 {"options":[...]}）；
-                // 端点对 json_schema 档的支持度实测结论见 api.ts 文件头
-                jsonSchema: api.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,
+                // 端点对 json_schema 档的支持度实测结论见 choice/api.ts 文件头
+                jsonSchema: task.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,
             };
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
             rawText = result.content;

@@ -11,8 +11,19 @@
 export type PromptRole = 'system' | 'user' | 'assistant';
 
 /**
+ * 提示词任务键（整合轮II：引擎多任务化）。四条生成管线各自持一套
+ * PromptConfig——choice（选项生成）与 persona 三段（策展 schema、按
+ * schema 填充人设、润色现有人设）。存储形态 Record<taskKey, PromptConfig>。
+ */
+export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'persona_refine';
+
+/** 全部任务键（读侧补缺/迁移遍历用；顺序＝编辑器任务条的呈现顺序）。 */
+export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen', 'persona_refine'];
+
+/**
  * 注入源标识。每个注入模块绑定一个源；源内容由组装时的
- * AssemblySources 提供（engine 纯函数消费，宿主数据由 sources 层收集）。
+ * AssemblySources / PersonaAssemblySources 提供（engine 纯函数消费，
+ * 宿主数据由 sources 层或各任务调用方收集）。
  */
 export type InjectionSource =
     | 'persona'
@@ -27,7 +38,35 @@ export type InjectionSource =
     | 'story_direction'
     | 'external_slot'
     | 'baibai'
-    | 'pool_entries';
+    | 'pool_entries'
+    // ---- persona 任务注入源（整合轮II）——内容在 PersonaAssemblySources ----
+    /** 生成用预设的 system 段（「纯净模式」＝空，模块跳过） */
+    | 'persona_preset'
+    /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装） */
+    | 'persona_wi'
+    /** 角色卡全量信息文本（{{charInfo}} 占位符同源） */
+    | 'char_info'
+    /** 开场白参考（{{greetings}} 占位符同源） */
+    | 'greetings'
+    /** 用户请求/修补指令（{{input}}/{{userRequirements}} 占位符同源） */
+    | 'user_request'
+    /** 策展产出的 schema（{{template}} 占位符同源） */
+    | 'curated_schema'
+    /** 当前人设文本（refine 的修补基线） */
+    | 'current_persona';
+
+/** persona 任务的注入源集合（判别/分流用）。 */
+export type PersonaInjectionSource =
+    | 'persona_preset'
+    | 'persona_wi'
+    | 'char_info'
+    | 'greetings'
+    | 'user_request'
+    | 'curated_schema'
+    | 'current_persona';
+
+/** choice 任务的注入源（persona 源之外的全部——engine 分流判别用）。 */
+export type ChoiceInjectionSource = Exclude<InjectionSource, PersonaInjectionSource>;
 
 /** 文本模块：用户可编辑的规则/任务/格式文本。 */
 export interface TextModule {

@@ -1,6 +1,6 @@
 /**
- * node 冒烟的批D 机判部分：persona 迁移幂等＋纯函数＋api 请求体形状＋
- * store 互斥。
+ * node 冒烟的整合轮II 机判部分：persona 迁移幂等＋统一端点收编＋四任务
+ * 提示词引擎＋api 客户端形状＋store 互斥。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
  * scripts/smoke.mjs 收口断言）。全部走合成数据——不依赖宿主在场数据，
@@ -8,11 +8,15 @@
  * （dist 加载即覆盖）。
  */
 import { extension_settings } from '@/host';
+import { getGlobal, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS, clampTimeout } from './storage';
-import { DEFAULT_PROMPTS, DEFAULT_TEMPLATES } from './prompts';
+import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
 import { computeDiffBlocks, assembleDiffResult } from './diff';
-import { buildOpenAIRequest, normalizeApiBase, readSSEResponse, testConnection } from './api';
+import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
+import { migrateApiDomain } from '@/modules/apis/migration';
+import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
+import { TASK_KEYS, usePromptsStore, assembleMessages, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
 import { usePersonaStore } from './store';
@@ -43,12 +47,28 @@ function wipeDomain(): void {
     if (tt) delete tt.persona;
 }
 
+/** 统一端点表＋choice 域整体抹掉（收编场景需要三域全部从零起步）。 */
+function wipeApiScenarioDomains(): void {
+    const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
+    if (tt) {
+        delete tt.apis;
+        delete tt.choice;
+        delete tt.persona;
+    }
+}
+
 function domainJson(): string {
     return JSON.stringify(readPersonaDomain());
 }
 
+/** 原始域形状（未经 normalize 的存根直读——过渡字段断言必须走这里）。 */
+function rawPersona(): Record<string, unknown> {
+    const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
+    return (tt?.persona ?? {}) as Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
-// 1) 迁移幂等（空 localStorage→写域；旧键→搬入；二次启动零重写）
+// 1) 迁移幂等（空 localStorage→写域；旧键→搬入；统一端点收编；二次零重写）
 // ---------------------------------------------------------------------------
 
 function runMigrationChecks(): void {
@@ -60,9 +80,9 @@ function runMigrationChecks(): void {
     // 1a. 空 localStorage → 写默认域
     const first = migratePersonaDomain();
     const defaults = readPersonaDomain();
-    check('迁移：空 localStorage 首启动写入默认域（apiSource=main、preset=current）',
+    check('迁移：空 localStorage 首启动写入默认域（endpointId 空、preset=current）',
         !first.skipped && first.migratedKeys.length === 0
-        && defaults.localConfig.apiSource === 'main'
+        && defaults.localConfig.endpointId === ''
         && defaults.uiState.generationPreset === 'current'
         && defaults.userContext.request === '' && !defaults.userContext.hasResult,
         `skipped=${first.skipped} migrated=${first.migratedKeys.join(',') || '无'}`);
@@ -99,21 +119,19 @@ function runMigrationChecks(): void {
         && second.migratedKeys.includes(LEGACY_KEYS.dataUser)
         && second.migratedKeys.includes(LEGACY_KEYS.pinnedBooks),
         `migrated=${second.migratedKeys.join(',')}`);
-    check('迁移：localConfig 字段全家平移（url/key/model/timeout/stream/effort/extraBooks）',
-        migrated.localConfig.apiSource === 'independent'
-        && migrated.localConfig.indepApiUrl === 'https://relay.example.com/v1'
-        && migrated.localConfig.indepApiKey === 'sk-legacy'
-        && migrated.localConfig.indepApiModel === 'deepseek-chat'
-        && migrated.localConfig.indepTimeout === 600
-        && migrated.localConfig.indepStream === false
+    // 过渡透传：端点旧字段以过渡形状进域（供 migrateApiDomain 收编——
+    // normalize 只认 v2 键名，故在 normalize 后回填；收档已退役：无档案时
+    // 独立 API 现值由 apis 迁移按 custom 直收，不再造「默认配置 1」档）
+    const transitional = (rawPersona().localConfig ?? {}) as Record<string, unknown>;
+    check('迁移：过渡域透传端点旧字段（apiSource＋indepApi* 现值＋stream/timeoutSec 预映射）',
+        transitional.apiSource === 'independent'
+        && transitional.indepApiUrl === 'https://relay.example.com/v1'
+        && transitional.indepApiKey === 'sk-legacy'
+        && transitional.indepApiModel === 'deepseek-chat'
+        && !('apiProfiles' in transitional) && !('activeApiProfileId' in transitional)
+        && transitional.stream === false && transitional.timeoutSec === 600
         && migrated.localConfig.thinkingEffort === 'high'
         && migrated.localConfig.extraBooks.includes('pinned-book'));
-    check('迁移：apiProfiles 收档「默认配置 1」（旧档无 profiles 时收现值并选中）',
-        migrated.localConfig.apiProfiles.length === 1
-        && migrated.localConfig.apiProfiles[0].name === '默认配置 1'
-        && migrated.localConfig.apiProfiles[0].url === 'https://relay.example.com/v1'
-        && migrated.localConfig.apiProfiles[0].key === 'sk-legacy'
-        && migrated.localConfig.activeApiProfileId === migrated.localConfig.apiProfiles[0].id);
     check('迁移：wiSelection/uiState/userContext/pinnedBooks 形状正确（淘汰字段丢弃）',
         JSON.stringify(migrated.wiSelection) === JSON.stringify({ charA: { 'Book One': ['1', '2'] } })
         && migrated.uiState.generationPreset === 'Pure'
@@ -125,13 +143,86 @@ function runMigrationChecks(): void {
     check('迁移：旧键保留作 legacy 快照（防回滚丢增量）',
         ls.get(LEGACY_KEYS.state) !== null && ls.get(LEGACY_KEYS.dataUser) !== null && ls.get(LEGACY_KEYS.pinnedBooks) !== null);
 
-    // 1c. 二次启动零重写（域在场 → skipped，域内容逐字节不变）
-    const before = domainJson();
-    const third = migratePersonaDomain();
-    check('迁移：二次启动零重写（域在场 skip、内容不变、无搬入）',
-        third.skipped && third.migratedKeys.length === 0 && domainJson() === before);
+    // 1e. 统一端点收编场景（choice 旧 apis[]＋persona 配置档撞 id/去重）
+    // —— 三域全部从零起步，模拟「批D 存档升级到整合轮II」的一次性迁移
+    for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
+    wipeApiScenarioDomains();
+    const tt = extension_settings.ttToolkit as Record<string, unknown>;
+    tt.choice = {
+        apis: [
+            { id: 'c1', name: 'choice端点一', apiurl: 'https://choice.example.com/v1', key: 'sk-c1', model: 'm-choice', stream: false, temperature: 0.3, max_tokens: 777, outputContract: 'json_schema' },
+            { id: 'c2', name: 'choice端点二', apiurl: 'https://choice-two.example.com/v1', key: 'sk-c2', model: 'm-choice-2', stream: true, temperature: 0.9, max_tokens: 1024 },
+        ],
+        activeApiId: 'c2',
+        gen: { count: 5, contextRounds: 2, minChars: 5, maxChars: 50, clickBehavior: 'append', debugForceRaw: false },
+        pool: { masterPool: [], poolConfigs: [] },
+    };
+    ls.set(LEGACY_KEYS.state, JSON.stringify({
+        localConfig: {
+            apiSource: 'independent',
+            indepApiUrl: 'https://custom.example.com/v1',
+            indepApiKey: 'sk-custom',
+            indepApiModel: 'gpt-custom',
+            indepTimeout: 90,
+            indepStream: true,
+            thinkingEffort: 'medium',
+            apiProfiles: [
+                // id 'c2' 与 choice 侧撞车且端点不同 → 收编时重分配新 id
+                { id: 'c2', name: '撞车档', url: 'https://persona.example.net/v1', key: 'sk-p', model: 'm-persona' },
+                // url+model 与 choice c1 相同 → 去重并入（id 映射到 c1）
+                { id: 'p-dup', name: '重复档', url: 'https://choice.example.com/v1', key: 'sk-p2', model: 'm-choice' },
+            ],
+            activeApiProfileId: 'p-dup',
+        },
+    }));
+    migratePersonaDomain();
+    const report = migrateApiDomain();
+    const endpoints = readApiDomain();
+    const c1 = endpoints.find(e => e.id === 'c1');
+    const c2 = endpoints.find(e => e.id === 'c2');
+    const remapped = endpoints.find(e => e.url === 'https://persona.example.net/v1' && e.model === 'm-persona');
+    check('收编：choice 旧 apis 并入统一表（id 保留、字段零丢失）',
+        !report.skipped && report.collectedFrom.includes('choice') && report.endpointCount === 3
+        && !!c1 && c1.name === 'choice端点一' && c1.url === 'https://choice.example.com/v1' && c1.key === 'sk-c1' && c1.model === 'm-choice'
+        && !!c2 && c2.url === 'https://choice-two.example.com/v1' && c2.key === 'sk-c2' && c2.model === 'm-choice-2');
+    check('收编：persona 侧撞 id 重分配＋同端点去重（idRemaps/mergedDuplicates）',
+        report.mergedDuplicates === 1
+        && report.idRemaps.length === 1 && report.idRemaps[0].from === 'c2' && typeof report.idRemaps[0].to === 'string'
+        && !!remapped && remapped.id !== 'c2' && remapped.name === '撞车档',
+        `remaps=${JSON.stringify(report.idRemaps)} merged=${report.mergedDuplicates}`);
+    const rawChoice = (tt.choice ?? {}) as Record<string, unknown>;
+    const choiceTask = (rawChoice.task ?? {}) as Record<string, unknown>;
+    check('收编：choice 域 v2 重写（activeEndpointId 重映射＋任务参数从选中端点拷贝＋gen/pool 透传）',
+        rawChoice.activeEndpointId === 'c2'
+        && choiceTask.outputContract === 'json_object' && choiceTask.reasoningEffort === 'off'
+        && choiceTask.stream === true && choiceTask.temperature === 0.9 && choiceTask.maxTokens === 1024
+        && ((rawChoice.gen ?? {}) as Record<string, unknown>).count === 5
+        && Array.isArray(((rawChoice.pool ?? {}) as Record<string, unknown>).masterPool)
+        && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
+        `choice=${JSON.stringify(rawChoice)}`);
+    const afterCollect = readPersonaDomain();
+    const rawPersonaAfter = (rawPersona().localConfig ?? {}) as Record<string, unknown>;
+    check('收编：persona localConfig v2 重写（endpointId 重映射＋任务参数收编＋旧字段清退）',
+        afterCollect.localConfig.endpointId === 'c1'
+        && afterCollect.localConfig.stream === true
+        && afterCollect.localConfig.thinkingEffort === 'medium'
+        && afterCollect.localConfig.timeoutSec === 90
+        && !('apiSource' in rawPersonaAfter) && !('apiProfiles' in rawPersonaAfter)
+        && !('indepApiUrl' in rawPersonaAfter) && !('activeApiProfileId' in rawPersonaAfter));
 
-    // 1d. 退休键清理无条件（域在场也清）——已由 1c 前置移除，这里再放回验证
+    // 1f. 二次启动零重写（统一表在场＋两域 v2 → 全部 skip，逐字节不变）
+    const apisBefore = JSON.stringify(tt.apis);
+    const choiceBefore = JSON.stringify(tt.choice);
+    const personaBefore = domainJson();
+    const personaSecond = migratePersonaDomain();
+    const apisSecond = migrateApiDomain();
+    check('收编：二次启动零重写（两步迁移均 skip、三域逐字节不变）',
+        personaSecond.skipped && apisSecond.skipped
+        && JSON.stringify(tt.apis) === apisBefore
+        && JSON.stringify(tt.choice) === choiceBefore
+        && domainJson() === personaBefore);
+
+    // 1g. 退休键清理无条件（域在场也清）——再放回验证
     ls.set('pw_custom_themes_v1', '残留');
     const fourth = migratePersonaDomain();
     check('迁移：域在场时退休键清理仍执行（pw_custom_themes_v1）',
@@ -139,21 +230,58 @@ function runMigrationChecks(): void {
 
     // 清场还原默认域（后续分区读域不依赖本段合成数据）
     for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
-    wipeDomain();
+    wipeApiScenarioDomains();
     migratePersonaDomain();
 }
 
 // ---------------------------------------------------------------------------
-// 2) prompts 常量形状
+// 2) 四任务提示词引擎（存储形态＋默认模板＋任务键）
 // ---------------------------------------------------------------------------
 
 function runPromptsChecks(): void {
-    check('prompts：curator 策展提示词在场（占位符 {{charInfo}}/{{userRequirements}}）',
-        DEFAULT_PROMPTS.curator.includes('{{charInfo}}') && DEFAULT_PROMPTS.curator.includes('{{userRequirements}}'));
-    check('prompts：personaGen 生成/润色提示词在场（占位符 {{user}}/{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
-        DEFAULT_PROMPTS.personaGen.includes('{{user}}') && DEFAULT_PROMPTS.personaGen.includes('{{charInfo}}')
-        && DEFAULT_PROMPTS.personaGen.includes('{{greetings}}') && DEFAULT_PROMPTS.personaGen.includes('{{template}}')
-        && DEFAULT_PROMPTS.personaGen.includes('{{input}}'));
+    const prompts = usePromptsStore();
+    const raw = getGlobal('promptConfigs') as unknown;
+    const record = (raw ?? {}) as Record<string, unknown>;
+    const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
+    check('prompts：四任务键 Record 齐备（choice 18 模块回归红线）',
+        !Array.isArray(raw) && typeof raw === 'object' && raw !== null
+        && TASK_KEYS.every(k => record[k] !== undefined)
+        && Array.isArray(choiceModules) && choiceModules.length === 18
+        && prompts.configFor('persona_curator') !== null
+        && prompts.configFor('persona_gen') !== null
+        && prompts.configFor('persona_refine') !== null,
+        `keys=${Object.keys(record).join('/')}`);
+
+    // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺三键。
+    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
+    // revision，否则返回缓存快照看不到外部写（写穿纪律：正常路径写域
+    // 都走 store action 自带 bump，这里模拟的是「旧档在场」的启动读迁移）
+    const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
+    setGlobal('promptConfigs', [legacySet]);
+    prompts.$patch({ revision: prompts.revision + 1 });
+    const migratedChoice = prompts.configFor('choice');
+    const rawAfter = getGlobal('promptConfigs') as unknown;
+    check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 三键）',
+        migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
+        && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
+    prompts.resetToDefault('choice'); // 还原 choice 18 模块红线
+
+    const curatorConfig = prompts.configFor('persona_curator');
+    const genConfig = prompts.configFor('persona_gen');
+    const refineConfig = prompts.configFor('persona_refine');
+    const curatorText = (curatorConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
+    const genText = (genConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
+    const refineTextModule = refineConfig?.modules.find(m => m.kind === 'text');
+    check('prompts：curator 默认模板占位符（{{charInfo}}/{{userRequirements}}）',
+        curatorText.includes('{{charInfo}}') && curatorText.includes('{{userRequirements}}'));
+    check('prompts：persona_gen 默认模板占位符（{{user}}/{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
+        genText.includes('{{user}}') && genText.includes('{{charInfo}}')
+        && genText.includes('{{greetings}}') && genText.includes('{{template}}')
+        && genText.includes('{{input}}'));
+    check('prompts：persona_refine 与 gen 同文（id 区分、注入前置同构）',
+        refineTextModule?.id === 'persona_refine_prompt' && refineTextModule.content === genText
+        && curatorConfig?.modules[0]?.id === 'inject_persona_preset' && refineConfig?.modules[0]?.id === 'inject_persona_preset');
+
     const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
     const keys = [...templateBlocks.keys()];
     check('prompts：默认用户人设模板六块（基本信息/外貌/性格/背景/喜恶/NSFW）',
@@ -164,7 +292,83 @@ function runPromptsChecks(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 3) yaml/diff 纯函数行为
+// 3) persona 任务组装管线（引擎多任务化——choice 路径零行为变化红线在
+//    choice/smoke.ts 的 90 条断言）
+// ---------------------------------------------------------------------------
+
+const assemblySources: PersonaAssemblySources = {
+    presetSystemPrompt: '你是人设生成器',
+    wiText: '> [FILE: 设定书]\n"""\n魔法世界\n"""',
+    charInfo: '林霜，温柔',
+    greetings: '「你好，旅行者」',
+    userRequest: '写个侦探',
+    curatedSchema: '基本信息:\n姓名:\n年龄:',
+    currentPersona: '',
+    userName: '王玉',
+    charName: '林霜',
+};
+
+function runPersonaAssemblyChecks(): void {
+    const prompts = usePromptsStore();
+
+    // curator 管线：preset+wi 两条 system 被引擎合并为一条（整合轮II 偏差：
+    // 旧实现分两条发——语义等价），user 指令占位符清零
+    const curator = assembleMessages(prompts.configFor('persona_curator')?.modules ?? [], assemblySources);
+    check('persona 组装：curator 管线（preset+wi 合并 system＋user 指令、占位符清零）',
+        curator.messages.length === 2
+        && curator.messages[0].role === 'system'
+        && curator.messages[0].content.includes('你是人设生成器') && curator.messages[0].content.includes('魔法世界')
+        && curator.messages[1].role === 'user'
+        && curator.messages[1].content.includes('林霜，温柔') && curator.messages[1].content.includes('写个侦探')
+        && !curator.messages[1].content.includes('{{charInfo}}') && !curator.messages[1].content.includes('{{userRequirements}}'));
+
+    // gen 管线：{{template}}←策展 schema、{{greetings}}、{{input}}、{{user}} 全填
+    const gen = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    const genUser = gen.messages[gen.messages.length - 1].content;
+    check('persona 组装：persona_gen 管线（五个占位符全部填充）',
+        gen.messages.length === 2 && gen.messages[1].role === 'user'
+        && genUser.includes('王玉') && genUser.includes('林霜，温柔')
+        && genUser.includes('「你好，旅行者」') && genUser.includes('基本信息:\n姓名:\n年龄:')
+        && genUser.includes('写个侦探') && !genUser.includes('{{'));
+
+    // refine 管线：默认模板不含 current_persona 注入模块（不双份），{{input}} 填充
+    const refineConfig = prompts.configFor('persona_refine');
+    const refine = assembleMessages(refineConfig?.modules ?? [], { ...assemblySources, userRequest: '[SYSTEM_OP: DATA_REVISION_PATCH] 修补指令', currentPersona: '姓名: 旧人设' });
+    const refineUser = refine.messages[refine.messages.length - 1].content;
+    check('persona 组装：persona_refine 管线（{{input}} 填充、current_persona 默认不双份注入）',
+        refine.messages.length === 2
+        && refineUser.includes('[SYSTEM_OP: DATA_REVISION_PATCH]') && !refineUser.includes('姓名: 旧人设')
+        && (refineConfig?.modules.every(m => m.kind === 'text' || m.source !== 'current_persona') ?? false));
+
+    // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复
+    prompts.toggleModule('persona_gen', 'persona_gen_prompt', false);
+    const off = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    const offTrace = off.trace.find(t => t.moduleId === 'persona_gen_prompt');
+    const offOk = off.messages.length === 1 && off.messages[0].role === 'system' && offTrace?.note === '模块已停用';
+    prompts.toggleModule('persona_gen', 'persona_gen_prompt', true);
+    const on = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    check('persona 组装：模块开关闭环（停用留痕不注入、启用恢复注入）',
+        offOk && on.messages.length === 2 && on.messages[1].role === 'user');
+}
+
+/** dump 观测口断言（异步——__TTK_PROMPTS__.dump 按任务返回全文）。 */
+async function runPersonaAssemblyDumpChecks(): Promise<void> {
+    const port = (globalThis as { __TTK_PROMPTS__?: { dump: (task?: string) => Promise<string> } }).__TTK_PROMPTS__;
+    const dumpText = await (port ? port.dump('persona_gen') : Promise.reject(new Error('口缺席')));
+    check('dump 口：按任务 dump 全文（persona_gen：组装 dump 标头＋模块清单＋指令正文）',
+        dumpText.includes('=== 消息组装 dump') && dumpText.includes('生成指令')
+        && dumpText.includes('[任务：生成/润色用户人设]'));
+    let thrownUnknown = false;
+    try {
+        await port?.dump('bogus');
+    } catch (e) {
+        thrownUnknown = (e as Error).message.includes('未知任务键');
+    }
+    check('dump 口：未知任务键 fail fast（提示可选值）', thrownUnknown);
+}
+
+// ---------------------------------------------------------------------------
+// 4) yaml/diff 纯函数行为
 // ---------------------------------------------------------------------------
 
 function runPureFunctionChecks(): void {
@@ -211,19 +415,21 @@ function runPureFunctionChecks(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 4) api.ts 请求体形状（fetch 桩）
+// 5) 统一 api 客户端请求体形状（fetch 桩）
 // ---------------------------------------------------------------------------
 
-function fakeSSEStream(chunks: string[]): { body: { getReader: () => { read: () => Promise<{ done: boolean; value?: Uint8Array }> } } } {
+function fakeSSEStream(chunks: string[]): Response {
     const encoder = new TextEncoder();
     const queue = chunks.map(c => encoder.encode(c));
     return {
+        ok: true,
+        status: 200,
         body: {
             getReader: () => ({
                 read: async () => queue.length > 0 ? { done: false, value: queue.shift() } : { done: true },
             }),
         },
-    };
+    } as unknown as Response;
 }
 
 async function runApiChecks(): Promise<void> {
@@ -231,27 +437,51 @@ async function runApiChecks(): Promise<void> {
     check('api：normalizeApiBase 剥尾斜杠+/chat/completions（保留 /v1）',
         normalizeApiBase('https://api.example.com/v1/chat/completions/') === 'https://api.example.com/v1'
         && normalizeApiBase('https://api.example.com') === 'https://api.example.com');
+    check('api：normalizeApiUrl 四步（剥 /chat/completions、裸域名补 /v1、剥尾斜杠）',
+        normalizeApiUrl('https://api.example.com/v1/chat/completions') === 'https://api.example.com/v1'
+        && normalizeApiUrl('https://api.example.com') === 'https://api.example.com/v1'
+        && normalizeApiUrl('https://api.example.com/v1/') === 'https://api.example.com/v1');
 
-    // 纯函数：请求体形状（温度固定 1.00；max_tokens 恒不注入；effort off 不发）
-    const req = buildOpenAIRequest(
+    // 纯函数：请求体形状（缺省任务参数不进请求体——显式发送制）
+    const body = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { url: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, thinkingEffort: 'off' },
-        false,
+        { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off' },
     );
-    const body = req.body as Record<string, unknown>;
-    check('api：请求体形状（model/messages/temperature=1.00、无 max_tokens、无 reasoning_effort、无 stream）',
-        body.model === 'm1' && Array.isArray(body.messages) && body.temperature === 1.00
-        && !('max_tokens' in body) && !('reasoning_effort' in body) && !('stream' in body)
-        && req.url === 'https://api.example.com/v1/chat/completions'
-        && req.headers.Authorization === 'Bearer sk-test');
-    const reqEffort = buildOpenAIRequest(
+    check('api：buildGenerateBody 基础形状（quiet/openai/reverse_proxy/proxy_password/tool_choice；缺省温度与 max_tokens 不发）',
+        body.type === 'quiet' && body.chat_completion_source === 'openai'
+        && body.reverse_proxy === 'https://api.example.com/v1' && body.proxy_password === 'sk-test'
+        && body.model === 'm1' && Array.isArray(body.messages) && body.tool_choice === 'none'
+        && body.stream === false
+        && !('temperature' in body) && !('max_tokens' in body) && !('reasoning_effort' in body)
+        && !('response_format' in body) && !('json_schema' in body));
+    const bodyExplicit = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { url: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, thinkingEffort: 'high' },
-        true,
+        { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5, maxTokens: 128 },
     );
-    const bodyEffort = reqEffort.body as Record<string, unknown>;
-    check('api：effort≠off 注入 reasoning_effort＋流式注入 stream',
-        bodyEffort.reasoning_effort === 'high' && bodyEffort.stream === true);
+    check('api：buildGenerateBody 显式参数（temperature/max_tokens 进请求体、stream 恒发）',
+        bodyExplicit.temperature === 0.5 && bodyExplicit.max_tokens === 128 && bodyExplicit.stream === true);
+
+    // 输出契约三档
+    const bodyJsonObject = buildGenerateBody(
+        [{ role: 'user', content: 'hi' }],
+        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_object' },
+    );
+    const bodyJsonSchema = buildGenerateBody(
+        [{ role: 'user', content: 'hi' }],
+        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_schema', jsonSchema: { options: [] } },
+    );
+    const jsonSchemaField = bodyJsonSchema.json_schema as Record<string, unknown> | undefined;
+    check('api：输出契约三档（json_object→response_format；json_schema 转换；prompt_only 无契约键）',
+        (bodyJsonObject.response_format as Record<string, unknown> | undefined)?.type === 'json_object'
+        && jsonSchemaField?.name === 'options' && jsonSchemaField?.strict === true && jsonSchemaField?.value !== undefined
+        && !('response_format' in bodyJsonSchema) && !('json_schema' in bodyJsonObject));
+
+    // reasoning_effort 纪律（off 不发已在基础形状断言——这里断言 high 发）
+    const bodyEffort = buildGenerateBody(
+        [{ role: 'user', content: 'hi' }],
+        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'prompt_only', reasoningEffort: 'high' },
+    );
+    check('api：reasoning_effort＝high 注入（low/medium/high 档）', bodyEffort.reasoning_effort === 'high');
 
     // fetch 桩：testConnection 实际发出形状（model+max_tokens:5+Hi 消息）
     const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -273,35 +503,115 @@ async function runApiChecks(): Promise<void> {
         globalThis.fetch = originalFetch;
     }
 
-    // SSE 解析：字符串 delta + 数组 delta 双形态 + [DONE] + 双帧分隔
-    const sse1 = fakeSSEStream(['data: {"choices":[{"delta":{"content":"你"}}]}\n\ndata: {"choices":[{"delta":{"content":[{"type":"text","text":"好"}]}}]}\n\ndata: [DONE]\n\n']);
-    const text1 = await readSSEResponse(sse1 as unknown as Response);
-    check('api：SSE 解析（delta.content 字符串/数组双形态、[DONE]、\\n\\n 分帧）', text1 === '你好', `text=${text1}`);
-    const sse2 = fakeSSEStream(['data: {"choices":[{"delta":{"content":"甲"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"乙"}}]}']);
-    const text2 = await readSSEResponse(sse2 as unknown as Response);
-    check('api：SSE 解析（\\r\\n\\r\\n 分帧＋流尾无空行补处理）', text2 === '甲乙', `text=${text2}`);
-
-    // SSE 错误帧抛错
-    let errorFrameThrown = false;
+    // SSE 帧状态机（经 callGenerateEndpoint 公共面——批B 产物只搬移不重写）
+    const sseCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        sseCalls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+        return fakeSSEStream(['data: {"choices":[{"delta":{"content":"你"}}]}\n\ndata: [DONE]\n\n']);
+    }) as typeof fetch;
     try {
-        await readSSEResponse(fakeSSEStream(['data: {"error":{"message":"quota"}}\n\n']) as unknown as Response);
-    } catch (e) {
-        errorFrameThrown = (e as Error).message.includes('quota');
+        const r1 = await callGenerateEndpoint(
+            [{ role: 'user', content: 'hi' }],
+            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+        );
+        check('api：流式 SSE 帧状态机（\\n\\n 分帧、[DONE] 跳过、delta 拼接、走宿主路由）',
+            r1.streamed && r1.content === '你' && sseCalls[0]?.url === '/api/backends/chat-completions/generate',
+            `text=${r1.content}`);
+        globalThis.fetch = (async () => fakeSSEStream(['data: {"choices":[{"delta":{"content":"甲"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"乙"}}]}'])) as typeof fetch;
+        const r2 = await callGenerateEndpoint(
+            [{ role: 'user', content: 'hi' }],
+            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+        );
+        check('api：流式 \\r\\n 归一＋尾帧无终止符补消费', r2.content === '甲乙', `text=${r2.content}`);
+    } finally {
+        globalThis.fetch = originalFetch;
     }
-    check('api：SSE 错误帧抛错（含上游错误信息）', errorFrameThrown);
 
-    // 空流抛错（反代吞文本场景）
-    let emptyThrown = false;
+    // 非流式：content 读取 + json.error 抛错
+    globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '好的' } }] }) })) as unknown as typeof fetch;
     try {
-        await readSSEResponse(fakeSSEStream(['data: [DONE]\n\n']) as unknown as Response);
-    } catch (e) {
-        emptyThrown = (e as Error).message.includes('流式响应为空');
+        const r3 = await callGenerateEndpoint(
+            [{ role: 'user', content: 'hi' }],
+            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+        );
+        check('api：非流式 content 读取（choices[0].message.content）', !r3.streamed && r3.content === '好的');
+        globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ error: { message: 'quota exceeded' } }) })) as unknown as typeof fetch;
+        let errorThrown = false;
+        try {
+            await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+            );
+        } catch (e) {
+            errorThrown = (e as Error).message.includes('quota');
+        }
+        check('api：非流式 json.error 抛错（含上游错误信息）', errorThrown);
+    } finally {
+        globalThis.fetch = originalFetch;
     }
-    check('api：空流响应抛错（提示切回非流式）', emptyThrown);
 }
 
 // ---------------------------------------------------------------------------
-// 5) worldbook 纯函数＋store 互斥
+// 6) persona 端到端（统一端点两段链：curator→personaGen 走引擎管线）
+// ---------------------------------------------------------------------------
+
+async function runPersonaE2EChecks(): Promise<void> {
+    const store = usePersonaStore();
+    // 端点表放一个冒烟端点，store 快照指向它
+    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟端点', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model' }]);
+    store.config.endpointId = 'smoke-endpoint';
+    store.config.stream = false;
+    store.requestText = '生成一个侦探人设';
+    store.isProcessing = false;
+
+    const CURATOR_YAML = '```yaml\n基本信息:\n姓名:\n年龄:\n```';
+    const PERSONA_YAML = '```yaml\n姓名: 阿德\n年龄: 20\n```';
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        calls.push({ url: String(url), body });
+        const content = calls.length === 1 ? CURATOR_YAML : PERSONA_YAML;
+        return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) } as Response;
+    }) as typeof fetch;
+    try {
+        await store.generate();
+        const firstMessages = (calls[0]?.body.messages ?? []) as Array<{ role: string; content: string }>;
+        const firstJoined = firstMessages.map(m => m.content).join('\n');
+        const secondMessages = (calls[1]?.body.messages ?? []) as Array<{ role: string; content: string }>;
+        const secondJoined = secondMessages.map(m => m.content).join('\n');
+        const lastFirst = firstMessages[firstMessages.length - 1];
+        const lastSecond = secondMessages[secondMessages.length - 1];
+        check('端到端：统一端点请求形状（宿主路由、quiet、reverse_proxy=端点地址、温度 1、不发 max_tokens）',
+            calls.length === 2
+            && calls[0].url === '/api/backends/chat-completions/generate'
+            && calls[0].body.type === 'quiet' && calls[0].body.chat_completion_source === 'openai'
+            && calls[0].body.reverse_proxy === 'https://smoke.example.com/v1' && calls[0].body.proxy_password === 'sk-smoke'
+            && calls[0].body.model === 'smoke-model' && calls[0].body.temperature === 1
+            && !('max_tokens' in calls[0].body) && calls[0].body.stream === false);
+        check('端到端：curator 段走引擎管线（策展指令全文进 messages＋assistant prefill 追加）',
+            firstJoined.includes('[任务：策展人设 schema]') && firstJoined.includes('<base_blocks>')
+            && !firstJoined.includes('{{charInfo}}') && !firstJoined.includes('{{userRequirements}}')
+            && lastFirst?.role === 'assistant' && lastFirst?.content.startsWith('```yaml'));
+        check('端到端：personaGen 段消费策展产出（<target_schema> 含 curator 输出、生成指令在场）',
+            secondJoined.includes('[任务：生成/润色用户人设]')
+            && secondJoined.includes('Schema Definition') && secondJoined.includes('<target_schema>')
+            && secondJoined.includes('基本信息:') && secondJoined.includes('[SYSTEM_OP: LOGIC_CONSTRAINT]')
+            && !secondJoined.includes('{{template}}')
+            && lastSecond?.role === 'assistant' && lastSecond?.content.startsWith('```yaml'));
+        check('端到端：两段链结果落地（结果框 YAML 剥围栏、互斥复位）',
+            store.resultText === '姓名: 阿德\n年龄: 20'
+            && store.isProcessing === false && store.processingLabel === '',
+            `result=${store.resultText}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+        writeApiDomain([]);
+        store.config.endpointId = '';
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 7) worldbook 纯函数＋store 互斥
 // ---------------------------------------------------------------------------
 
 async function runWorldbookAndStoreChecks(): Promise<void> {
@@ -328,21 +638,23 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     const store = usePersonaStore();
     store.isProcessing = true;
     store.processingLabel = '占用标记';
-    store.lastRun = null;
+    const lastRunBefore = store.lastRun;
     await store.generate();
     check('store：生成期间再触发被互斥忽略（lastRun 不变、label 不变）',
-        store.lastRun === null && store.processingLabel === '占用标记');
+        store.lastRun === lastRunBefore && store.processingLabel === '占用标记');
     await store.refine();
     check('store：生成期间润色同样被互斥忽略（不进 diff 视图）', !store.showDiff);
     store.isProcessing = false;
     store.processingLabel = '';
 
-    // 主 API 路径：宿主存根无 generateRaw → 抛「酒馆版本过旧」被 store 吞成 toast，
-    // finally 复位互斥（不挂死）
+    // 端点缺失 fail fast（整合轮II：原「主 API generateRaw 缺席」改统一端点口径）
+    store.config.endpointId = 'no-such-endpoint';
     store.requestText = '合成需求';
+    const resultBefore = store.resultText;
     await store.generate();
-    check('store：主 API generateRaw 缺席路径 fail fast（互斥复位、结果不误写）',
-        store.isProcessing === false && store.processingLabel === '');
+    check('store：端点缺失 fail fast（不进生成、互斥态干净、结果不误写）',
+        store.isProcessing === false && store.processingLabel === '' && store.resultText === resultBefore);
+    store.config.endpointId = '';
 
     // charKey 兜底（stubContext.characterId=null → 'global_no_char'）
     check('store：charKey 兜底 global_no_char（|| 兜底、字符串口径）', store.charKey === 'global_no_char');
@@ -378,16 +690,19 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/纯函数/api 形状/互斥机判（批D）===');
+    console.info('=== persona 迁移/统一端点收编/四任务引擎/纯函数/api 形状/端到端/互斥机判（整合轮II）===');
     runMigrationChecks();
     runPromptsChecks();
+    runPersonaAssemblyChecks();
+    await runPersonaAssemblyDumpChecks();
     runPureFunctionChecks();
     await runApiChecks();
+    await runPersonaE2EChecks();
     await runWorldbookAndStoreChecks();
     if (failures.length > 0) {
         console.error(`[persona-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/5 旧键搬入＋收档/退休键清理/legacy 快照保留/二次启动零重写）、prompts 常量形状（curator/personaGen 六块模板）、yaml/diff 纯函数（分块/围栏/取舍拼装）、api 请求体形状（fetch 桩/SSE 双帧双形态/错误帧/空流）、worldbook 触发词与 fail fast、store 互斥与显式保存点全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/5 旧键搬入＋过渡透传/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写/二次启动零重写）、四任务提示词引擎（Record 四键＋choice 18 模块红线/旧数组一次写迁移/三套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml/diff 纯函数（分块/围栏/取舍拼装）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（统一端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、store 互斥与显式保存点全部通过。');
 }

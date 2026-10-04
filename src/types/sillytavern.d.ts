@@ -162,12 +162,6 @@ declare module '@sillytavern/scripts/st-context' {
             movingUIState: Record<string, Record<string, unknown>>;
         };
         /**
-         * 主 API 原始生成通道（script.js:5092 generateRaw 的转发；批D
-         * persona「主 API」模式，prompt 传消息数组原样透传）。
-         * @hostAnchor scripts/st-context.js:211 generateRaw,
-         */
-        generateRaw?: (options: { prompt?: unknown }) => Promise<unknown>;
-        /**
          * oai_settings 的转发（当前激活 openai 预设名＝
          * preset_settings_openai；批D persona 预设解析读取）。
          * @hostAnchor scripts/st-context.js:233 chatCompletionSettings: oai_settings,

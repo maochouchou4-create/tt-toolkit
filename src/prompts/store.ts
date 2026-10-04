@@ -5,21 +5,24 @@
  * 全部读取走 getGlobal/getChat 读透传、写入走写穿 action＋revision bump
  * 失效信号；store 不落值快照（快照＝第二真相源）。
  *
- * 存储落点（方案 §2.2）：
- *   - 全局域 extension_settings.ttToolkit：promptConfigs（含 modules；
- *     m03359 起单模板——多套旧档读侧收敛为生效那套）、
+ * 存储落点（方案 §2.2；整合轮II 升 Record）：
+ *   - 全局域 extension_settings.ttToolkit：promptConfigs
+ *     （Record<taskKey, PromptConfig>，四任务各一套——choice 选项生成＋
+ *     persona 策展/填充/润色；旧数组档读侧迁移为 {choice: 旧生效套}，
+ *     一次性写回，二次启动零改写）、
  *     externalInjections（外部注入搬运配置）、
  *     directionPresets（用户自建走向预设列表——G4）；
  *   - 聊天域 chat_metadata.ttToolkit：storyDirection（已应用预设正文
  *     ＋自由文本）——写走 writeChatMetadata 立即保存通道。
- *   - 批C 起读侧对旧存档补插池注入模块（inject_pool_entries，缺席才补
- *     ——见 readPromptDomain 的 backfillPoolModules）。
+ *   - 批C 起读侧对旧档补插池注入模块（inject_pool_entries，缺席才补
+ *     ——见 backfillPoolModules；整合轮II 起只作用于 choice 任务——
+ *     persona 管线无池注入面）。
  */
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
-import { createDefaultPromptConfig } from './defaults';
-import { moduleGroupOf } from './types';
-import type { DirectionPreset, ExternalInjectionConfig, PromptConfig, StoryDirection } from './types';
+import { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
+import { TASK_KEYS, moduleGroupOf } from './types';
+import type { DirectionPreset, ExternalInjectionConfig, PromptConfig, StoryDirection, TaskKey } from './types';
 
 const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
 const GLOBAL_PROMPT_ACTIVE_KEY = 'promptActiveId';
@@ -29,72 +32,82 @@ const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 
 /** 全局域整体结构（批B 落的 prompts 命名空间；choice 侧另有自己的键）。 */
 export interface PromptGlobalDomain {
-    /** m03359 起恒为单元素（单模板；键形状沿用数组＝旧档迁移零改写） */
-    promptConfigs: PromptConfig[];
-    /** 已废弃字段位（恒取 promptConfigs[0].id）——保留只为旧档键位兼容 */
-    promptActiveId: string;
+    /** 四任务配置（Record——整合轮II；promptActiveId 旧键随之退休，不再写入） */
+    promptConfigs: Record<TaskKey, PromptConfig>;
     externalInjections: ExternalInjectionConfig;
 }
 
 const DEFAULT_EXTERNAL: ExternalInjectionConfig = { allSlots: false, selectedSlots: [], baibai: false };
 
+/** 配置形状守门（Record 形态下逐键校验——外部写坏的键回退默认，不抛错）。 */
+function isConfigShape(value: unknown): value is PromptConfig {
+    return typeof value === 'object' && value !== null && Array.isArray((value as PromptConfig).modules);
+}
+
 function readPromptDomain(): PromptGlobalDomain {
-    const configs = getGlobal<PromptConfig[]>(GLOBAL_PROMPT_CONFIGS_KEY);
-    const activeId = getGlobal<string>(GLOBAL_PROMPT_ACTIVE_KEY);
     const external = getGlobal<ExternalInjectionConfig>(GLOBAL_EXTERNAL_KEY);
-    let list = Array.isArray(configs) ? configs : [];
-    if (list.length === 0) {
-        // 首次启动：落默认模板（一次性写穿；后续不再覆盖）
-        list = [createDefaultPromptConfig()];
-        setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
-    } else {
-        let changed = false;
-        // m03359 单模板迁移：旧档多套配置收敛为当时生效那套（配置集管理面
-        // 已砍除——用户拍板「懒得配置的，这一套就够了」，历史套数不保留）
-        if (list.length > 1) {
-            list = [list.find(c => c.id === activeId) ?? list[0]];
-            changed = true;
+    const raw = getGlobal<unknown>(GLOBAL_PROMPT_CONFIGS_KEY);
+    const configs: Partial<Record<TaskKey, PromptConfig>> = {};
+    let changed = false;
+    if (Array.isArray(raw)) {
+        // 整合轮II 迁移：旧数组档（单模板时代，恒单元素）→ {choice: 当时生效套}。
+        // m03359 的多套收敛语义保留（activeId 命中 ?? 首套）；一次性写回 Record 形，
+        // promptActiveId 旧键读后即退休（不写不删——normalize 丢弃面自然淡出）。
+        let list = raw as PromptConfig[];
+        const activeId = getGlobal<string>(GLOBAL_PROMPT_ACTIVE_KEY);
+        if (list.length === 0) list = [createDefaultPromptConfig()];
+        else if (list.length > 1) list = [list.find(c => c.id === activeId) ?? list[0]];
+        configs.choice = list[0];
+        changed = true;
+    } else if (raw !== null && typeof raw === 'object') {
+        // 新 Record 形：逐任务键读取；未知键丢弃（normalize 丢弃面）
+        const record = raw as Record<string, unknown>;
+        for (const task of TASK_KEYS) {
+            if (isConfigShape(record[task])) configs[task] = record[task];
         }
-        if (backfillPoolModules(list)) changed = true;
-        // 旧档里的 inject_pool_rules 模块剔除（m03359：池规则并入 core_rules，
-        // 'pool_rules' 注入源已从类型层删除——留着会在引擎 switch 不可达）
-        for (const config of list) {
-            if (!Array.isArray(config.modules)) continue;
-            const filtered = config.modules.filter(m => !(m.kind === 'inject' && (m as { source?: unknown }).source === 'pool_rules'));
-            if (filtered.length !== config.modules.length) {
-                config.modules = filtered;
-                changed = true;
-            }
-        }
-        if (changed) setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
     }
+    // 补缺四键（首次启动全默认；旧档补 persona 三键）
+    for (const task of TASK_KEYS) {
+        if (configs[task]) continue;
+        configs[task] = createTaskDefaultConfig(task);
+        changed = true;
+    }
+    if (backfillPoolModules(configs.choice)) changed = true;
+    if (stripRetiredPoolRules(configs.choice)) changed = true;
+    if (changed) setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, configs);
     return {
-        promptConfigs: list,
-        promptActiveId: list[0]?.id ?? '',
+        promptConfigs: configs as Record<TaskKey, PromptConfig>,
         externalInjections: { ...DEFAULT_EXTERNAL, ...(external ?? {}) },
     };
 }
 
-/** 池注入模块补建（就地修改 list；返回是否有改动）。 */
-function backfillPoolModules(list: PromptConfig[]): boolean {
-    let changed = false;
-    for (const config of list) {
-        if (!Array.isArray(config.modules)) continue;
-        // 双复核 P3 修复语义保留：按 source 在场判断——缺席才补，幂等
-        if (!config.modules.some(m => m.kind === 'inject' && m.source === 'pool_entries')) {
-            config.modules.push({
-                kind: 'inject',
-                id: 'inject_pool_entries',
-                name: '池条目',
-                role: 'system',
-                order: 98,
-                enabled: true,
-                source: 'pool_entries',
-            });
-            changed = true;
-        }
-    }
-    return changed;
+/**
+ * 池注入模块补建（choice 任务专属——persona 管线无池注入面；就地修改，
+ * 返回是否有改动）。双复核 P3 修复语义保留：按 source 在场判断——缺席才
+ * 补，幂等。
+ */
+function backfillPoolModules(choice: PromptConfig | undefined): boolean {
+    if (!choice || !Array.isArray(choice.modules)) return false;
+    if (choice.modules.some(m => m.kind === 'inject' && m.source === 'pool_entries')) return false;
+    choice.modules.push({
+        kind: 'inject',
+        id: 'inject_pool_entries',
+        name: '池条目',
+        role: 'system',
+        order: 98,
+        enabled: true,
+        source: 'pool_entries',
+    });
+    return true;
+}
+
+/** 旧档里的 inject_pool_rules 模块剔除（m03359：池规则并入 core_rules；choice 任务专属）。 */
+function stripRetiredPoolRules(choice: PromptConfig | undefined): boolean {
+    if (!choice || !Array.isArray(choice.modules)) return false;
+    const filtered = choice.modules.filter(m => !(m.kind === 'inject' && (m as { source?: unknown }).source === 'pool_rules'));
+    if (filtered.length === choice.modules.length) return false;
+    choice.modules = filtered;
+    return true;
 }
 
 /** 外部注入搬运配置读取（非 store 上下文消费——sources 组装路径）。 */
@@ -104,7 +117,7 @@ export function externalInjectionConfig(): ExternalInjectionConfig {
 }
 
 /**
- * 启动期初始化：默认模板集落盘（幂等——已有配置不覆盖）＋activeId 兜底。
+ * 启动期初始化：默认模板集落盘（幂等——已有配置不覆盖）＋旧数组档迁移。
  * 由 choice 模块初始化（浏览器与 node 冒烟两路）调用——不依赖任何 UI
  * 读方先打开设置页。
  */
@@ -120,14 +133,21 @@ export const usePromptsStore = defineStore('tt-prompts', {
         lastTraceText: '',
     }),
     getters: {
-        configs(): PromptConfig[] {
+        /** 四任务配置全景（编辑器任务切换条/列表渲染） */
+        taskConfigs(): Record<TaskKey, PromptConfig> {
             void this.revision;
             return readPromptDomain().promptConfigs;
         },
-        /** 当前生效配置（m03359 单模板：promptConfigs[0]） */
+        /** 按任务取生效配置（函数式 getter——Pinia 传参惯用法） */
+        configFor(): (task: TaskKey) => PromptConfig | null {
+            void this.revision;
+            const configs = readPromptDomain().promptConfigs;
+            return task => configs[task] ?? null;
+        },
+        /** choice 任务生效配置（兼容惯用消费方） */
         effectiveConfig(): PromptConfig | null {
             void this.revision;
-            return readPromptDomain().promptConfigs[0] ?? null;
+            return readPromptDomain().promptConfigs.choice ?? null;
         },
         externalInjections(): ExternalInjectionConfig {
             void this.revision;
@@ -158,33 +178,36 @@ export const usePromptsStore = defineStore('tt-prompts', {
     },
     actions: {
         /**
-         * 恢复默认模板（m03359 拍板新增）：单模板的自救口——用户改坏了自己
-         * 也不会修时一键回厂；也是 A/B 盲评的 B 面（改完与默认互相对照）。
-         * 整体替换 modules，不可撤销（UI 侧先 confirm）。
+         * 按任务恢复默认模板（m03359 拍板新增，整合轮II 起按任务分立）：
+         * 用户改坏了自己也不会修时一键回厂。整体替换该任务的 modules，
+         * 不可撤销（UI 侧先 confirm）。
          */
-        resetToDefault() {
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [createDefaultPromptConfig()]);
+        resetToDefault(task: TaskKey) {
+            const d = readPromptDomain();
+            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...d.promptConfigs, [task]: createTaskDefaultConfig(task) });
             this.revision++;
         },
-        /** 整体替换当前模板的模块集（编辑器写回——单模板直改） */
-        replaceModules(modules: PromptConfig['modules']) {
+        /** 整体替换指定任务模板的模块集（编辑器写回） */
+        replaceModules(task: TaskKey, modules: PromptConfig['modules']) {
             const d = readPromptDomain();
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, d.promptConfigs.map((c, i) => (i === 0 ? { ...c, modules } : c)));
+            const current = d.promptConfigs[task];
+            if (!current) return;
+            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...d.promptConfigs, [task]: { ...current, modules } });
             this.revision++;
         },
         /** 单模块启停（编辑器高频操作：读-改-写整集） */
-        toggleModule(moduleId: string, enabled: boolean) {
-            const cfg = readPromptDomain().promptConfigs[0];
+        toggleModule(task: TaskKey, moduleId: string, enabled: boolean) {
+            const cfg = readPromptDomain().promptConfigs[task];
             if (!cfg) return;
-            this.replaceModules(cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
+            this.replaceModules(task, cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
         },
         /**
          * 模块排序交换（order 值互换）。编辑器按 G5 三分组渲染，移动的
          * 交换对象限定同组相邻模块——跨组位置由各组分段天然隔开，跨组
          * 交换会让另一组里凭空多/少一行，视觉上＝乱跳。
          */
-        moveModule(moduleId: string, direction: -1 | 1) {
-            const cfg = readPromptDomain().promptConfigs[0];
+        moveModule(task: TaskKey, moduleId: string, direction: -1 | 1) {
+            const cfg = readPromptDomain().promptConfigs[task];
             if (!cfg) return;
             const sorted = [...cfg.modules].sort((a, b) => a.order - b.order);
             const idx = sorted.findIndex(m => m.id === moduleId);
@@ -198,13 +221,14 @@ export const usePromptsStore = defineStore('tt-prompts', {
             const orderA = sorted[idx].order;
             sorted[idx] = { ...sorted[idx], order: sorted[target].order };
             sorted[target] = { ...sorted[target], order: orderA };
-            this.replaceModules(sorted);
+            this.replaceModules(task, sorted);
         },
         /** 编辑文本模块内容（编辑器 textarea 写回） */
-        updateModuleContent(moduleId: string, content: string) {
-            const cfg = readPromptDomain().promptConfigs[0];
+        updateModuleContent(task: TaskKey, moduleId: string, content: string) {
+            const cfg = readPromptDomain().promptConfigs[task];
             if (!cfg) return;
             this.replaceModules(
+                task,
                 cfg.modules.map(m => (m.id === moduleId && m.kind === 'text' ? { ...m, content } : m)),
             );
         },

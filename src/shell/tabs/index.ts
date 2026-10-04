@@ -6,11 +6,24 @@
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
+import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import NavSettingsTab from './NavSettingsTab.vue';
 import PersonaTab from './PersonaTab.vue';
 import PoolTab from './PoolTab.vue';
 import PromptEditorTab from './PromptEditorTab.vue';
+
+export function createApiTab(): ShellTab {
+    return {
+        id: 'api',
+        tabTitle: 'API',
+        mount(container) {
+            const app = createApp(ApiTab);
+            app.use(pinia);
+            app.mount(container);
+        },
+    };
+}
 
 export function createNavSettingsTab(): ShellTab {
     return {

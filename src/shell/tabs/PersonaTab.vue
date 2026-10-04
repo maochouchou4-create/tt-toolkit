@@ -1,12 +1,13 @@
 <template>
   <!--
-    PersonaWeaver fork「人设」tab（批D 平移）。
-    旧 callPopup 弹窗四分区（人设/参考/API/提示词对照）平移进壳内 tab。
-    视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系），
-    自持类名前缀 tt-persona-（pw- 旧样式不整体搬运，按需重写）。
+    PersonaWeaver fork「人设」tab（批D 平移，整合轮II 收敛）。
+    四分区收敛为三：人设/参考/生成通道。
+    生成通道＝统一端点表引用＋persona 任务参数（整合轮II：端点身份在「API」页维护）；
+    旧「提示词对照」分区删除（模板进「提示词」tab 四任务体系可编辑）。
+    视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系），类名前缀 tt-persona-。
   -->
   <div class="tt-persona-tab">
-    <!-- 内分区条（人设/参考/API/提示词对照） -->
+    <!-- 内分区条（人设/参考/生成通道） -->
     <div class="tt-persona-strip">
       <button
         v-for="sec in sections"
@@ -180,48 +181,36 @@
       </div>
     </div>
 
-    <!-- ================= 分区三：API ================= -->
+    <!-- ================= 分区三：生成通道（整合轮II：统一端点表引用＋persona 任务参数） ================= -->
     <div v-show="activeSection === 'api'" class="tt-persona-section">
       <div class="tt-card">
         <div class="tt-card-title">生成通道</div>
-        <label class="tt-persona-field">
-          <span>API 通道</span>
-          <select :value="store.config.apiSource" class="tt-persona-select" @change="onApiSourceChange">
-            <option value="main">主 API（走宿主 generateRaw）</option>
-            <option value="independent">独立 API（OpenAI 兼容直连）</option>
+        <div class="tt-card-sub">
+          人设生成使用「API」页统一维护的端点；此处只选端点与调人设任务参数。
+          提示词模板在「提示词」tab 的「人设」任务里编辑。
+        </div>
+
+        <label v-if="apis.endpoints.length" class="tt-persona-field">
+          <span>生成端点</span>
+          <select :value="store.config.endpointId" class="tt-persona-select" @change="onEndpointChange">
+            <option value="">（选择端点）</option>
+            <option v-for="e in apis.endpoints" :key="e.id" :value="e.id">{{ e.name || '（未命名）' }} · {{ e.model || '未填模型' }}</option>
           </select>
         </label>
-        <div class="tt-persona-note">独立 API 仅支持 OpenAI 兼容形态（Anthropic 原生协议已在本 fork 砍除）；纯 fetch 直连，不经宿主路由。</div>
-      </div>
-
-      <div class="tt-card">
-        <div class="tt-card-title">独立 API 配置</div>
-        <label class="tt-persona-field"><span>地址</span>
-          <input v-model.trim="store.config.indepApiUrl" type="text" placeholder="https://api.example.com/v1">
-        </label>
-        <label class="tt-persona-field"><span>密钥</span>
-          <input v-model.trim="store.config.indepApiKey" type="password" autocomplete="off" placeholder="sk-…">
-        </label>
-        <label class="tt-persona-field"><span>模型</span>
-          <input v-model.trim="store.config.indepApiModel" type="text" list="tt-persona-models" placeholder="model-id">
-          <datalist id="tt-persona-models">
-            <option v-for="m in store.modelOptions" :key="m" :value="m" />
-          </datalist>
-        </label>
-        <div class="tt-actions">
-          <button type="button" @click="store.fetchModelList()">取模型列表</button>
-          <button type="button" @click="store.runTestConnection()">测试连接</button>
-          <button type="button" @click="store.saveConfig()">保存配置</button>
+        <div v-else class="tt-persona-empty">
+          未配置端点——<button type="button" class="tt-persona-link" @click="goApi">到「API」页添加</button>
         </div>
-        <div v-if="store.connectionStatus" class="tt-persona-conn">{{ store.connectionStatus }}</div>
-        <label class="tt-persona-field"><span>请求超时（秒）</span>
-          <input v-model.number="store.config.indepTimeout" type="number" min="30" max="1800" step="10">
+
+        <label class="tt-persona-field">
+          <span>请求超时（秒）</span>
+          <input :value="store.config.timeoutSec" type="number" min="30" max="1800" step="10" @change="onTimeoutChange">
         </label>
-        <label class="tt-switch-row">
-          <input v-model="store.config.indepStream" type="checkbox">
-          <span>流式输出（假流式端点必开；空流响应时提示切回非流式）</span>
+        <label class="tt-persona-switch">
+          <input :checked="store.config.stream" type="checkbox" @change="onStreamToggle">
+          <span>流式输出（假流式端点必开；长请求防挂死）</span>
         </label>
-        <label class="tt-persona-field"><span>思考强度</span>
+        <label class="tt-persona-field">
+          <span>思考强度</span>
           <select :value="store.config.thinkingEffort" class="tt-persona-select" @change="onEffortChange">
             <option value="off">不发送（默认）</option>
             <option value="low">低</option>
@@ -229,46 +218,12 @@
             <option value="high">高</option>
           </select>
         </label>
-      </div>
+        <div class="tt-persona-note">思考强度：仅部分端点支持，发错档会被端点忽略或报错，默认不发</div>
 
-      <div class="tt-card">
-        <div class="tt-card-title">配置档</div>
-        <div class="tt-actions"><button type="button" @click="store.createProfile()">收进新档</button></div>
-        <ul class="tt-persona-profile-list">
-          <li v-for="p in store.config.apiProfiles" :key="p.id" class="tt-persona-profile-row" :class="{ 'tt-persona-profile-row--active': p.id === store.config.activeApiProfileId }">
-            <button type="button" class="tt-persona-profile-select" @click="store.selectProfile(p.id)">
-              {{ p.id === store.config.activeApiProfileId ? '✓' : '切' }} {{ p.name }}
-            </button>
-            <span class="tt-persona-profile-meta">{{ p.model || '未填模型' }}</span>
-            <button type="button" class="tt-persona-profile-del" @click="confirmDeleteProfile(p)">删</button>
-          </li>
-        </ul>
-        <div v-if="store.config.apiProfiles.length === 0" class="tt-persona-empty">尚无配置档——填好右侧表单后「收进新档」</div>
-      </div>
-    </div>
-
-    <!-- ================= 分区四：提示词对照（只读） ================= -->
-    <div v-show="activeSection === 'prompts'" class="tt-persona-section">
-      <div class="tt-card">
-        <div class="tt-card-title">提示词对照（只读）</div>
-        <div class="tt-card-sub">平移自旧模块默认提示词；占位符随生成流程替换。不可编辑（不进提示词编辑器体系）</div>
-
-        <details class="tt-persona-details" open>
-          <summary>预设系统段抽取（当前预设）</summary>
-          <pre class="tt-persona-pre">{{ store.systemPromptPreview || '（空——当前选择不含系统段）' }}</pre>
-        </details>
-        <details class="tt-persona-details">
-          <summary>策展提示词（curator，第一段）</summary>
-          <pre class="tt-persona-pre">{{ DEFAULT_PROMPTS.curator }}</pre>
-        </details>
-        <details class="tt-persona-details">
-          <summary>生成/润色提示词（personaGen，第二段）</summary>
-          <pre class="tt-persona-pre">{{ DEFAULT_PROMPTS.personaGen }}</pre>
-        </details>
-        <details class="tt-persona-details">
-          <summary>默认用户人设模板（六块 YAML）</summary>
-          <pre class="tt-persona-pre">{{ DEFAULT_TEMPLATES.user }}</pre>
-        </details>
+        <div class="tt-actions">
+          <button type="button" :disabled="store.config.endpointId === ''" @click="store.runTestConnection()">测试连接</button>
+        </div>
+        <div v-if="store.connectionStatus" class="tt-persona-conn">{{ store.connectionStatus }}</div>
       </div>
     </div>
   </div>
@@ -277,16 +232,18 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 import { usePersonaStore } from '@/modules/persona/store';
-import { DEFAULT_PROMPTS, DEFAULT_TEMPLATES } from '@/modules/persona/prompts';
+import { useApisStore } from '@/modules/apis/store';
+import { useShellStore } from '@/shell/store';
 
 const store = usePersonaStore();
+const apis = useApisStore();
+const shell = useShellStore();
 
-/** 内分区条状态（人设/参考/API/提示词对照）。 */
+/** 内分区条状态（人设/参考/生成通道）。 */
 const sections = [
     { id: 'editor', label: '人设' },
     { id: 'context', label: '参考' },
-    { id: 'api', label: 'API' },
-    { id: 'prompts', label: '提示词' },
+    { id: 'api', label: '生成通道' },
 ] as const;
 const activeSection = ref<(typeof sections)[number]['id']>('editor');
 
@@ -352,17 +309,29 @@ function onEntryCheck(book: string, uid: number, event: Event): void {
     store.setCheck(book, uid, (event.target as HTMLInputElement).checked);
 }
 
-function onApiSourceChange(event: Event): void {
-    store.config.apiSource = (event.target as HTMLSelectElement).value as 'main' | 'independent';
+/** 生成通道：端点选择写穿（setEndpointId 内部即时落域）。 */
+function onEndpointChange(event: Event): void {
+    store.setEndpointId((event.target as HTMLSelectElement).value);
+}
+
+function onTimeoutChange(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) store.config.timeoutSec = Math.max(30, Math.min(1800, Math.round(value)));
+    store.saveConfig();
+}
+
+function onStreamToggle(event: Event): void {
+    store.config.stream = (event.target as HTMLInputElement).checked;
+    store.saveConfig();
 }
 
 function onEffortChange(event: Event): void {
     store.config.thinkingEffort = (event.target as HTMLSelectElement).value as 'off' | 'low' | 'medium' | 'high';
+    store.saveConfig();
 }
 
-function confirmDeleteProfile(profile: { id: string; name: string }): void {
-    if (!confirm(`删除配置档「${profile.name}」？`)) return;
-    store.deleteProfile(profile.id);
+function goApi(): void {
+    shell.activate('api');
 }
 
 /** onActivate 快照纪律：宿主派生数据每次激活刷新（只读宿主，不写域）。 */
@@ -519,9 +488,7 @@ onActivated(() => { store.refreshHostData(); });
 }
 
 .tt-persona-load-row button,
-.tt-persona-book-pin,
-.tt-persona-profile-select,
-.tt-persona-profile-del {
+.tt-persona-book-pin {
     background: transparent;
     color: var(--SmartThemeBodyColor, inherit);
     border: 1px solid var(--SmartThemeBorderColor, #666);
@@ -597,8 +564,18 @@ onActivated(() => { store.refreshHostData(); });
 
 .tt-persona-empty {
     font-size: 0.8em;
-    opacity: 0.6;
+    opacity: 0.7;
     padding: 6px 0;
+}
+
+.tt-persona-link {
+    background: transparent;
+    color: var(--SmartThemeQuoteColor, #c58a36);
+    border: none;
+    padding: 0;
+    font-size: 1em;
+    cursor: pointer;
+    text-decoration: underline;
 }
 
 .tt-persona-field {
@@ -627,55 +604,19 @@ onActivated(() => { store.refreshHostData(); });
     font-size: 0.95em;
 }
 
+.tt-persona-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
 .tt-persona-note,
 .tt-persona-conn {
     font-size: 0.75em;
     opacity: 0.6;
     padding: 2px 0 4px;
-}
-
-.tt-persona-profile-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.tt-persona-profile-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor, #666) 40%, transparent);
-}
-
-.tt-persona-profile-row--active {
-    font-weight: bold;
-}
-
-.tt-persona-profile-meta {
-    flex: 1;
-    min-width: 0;
-    font-size: 0.75em;
-    opacity: 0.6;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.tt-persona-profile-del:hover {
-    color: var(--SmartThemeQuoteColor, #c58a36);
-}
-
-.tt-persona-pre {
-    white-space: pre-wrap;
-    word-break: break-all;
-    font-size: 0.75em;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.08));
-    border: 1px dashed var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 6px 8px;
-    max-height: 24em;
-    overflow-y: auto;
-    margin: 0 0 6px;
 }
 </style>

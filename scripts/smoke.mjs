@@ -15,7 +15,7 @@
 
 import { register } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const DIST_ENTRY = new URL('../dist/index.js', import.meta.url);
 
@@ -306,8 +306,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // safeWeight fork 语义、非数字 messageId 跳过）＝77；批C.2 只读化 +11
 //（asset 静态形状 7＋同步行为 4）＝88；反馈轮 +1（asset v2 条目规则全移除）
 // ＝89；m03359 整合轮 +1（few-shot 7 条计数）＝90（注入区 9 条不变：删
-// pool_rules 分层/空规则两断言，加池规则并入/模块移除两断言）。
-const CHOICE_PASS_EXPECTED = 90;
+// pool_rules 分层/空规则两断言，加池规则并入/模块移除两断言）；整合轮II
+// +1（PoolBackup v2 备份升格断言：v1 apis→统一端点表＋choiceTask 派生）
+// ＝91。
+const CHOICE_PASS_EXPECTED = 91;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -349,34 +351,54 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
     failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
-// 提示词配置初始化：默认模板落进全局域 storage（m03359 整合轮起 18 模块——
-// inject_pool_rules 已删，反 OOC 要点并入 core_rules）
+// 提示词配置初始化：默认模板落进全局域 storage（m03359 整合轮起 choice
+// 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。整合轮II
+// 起存储升级为 Record<taskKey, PromptConfig> 四任务键：choice 18 模块红线
+// 不变，persona 三任务键在场（各 4 模块：preset/wi/任务指令）
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
-if (!Array.isArray(promptDomain) || promptDomain.length !== 1 || !Array.isArray(promptDomain[0].modules) || promptDomain[0].modules.length !== 18) {
-    failures.push('默认提示词配置未正确初始化（期望 1 套 18 模块）');
+const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
+const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
+const personaKeyOk = ['persona_curator', 'persona_gen', 'persona_refine'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
+if (promptTaskKeys.length !== 4 || promptChoiceModules !== 18 || !personaKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 四任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
 // 批D 机判：persona 迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 批D 41 条：迁移幂等 9（空启动写默认域/5 键搬入/localConfig 全家/
-// apiProfiles 收档/形状+淘汰字段/退休键清理/legacy 快照保留/二次启动
-// 零重写/域在场退休键仍清）＋prompts 4＋yaml·stripYamlFence·diff 8＋
-// api 8（端点规范化/请求体形状×2/测连 fetch 桩/SSE 双形态/\\r\\n 帧/
-// 错误帧/空流）＋worldbook·store·storage 12（触发词/无书 fail fast/
-// 上下文空桶/互斥×2/generateRaw 缺席/charKey 兜底/超时钳制/划词模板/
-// 保存点写域/normalize 丢未知/写域清理）。
-const PERSONA_PASS_EXPECTED = 41;
+// 批D 41 条 → 整合轮II 重写为 60 条（统一 API 层＋提示词引擎多任务化）：
+// 迁移 12（批D 9 条保留骨架：空启动/5 键搬入/形状/退休键/legacy 快照/
+// 二次零重写/域在场仍清，过渡透传改实际 v2 透传形状＋新增收编 4 条：
+// 统一表形状/去重＋id 重映射/choice 域 v2 重写/persona localConfig v2）＋
+// prompts 7（四任务键齐备/choice 18 模块红线/persona 三任务默认形状/
+// refine-gen 同文/旧数组一次写迁移/任务隔离开关/按任务恢复默认）＋
+// persona 组装 5＋persona dump 观测口 2＋纯函数 8（批D 原样保留）＋
+// api 11（buildGenerateBody 三档/显式参数/effort/SSE——改走统一客户端
+// 公共面）＋e2e 4（store.generate 两段链走统一端点：请求形状/curator 段
+// 标记/personaGen 段标记/结果落框）＋worldbook·store 12（批D 骨架保留；
+// 主 API 缺席检查改端点缺失 fail fast，互斥改 lastRun 不变口径）。
+const PERSONA_PASS_EXPECTED = 60;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
     failures.push(`persona 机判异常：期望恰好 ${PERSONA_PASS_EXPECTED} 条 PASS，实际 ${personaPassLines.length} 条 / FAIL ${personaFailLines.length} 条${personaFailLines.length ? `（首条：${personaFailLines[0]}）` : ''}`);
 }
 
+// ---------------------------------------------------------------------------
+// 整合轮II 退休符号清零：generateRaw（宿主主 API 通道）整体删除——dist
+// 产物出现任何一处都说明退休不彻底。apiSource/apiProfiles 不做字符串计
+// 数：迁移收编必须按旧键名读旧档（「旧字段只读不写」纪律的读侧合法残
+// 留），其退休由结构性断言保证（persona/choice smoke 断言迁移后域内无
+// 这些键＋normalize 丢弃未知字段——重新引入为真实字段必翻红）
+// ---------------------------------------------------------------------------
+const distSource = readFileSync(DIST_ENTRY, 'utf8');
+const generateRawCount = (distSource.match(/generateRaw/g) ?? []).length;
+if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateRaw（计数 ${generateRawCount}，期望 0）`);
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链），__TTK_PROMPTS__ 全局口在场；persona 机判 ${personaPassLines.length} 条全 PASS（批D 迁移幂等/prompts 常量/yaml·diff 纯函数/api 请求体形状与 SSE/世界书触发词/store 互斥与显式保存点）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（整合轮II：迁移收编幂等/prompts 四任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

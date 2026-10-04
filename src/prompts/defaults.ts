@@ -1,7 +1,9 @@
 /**
- * 选项生成默认模板（唯一模板——m03359 拍板砍配置集，单套即真相源；
- * 方案 §0 病因判定：fork 出厂模板是上游猫娘 RP 特化演化，文本不搬不抄，
- * 按 §2.3 制版原则为「通用 RP + flash 级模型」重写）。
+ * 任务默认模板（整合轮II 起四任务：choice 选项生成＋persona 三段——
+ * 策展/填充/润色）。choice 部分＝m03359 拍板砍配置集后的唯一模板
+ * （方案 §0 病因判定：fork 出厂模板是上游猫娘 RP 特化演化，文本不搬
+ * 不抄，按 §2.3 制版原则为「通用 RP + flash 级模型」重写）；persona
+ * 部分＝PersonaWeaver fork 默认提示词原样平移（见文末分节注释）。
  *
  * 制版原则落点：
  *   - 结构化分段标签：注入模块由引擎包裹 <persona>/<character>/…
@@ -15,7 +17,7 @@
  *     要点去重后写进 core_rules 第 2 条——同一约束每请求只出现一份；
  *   - 占位符：{{count}}/{{min_chars}}/{{max_chars}}/{{user}}/{{char}}。
  */
-import type { PromptConfig } from './types';
+import type { PromptConfig, TaskKey } from './types';
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -225,4 +227,182 @@ export function createDefaultPromptConfig(): PromptConfig {
             },
         ],
     };
+}
+
+// ---------------------------------------------------------------------------
+// persona 任务默认模板（整合轮II：人设三段管线进统一提示词引擎）。
+//
+// 正文＝PersonaWeaver fork 默认提示词原样平移（零改动，含占位符键名——
+// {{charInfo}}/{{greetings}}/{{template}}/{{input}}/{{userRequirements}} 是
+// engine fillPersonaPlaceholders 的组装契约，禁止改名）。fork 原三段
+// 消息序列（system 预设 / system 世界书参考 / user 指令）映成模块管线：
+// 两个 inject 模块（persona_preset/persona_wi，role system）＋一个文本
+// 模块（指令正文，role user）；assistant prefill 仍由 generation.ts 在
+// 组装完成后追加（去 prefill 重试需要独立消息数组，不进模板）。
+// ---------------------------------------------------------------------------
+
+/** 策展指令（persona_curator 任务）：只产出 schema 键名，不填值。 */
+const PERSONA_CURATOR_PROMPT = `[任务：策展人设 schema]
+[背景：你要为读者本人的角色（User 自设）设计一份 YAML 人设 schema（只定键名，值为空）。这份人设将与本对话提供的《世界设定》一同被阅读——读者始终同时看到这两份文档。]
+
+<source_materials>
+{{charInfo}}
+</source_materials>
+
+{{userRequirements}}
+
+[原则——按顺序适用]：
+1. 补充而非重复：《世界设定》读者已经知道。禁止添加任何其内容只会复述世界设定已有信息的字段（世界规则、传说、地理、阵营、其他角色的背景）。仅当字段捕捉到该角色特有、且世界设定未提供的信息时才允许。
+2. 只写静态本质：人设是长期稳定的「他是谁」档案——身份、性格、如何呈现。禁止添加承载剧情进展或当前状态的字段（如「现状」「与X的关系」「当前处境」）：这些随剧情流动，由世界书与对话本身承担，写进人设只会过时失真。
+3. 世界风味键名：当世界定义了与该角色相关的机制（如境界、第二性别、义体改造），用该世界的词汇添加键名——每个对扮演重要的机制一个键，不多加。
+4. 规模随素材：世界设定差异很大。有的为该角色在世界中的位置提供了丰富、具体的钩子；有的只有宽泛传说、与个人关联很少。schema 的广度要匹配设定实际给予的：钩子丰富 → schema 更充实；宽泛或单薄 → 保持精简、聚焦身份。绝不用设定无法支撑的字段凑数。
+5. 默认精简：从下方基础块出发，只添加这个世界和用户需求能支撑的块。少而锐利的字段胜过面面俱到的表格。顶层块不得超过 10 个。
+6. 主角聚焦：这是读者自己的角色——身份、性格、外貌最重要；社交类块保持轻量。
+7. 可演性优先：性格类块优先设「写出来就能演」的字段（情绪反应、小动作习惯、口头禅、在乎与害怕一类），少设只能装标签的抽象特质栏。
+
+<base_blocks>
+基本信息 / 外貌 / 性格 / 背景 / 喜恶 / NSFW
+</base_blocks>
+
+[约束]：只输出 YAML 键名，值为空，键名用简体中文。无任何解释。输出单个 \`\`\`yaml 代码块。
+
+[行动]：
+现在输出策展好的 YAML schema。`;
+
+/** 人设填充/润色指令（persona_gen 与 persona_refine 共用正文）。 */
+const PERSONA_GEN_PROMPT = `[任务：生成/润色用户人设]
+[目标对象："{{user}}"]
+[背景：本档案是 {{user}} 的长期人设，供 AI 在整个扮演过程中稳定呈现这个角色——它定义的是不随剧情改变的「他是谁」与「如何扮演」。当前处境、人际关系与剧情进展由对话本身自然演化，档案不追踪这些动态。]
+
+<source_materials>
+{{charInfo}}
+{{greetings}}
+</source_materials>
+
+<target_schema>
+{{template}}
+</target_schema>
+
+{{input}}
+
+<value_style_examples>
+[文风示例——只示范「值写成什么样算活」，禁止照搬示例内容；你的值必须出自本对话的素材。]
+
+核心特质
+  僵硬（禁）：外冷内热，理性克制，内心细腻
+  活人感（对）：帮了人死不承认，被当面道谢会恼羞成怒地转移话题
+情绪反应
+  僵硬（禁）：遇事冷静，不易动怒
+  活人感（对）：被当众拆穿先僵两秒，随后用一句更冷的玩笑找回场子
+小动作习惯
+  僵硬（禁）：紧张时会有一些小动作
+  活人感（对）：说谎前必清嗓子；无聊到极点就用指甲刮杯沿
+口头禅
+  僵硬（禁）：唉，无所谓啦
+  活人感（对）：「行吧。」——只在明显不情愿时说，尾音拖得很长
+</value_style_examples>
+
+[要求]：
+1. 严格遵循 YAML schema，输出 schema 定义的每一个叶子字段。
+2. 补充而非复述——《世界设定》与人设同时展示。绝不把世界设定内容复制或改写进字段值。当字段涉及既有世界事实时，用该角色对此的具体情况作答（如：此人特有的灵根，而非这个世界里灵根是什么）。
+3. 值要精炼——普通叶子值是一句短语或短句（≤20 个汉字），除非该块明确是叙事性的（如背景故事）。性格块九叶均为可扮演叶（核心特质/矛盾点/表里反差/情绪反应/小动作习惯/说话风格/口头禅/在乎与害怕/底线与禁忌），须写清触发情境与具体表现，长度上限放宽到 40 个汉字。不灌水、不凑字、不复述字段名。
+4. 活人感铁律——性格与习惯类值必须通过「能演出来吗」检验：一条值里要有一个镜头拍得到的动作、或一句能直接搬进对话的台词——且必须带该角色特有的触发情境或说法，谁都能说的泛用台词不算数。写「触发情境＋具体反应」，不写评语。禁用以下偷懒形态：
+   - 无情境裸特质词（「温柔善良」「重情重义」）；
+   - 四字标签连串（「冷静自持、从容不迫」）；
+   - 「看似A实则B」「表面A内心B」句式——反差必须落成同一情境下可观察的行为差异（表里反差字段同理）；
+   - 用「有时」「可能」「某种程度上」类含糊词替代具体事实。
+5. 强制完整——绝不留空。每个叶子字段都必须填入具体、非空的值。不得输出空串、null、"-"，也不得输出「未知」「unknown」「N/A」「待定」「TBD」「暂无」之类的偷懒占位。若素材或用户请求无法直接确定某字段，生成与人设、上下文、世界观最相符的合理值——但不得与既有证据矛盾。
+6. 生命周期/时间线例外——仅当字段内容对应角色尚未到达或经历的人生阶段、年龄段或既定事件时（如 24 岁角色的「中年_35至今」「老年」阶段；未出生的后代；既定剧情中尚未发生的情节），叶子字段才可包含有叙事意义的占位。此时必须写出明确说明原因的上下文占位，如「尚未发生（角色现年X岁，未达此阶段）」「未到该阶段」「剧情尚未触及」。此规则通用适用于任何模板的时间锁/未来锁字段，包括自定义模板。原因必须具体——不带解释的裸「未知」「N/A」「TBD」仍然禁止。
+7. 润色/修补模式——若输入中提供了既有目标暂存（Target Buffer），将其视为基线。完整保留未被用户修补指令明确触及的字段，不得清空、留白、缩短或用占位符替换未触及字段。只修改修补指令指向的字段（及其直接牵连的字段）。此前空白的字段现在必须填上（遵循规则 5、6）。文风铁律（规则 4）只约束本次新写或改写的值——未触及字段哪怕文风偏旧也原样保留，不构成重写理由。
+
+[约束]：不得包含任何「小剧场」、成段场景描写、内心独白或 CoT 状态栏——值内「规则 3 上限内的典型情境＋反应」不算场景描写。严格只输出 YAML 数据。schema 中每个叶子键都必须有非空值（按规则 6 带完整解释的时间线占位视为非空）。完成前默默自查，把仍然空着的字段补齐。值保持规则 3 的精炼；任何值不得复述世界设定内容。
+
+[行动]：
+只输出符合 schema 的 YAML 数据，每个字段都已填好。`;
+
+/** persona 三段共用前缀模块：预设 system 段＋世界书参考（均 role system）。 */
+function personaPreambleModules() {
+    return [
+        {
+            kind: 'inject' as const,
+            id: 'inject_persona_preset',
+            name: '预设',
+            role: 'system' as const,
+            order: 10,
+            enabled: true,
+            source: 'persona_preset' as const,
+        },
+        {
+            kind: 'inject' as const,
+            id: 'inject_persona_wi',
+            name: '世界书参考',
+            role: 'system' as const,
+            order: 20,
+            enabled: true,
+            source: 'persona_wi' as const,
+        },
+    ];
+}
+
+/**
+ * 按任务键取默认配置（恢复默认/读侧补缺共用）。choice 分支＝
+ * createDefaultPromptConfig() 原样（输出逐字节不变——choice smoke
+ * 回归红线）；persona 三任务＝前缀注入模块＋fork 指令正文。
+ */
+export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
+    switch (task) {
+        case 'choice':
+            return createDefaultPromptConfig();
+        case 'persona_curator':
+            return {
+                id: 'default',
+                name: '默认',
+                modules: [
+                    ...personaPreambleModules(),
+                    {
+                        kind: 'text',
+                        id: 'curator_prompt',
+                        name: '策展指令',
+                        role: 'user',
+                        order: 30,
+                        enabled: true,
+                        content: PERSONA_CURATOR_PROMPT,
+                    },
+                ],
+            };
+        case 'persona_gen':
+            return {
+                id: 'default',
+                name: '默认',
+                modules: [
+                    ...personaPreambleModules(),
+                    {
+                        kind: 'text',
+                        id: 'persona_gen_prompt',
+                        name: '生成指令',
+                        role: 'user',
+                        order: 30,
+                        enabled: true,
+                        content: PERSONA_GEN_PROMPT,
+                    },
+                ],
+            };
+        case 'persona_refine':
+            return {
+                id: 'default',
+                name: '默认',
+                modules: [
+                    ...personaPreambleModules(),
+                    {
+                        kind: 'text',
+                        id: 'persona_refine_prompt',
+                        name: '润色指令',
+                        role: 'user',
+                        order: 30,
+                        enabled: true,
+                        content: PERSONA_GEN_PROMPT,
+                    },
+                ],
+            };
+    }
 }
