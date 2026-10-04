@@ -10,6 +10,7 @@ import { pinia } from '@/pinia';
 import { eventBus, event_types } from '@/host';
 import { ensurePromptConfigs } from '@/prompts';
 import { version } from '@/version';
+import { installAutoGenerate } from './auto';
 import { assembleCurrent } from './generator';
 import { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
 import OptionsBar from './OptionsBar.vue';
@@ -80,6 +81,7 @@ function installGlobalPort(): void {
 export function initChoice(): void {
     ensurePromptConfigs();
     installGlobalPort();
+    installAutoGenerate();
     mountBarWithRetry();
     console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TTK_PROMPTS__）`);
 }
@@ -88,6 +90,7 @@ export function initChoice(): void {
 export function initChoiceMinimal(): void {
     ensurePromptConfigs();
     installGlobalPort();
+    installAutoGenerate();
 }
 
 export { runChoiceSmoke } from './smoke';

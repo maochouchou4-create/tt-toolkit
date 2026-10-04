@@ -73,6 +73,8 @@ declare module '@sillytavern/scripts/events' {
         APP_INITIALIZED: string;
         CHAT_CHANGED: string;
         MESSAGE_UPDATED: string;
+        /** 批C：emit 形态 (messageId: number, type: string)，核实记录见 host/events.ts 头注释 */
+        MESSAGE_RECEIVED: string;
         CHARACTER_MESSAGE_RENDERED: string;
         SETTINGS_LOADED: string;
         [key: string]: string;

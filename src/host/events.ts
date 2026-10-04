@@ -11,6 +11,17 @@
  *   on/once/makeLast/makeFirst/removeListener/emit/emitAndWait——
  *   没有 off，摘除监听的方法名是 removeListener（eventemitter.js:114）。
  * - 事件名从这里转发导出而不在业务侧写字面量，防止枚举值漂移。
+ * - 批C 补核：`scripts/events.js:9` `MESSAGE_RECEIVED: 'message_received'`。
+ *   emit 形态两参 `(messageId: number, type: string)`：主生成路径
+ *   `script.js:4742/4774` `await eventSource.emit(event_types.MESSAGE_RECEIVED,
+ *   this.messageId, this.type)`；分组消息走 (chat_id, type)
+ *   （script.js:8249/8279/8306/8361）；另有 'first_message'（script.js:9342/
+ *   11824）、'command'（slash-commands.js:6117/6125）、'extension' 等类型值。
+ *   type='quiet' 真实存在（script.js:3914 Generate('quiet') 及 5407/5497/
+ *   5505/5544 分支），且会经 4742 正常 emit——静默生成不触发自动出选项。
+ *   emit 后宿主紧接 finalizeMessageContent→CHARACTER_MESSAGE_RENDERED：
+ *   emit 串行 await 每个监听器，监听器里 await 重活会推迟正文渲染
+ *   （自动生成监听必须 fire-and-forget，见 modules/choice/auto.ts）。
  */
 
 import { eventSource as stEventSource, event_types as stEventTypes } from '@sillytavern/scripts/events';
@@ -20,6 +31,7 @@ export const event_types = {
     APP_READY: stEventTypes.APP_READY,
     CHAT_CHANGED: stEventTypes.CHAT_CHANGED,
     MESSAGE_UPDATED: stEventTypes.MESSAGE_UPDATED,
+    MESSAGE_RECEIVED: stEventTypes.MESSAGE_RECEIVED,
     CHARACTER_MESSAGE_RENDERED: stEventTypes.CHARACTER_MESSAGE_RENDERED,
     SETTINGS_LOADED: stEventTypes.SETTINGS_LOADED,
 } as const;

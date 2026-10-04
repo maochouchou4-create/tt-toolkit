@@ -11,10 +11,12 @@ import {
     collectAssemblySources,
     renderDump,
     usePromptsStore,
+    type PoolInjectionSupply,
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
 import { choiceStorage, resolveActiveApi } from './api';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
+import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
 
 /**
@@ -62,18 +64,23 @@ export function isGenerating(): boolean {
 /**
  * 组装当前上下文的消息数组（dump 口与生成管线共用一条路径——dump 显示
  * 的就是实际发送的内容，不存在「展示与发送两套组装」）。
+ *
+ * 批C：池供给在这里现场抽取（每次组装重抽、pinned 恒在）——抽一次快照
+ * 传给 sources/engine，prompts 层不回读 choice 域（单向供给）。
  */
 export async function assembleCurrent(): Promise<{ dumpText: string; messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; trace: ModuleTrace[] }> {
     const promptsStore = usePromptsStore();
     const config = promptsStore.effectiveConfig;
     if (!config) throw new Error('提示词配置缺席（storage 未初始化？）');
     const gen = choiceStorage.readDomain().gen;
+    const poolInjection: PoolInjectionSupply = drawPoolInjection();
     const sources = await collectAssemblySources({
         storyDirection: promptsStore.storyDirection,
         contextRounds: gen.contextRounds,
         count: gen.count,
         minChars: gen.minChars,
         maxChars: gen.maxChars,
+        poolInjection,
     });
     const result = assembleMessages(config.modules, sources);
     return { dumpText: renderDump(result), messages: result.messages, trace: result.trace };
