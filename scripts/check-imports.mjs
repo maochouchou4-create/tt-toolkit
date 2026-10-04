@@ -14,6 +14,14 @@
  *      级数；
  *   4. 逐条对照（双向差集 + 逐条级数断言，不按总数——总数断言锁不住
  *      单条错配）。任一失败 → exit 1。
+ *   5. 宿主 CSS 类黑名单（B.1 验收教训机判）：src/host 之外的 UI 面
+ *      （.vue/.ts）禁用宿主布局/图标类——.panelControlBar 在宿主是
+ *      position:absolute 的右上图标簇（style.css:879-888），塞进壳头行
+ *      会把标题钉到右上角压正文（用户实测「乱飞」根因）；fa-* 字形在
+ *      扩展上下文实测不渲染（空 div 零宽）。布局与图标必须自持；
+ *      允许的白名单＝根皮肤（drawer-content/flexGap5/scrollY）与
+ *      宿主契约类（drag-grabber）。src/host/ 不扫（宿主上下文里造宿主
+ *      DOM 是合法的）。注释先剥离再匹配（源码注释常引用这些类名）。
  *
  * 注：块注释内不得出现「斜杠+星」闭合序列，涉及 @sillytavern 与
  * glob 的措辞一律加空格隔开。
@@ -163,6 +171,47 @@ for (const spec of expected) {
 for (const spec of actual) {
     if (!expected.has(spec)) {
         problems.push(`多余说明符：dist/index.js 的 ${spec} 没有对应 src/host 导入`);
+    }
+}
+
+// ---- 5. 宿主 CSS 类黑名单（UI 面布局自持约束） ---------------------------
+
+// 黑名单＝宿主布局语义类＋图标字体类（见文件头职责 5 的理由）。
+// 允许项：根皮肤类（drawer-content/flexGap5/scrollY）与宿主契约类
+// （drag-grabber）不在黑名单内，自然放行。
+const HOST_CLASS_BLACKLIST = new Set([
+    'panelControlBar',
+    'flex-container',
+    'alignItemsBaseline',
+    'inline-drawer',
+    'fa-solid',
+    'fa-fw',
+    'fa-circle-xmark',
+]);
+
+function collectClassTokens(text) {
+    const tokens = [];
+    for (const match of text.matchAll(/class="([^"]*)"/g)) {
+        tokens.push(...match[1].trim().split(/\s+/).filter(Boolean));
+    }
+    for (const match of text.matchAll(/className\s*=\s*['"]([^'"]*)['"]/g)) {
+        tokens.push(...match[1].trim().split(/\s+/).filter(Boolean));
+    }
+    return tokens;
+}
+
+{
+    const files = walkFiles(SRC_DIR, ['.ts', '.tsx', '.js', '.mjs', '.vue'])
+        .filter(f => !relative(ROOT, f).replaceAll('\\', '/').startsWith('src/host/'));
+    for (const file of files) {
+        const text = stripComments(readFileSync(file, 'utf8'));
+        for (const token of collectClassTokens(text)) {
+            if (HOST_CLASS_BLACKLIST.has(token)) {
+                problems.push(
+                    `宿主类黑名单：${relative(ROOT, file).replaceAll('\\', '/')} 使用了宿主布局/图标类「${token}」（UI 面布局与图标必须自持，见 check-imports 文件头职责 5）`,
+                );
+            }
+        }
     }
 }
 

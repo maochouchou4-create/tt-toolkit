@@ -151,18 +151,19 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     }
     if (config.reasoningEffort && config.reasoningEffort !== 'off') {
         // 思考强度（G3）：值域对齐 OpenAI reasoning_effort（low/medium/high）。
-        // 宿主侧两级语义（复核 D:\code\repos\TauriTavern\src-tauri\rewrite 施工时
-        // HEAD）：
+        // 宿主侧两级语义（复核 D:\code\repos\TauriTavern\src-tauri 施工 HEAD）：
         // ①入站捕获：chat_completion_dto.rs ChatCompletionGenerateRequestDto
         //   payload 用 `#[serde(flatten)] Map<String,Value>`（:41-45），未知
         //   字段（含 reasoning_effort）整包进 Rust payload map；
-        // ②出站白名单：openai.rs build_chat_completion_payload 按白名单逐键
-        //   组装上游请求（:153-173），reasoning_effort 仅在
-        //   should_forward_openai_reasoning_effort（openai_reasoning.rs:41-46）
-        //   命中 OpenAI 推理系模型名（o1/o3/gpt-5.x…）时转发（openai.rs:
-        //   188-199），其余模型名在宿主翻译层被静默丢弃。
-        // 故该字段仅对推理系模型名真实生效——与端点配置 UI 的「仅部分端点
-        // 支持，发错档会被端点忽略或报错，默认不发」说明口径一致。
+        // ②出站双通路（openai.rs build_chat_completion_payload）：
+        //   - source=="custom" 时 reasoning_effort 原样透传（openai.rs:
+        //     182-186）——本扩展的直连端点即 custom 源，字段对用户端点
+        //     真实生效；
+        //   - source=="openai" 且模型名命中推理系白名单（o1/o3/gpt-5.x，
+        //     openai.rs:188-199 → openai_reasoning.rs:41-46）时经
+        //     normalize 后转发，其余 openai 原生源静默丢弃。
+        // 与端点配置 UI 的「仅部分端点支持，发错档会被端点忽略或报错，
+        // 默认不发」说明口径一致（custom 源下由上游端点自行裁决）。
         body.reasoning_effort = config.reasoningEffort;
     }
     // prompt_only：不发 response_format——纯提示词契约＋客户端解析兜底

@@ -30,6 +30,17 @@
     user-select: none;
 }
 
+/* 头行：布局全自持（教训：复用宿主 .panelControlBar 会被其
+   body .panelControlBar 绝对定位（style.css:879-888）钉到浮层右上角
+   并压住正文——用户实测「标题行消失＋显示乱飞」）。宿主类此后仅允许
+   出现在根元素皮肤层（drawer-content/flexGap5）。 */
+.tt-shell-controlbar {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    padding: 4px 4px 0 0;
+}
+
 /* 拖把手：Unicode 字符自持渲染（不依赖宿主 FontAwesome——fa 字形实测
    未套上，空 div 零宽不可见不可抓）；min 尺寸保证字符缺码位时仍有
    可抓区域。dragElement 契约只认 .drag-grabber 类与本元素 id。 */
@@ -59,6 +70,11 @@
     margin-left: 8px;
     cursor: pointer;
     opacity: 0.6;
+    line-height: 1;
+    min-width: 1.2em;
+    min-height: 1em;
+    text-align: center;
+    user-select: none;
 }
 
 .tt-shell-close:hover {

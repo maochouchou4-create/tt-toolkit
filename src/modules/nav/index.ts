@@ -15,9 +15,10 @@
  *     localStorage 键，旧键保留只读、清理归批E）；
  *   - 日志转发走 host/ttlog（createTtlog 工厂），target 仍为 "msgnav"，
  *     落盘 tauritavern.log.*；
- *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（四导航键
+ *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（三导航键
  *     ＋末位「工具箱」键，消息体为 /ttnav-* 与 /tt-toolbox 斜令），
- *     命令亦可直接在输入框敲。
+ *     命令亦可直接在输入框敲。/ttnav-auto 只注册斜令不进 QR 面
+ *     （B.1 用户拍板：设置页已有开关、QR 键平时不点，不要重复入口）。
  * - 初始化为显式导出（initNav / initNavMinimal），由 main.ts 统一做
  *   环境分支后调用——模块求值期不自启动：storage 必须先初始化（旧
  *   localStorage 键迁移），否则 store 首读会拿到迁移前的旧值。

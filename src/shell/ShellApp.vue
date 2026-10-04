@@ -1,17 +1,22 @@
 <template>
   <!--
-    壳浮层：复用宿主 drawer-content 体系（#floatingPrompt 先例）——配色/
-    毛玻璃/边框来自宿主 .drawer-content（SmartTheme 变量），openDrawer
-    为显示态。拖把手 id 必须是 <根id>header 且带 .drag-grabber 类（宿主
-    dragElement 契约）；图标用 Unicode ⠿ 文本渲染——宿主 FontAwesome
-    字形在本扩展实测未渲染（空 div 零宽＝不可见不可抓），不依赖字体才稳。
+    壳浮层：根元素复用宿主 .drawer-content 皮肤（#floatingPrompt 先例，
+    实证宿主渲染正常），openDrawer 为显示态。头行布局完全自持
+    （.tt-shell-controlbar）：不得复用宿主 .panelControlBar ——宿主
+    body .panelControlBar（style.css:879-888）是 position:absolute 的
+    右上角图标簇（原生浮层里只放把手/关闭等图标，index.html:8039-8045），
+    塞标题进去会被钉在浮层右上角压住正文（用户验收实测「标题行消失＋
+    显示乱飞」根因）。拖把手 id 必须是 <根id>header 且带 .drag-grabber
+    类（宿主 dragElement 契约）；图标用 Unicode 文本渲染——宿主
+    FontAwesome 字形在本扩展实测未渲染（空 div 零宽＝不可见不可抓），
+    不依赖字体才稳。
   -->
   <div id="ttToolkitShell" class="drawer-content flexGap5 tt-shell" :class="{ openDrawer: store.open }">
-    <div class="panelControlBar flex-container alignItemsBaseline">
+    <div class="tt-shell-controlbar">
       <div id="ttToolkitShellheader" class="drag-grabber tt-shell-grabber" title="拖动">⠿</div>
       <b class="tt-shell-title">TT 工具箱</b>
       <span class="tt-shell-version">v{{ version }}</span>
-      <div class="tt-shell-close fa-fw fa-solid fa-circle-xmark floating_panel_close" title="收起" @click="store.toggle(false)" />
+      <div class="tt-shell-close" title="收起" @click="store.toggle(false)">✕</div>
     </div>
     <div class="tt-shell-body">
       <div v-if="store.tabs.length === 0" class="tt-shell-empty">没有可用的功能页（模块未注册任何 tab）</div>
