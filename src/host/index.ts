@@ -12,7 +12,6 @@ export type { EventTypeName } from './events';
 export {
     characters,
     chat_metadata,
-    discardPendingMetadataSave,
     extension_settings,
     this_chid,
     writeChatMetadata,
