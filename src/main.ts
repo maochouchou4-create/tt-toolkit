@@ -14,8 +14,9 @@
 import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
-import { createDebugTab, createNavSettingsTab } from '@/shell/tabs';
+import { createChoiceSettingsTab, createDebugTab, createNavSettingsTab, createPromptEditorTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
+import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
 import { version } from '@/version';
 
@@ -39,6 +40,9 @@ async function runNodeSmoke(): Promise<void> {
     } else {
         console.warn('=== nav 模块未初始化（__TT_NAV__ 不在场）===');
     }
+    initChoiceMinimal();
+    // 批B 机判：组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
+    await runChoiceSmoke();
 }
 
 async function main(): Promise<void> {
@@ -48,8 +52,11 @@ async function main(): Promise<void> {
     }
     initStorage();
     mountShell();
-    registerTab(createDebugTab());
+    registerTab(createChoiceSettingsTab());
+    registerTab(createPromptEditorTab());
     registerTab(createNavSettingsTab());
+    registerTab(createDebugTab());
+    initChoice();
     initNav();
     console.info(`[tt-toolkit] v${version} ready (rewrite)`);
 }

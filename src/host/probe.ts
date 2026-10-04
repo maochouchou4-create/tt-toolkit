@@ -62,6 +62,10 @@ export function probeHost(): ProbeResult[] {
             const present = hasDocument() && document.querySelector('#chat') !== null;
             return { present, detail: present ? '在场' : '未挂载' };
         }),
+        probe('#send_form（选项条停靠容器）', () => {
+            const present = hasDocument() && document.querySelector('#send_form') !== null;
+            return { present, detail: present ? '在场' : '未挂载' };
+        }),
         probe('SmartTheme CSS 变量（--SmartThemeBodyColor）', () => {
             if (!hasDocument()) return { present: false, detail: '无 DOM 环境' };
             const value = getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim();

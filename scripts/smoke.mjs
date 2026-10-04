@@ -49,6 +49,25 @@ globalThis.__TT_SMOKE_STUBS__ = {
     this_chid: '0',
     // 全局 settings 防抖落盘（node 下 noop；roundtrip 只测内存写读链路）
     saveSettingsDebounced: noop,
+    // 发送通道（node 冒烟不真发）
+    sendTextareaMessage: async () => {},
+    // 宏替换（恒等——冒烟下 {{user}} 等走引擎兜底值）
+    substituteParams: text => text,
+    // 请求头（node 下无 CSRF）
+    getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+    // 宿主通用注入槽位表（空表——真实占用归浏览器验收）
+    extension_prompts: {},
+    // power_user（人设空——persona 注入模块按「未设置」路径走）
+    power_user: { persona_description: '' },
+    // 世界书激活（空桶——真实条目归浏览器验收）
+    getWorldInfoPrompt: async () => ({
+        worldInfoBefore: '',
+        worldInfoAfter: '',
+        worldInfoExamples: [],
+        worldInfoDepth: [],
+        anBefore: [],
+        anAfter: [],
+    }),
     // 事件总线（真实 API 面无 off，摘除监听为 removeListener）
     eventSource: { on: noop, once: noop, emit: noop },
     event_types: {
@@ -159,9 +178,49 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
     failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
 }
 
+// ---------------------------------------------------------------------------
+// 批B 机判：choice 组装/解析（[choice-smoke] 输出行收口）＋全局口在场
+// ---------------------------------------------------------------------------
+const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
+const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
+if (choicePassLines.length < 20 || choiceFailLines.length > 0) {
+    failures.push(`choice 机判异常：PASS ${choicePassLines.length} 条 / FAIL ${choiceFailLines.length} 条${choiceFailLines.length ? `（首条：${choiceFailLines[0]}）` : ''}`);
+}
+
+// 批B 判据的 dump 断言：组装 dump 全文出现在输出中，且关键注入段逐项可见
+const dumpStart = outputLines.findIndex(l => l.startsWith('=== 组装 dump 全文 ==='));
+if (dumpStart < 0) {
+    failures.push('未见「组装 dump 全文」输出');
+} else {
+    const dumpBody = outputLines.slice(dumpStart).join('\n');
+    for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<direction>', '<external_memory>']) {
+        if (!dumpBody.includes(marker)) {
+            failures.push(`组装 dump 缺少注入段标记 ${marker}`);
+        }
+    }
+}
+
+// 全局口 __TTK_PROMPTS__：dump/assemble/parseOptions 三件套在场
+const promptsPort = globalThis.__TTK_PROMPTS__;
+if (!promptsPort || typeof promptsPort.dump !== 'function' || typeof promptsPort.parseOptions !== 'function' || typeof promptsPort.assemble !== 'function') {
+    failures.push('__TTK_PROMPTS__ 全局口不在场或接口不全（dump/assemble/parseOptions）');
+}
+
+// 回退确定性触发：畸形样本解析走回退路径且产出 4 条（choice-smoke 内部
+// 已断言，这里锁输出行存在——机判判据独立可观测）
+if (!outputLines.some(l => l.includes('畸形样本走回退路径') && l.includes('PASS'))) {
+    failures.push('畸形样本回退路径断言未见 PASS 输出');
+}
+
+// 提示词配置初始化：默认模板集落进全局域 storage
+const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
+if (!Array.isArray(promptDomain) || promptDomain.length !== 1 || !Array.isArray(promptDomain[0].modules) || promptDomain[0].modules.length !== 17) {
+    failures.push('默认提示词配置未正确初始化（期望 1 套 17 模块）');
+}
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；批B choice 机判 ${choicePassLines.length} 条全 PASS（组装注入逐项可见＋解析回退确定性触发），__TTK_PROMPTS__ 全局口在场。`);

@@ -17,10 +17,21 @@
  */
 
 const STUB_EXPORTS = {
-    'script.js': ['chat_metadata', 'characters', 'saveSettingsDebounced', 'this_chid'],
+    'script.js': [
+        'chat_metadata',
+        'characters',
+        'saveSettingsDebounced',
+        'this_chid',
+        'sendTextareaMessage',
+        'substituteParams',
+        'getRequestHeaders',
+        'extension_prompts',
+    ],
     'scripts/extensions.js': ['extension_settings'],
     'scripts/events.js': ['eventSource', 'event_types'],
     'scripts/RossAscends-mods.js': ['dragElement'],
+    'scripts/power-user.js': ['power_user'],
+    'scripts/world-info.js': ['getWorldInfoPrompt'],
     'scripts/slash-commands/SlashCommandParser.js': ['SlashCommandParser'],
     'scripts/slash-commands/SlashCommand.js': ['SlashCommand'],
     'scripts/st-context.js': ['getContext'],

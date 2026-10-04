@@ -33,6 +33,27 @@ declare module '@sillytavern/script' {
      * @hostAnchor script.js:805 export function saveSettingsDebounced(loopCounter = 0) {
      */
     export function saveSettingsDebounced(loopCounter?: number): void;
+    /**
+     * 发送 #send_textarea 当前内容（宿主完整发送语义：slash 解析/
+     * continue-on-send；async 无参）。
+     * @hostAnchor script.js:2312 export async function sendTextareaMessage() {
+     */
+    export function sendTextareaMessage(): Promise<void>;
+    /**
+     * 宏替换（{{user}}/{{char}} 等；options 形态见宿主 source）。
+     * @hostAnchor script.js:3787 export function substituteParams(content, options = {}) {
+     */
+    export function substituteParams(content: string, options?: Record<string, unknown>): string;
+    /**
+     * 宿主请求头（CSRF token；生成端点调用必需）。
+     * @hostAnchor script.js:1041 export function getRequestHeaders({ omitContentType = false } = {}) {
+     */
+    export function getRequestHeaders(options?: { omitContentType?: boolean }): Record<string, string>;
+    /**
+     * 宿主通用注入槽位表（可变单例；本仓只读扫描，不写）。
+     * @hostAnchor script.js:1021 export let extension_prompts = {};
+     */
+    export let extension_prompts: Record<string, unknown>;
 }
 
 declare module '@sillytavern/scripts/extensions' {
@@ -142,4 +163,29 @@ declare module '@sillytavern/scripts/RossAscends-mods' {
      * @hostAnchor scripts/RossAscends-mods.js:498 export function dragElement($elmnt) {
      */
     export function dragElement($elmnt: unknown): void;
+}
+
+declare module '@sillytavern/scripts/power-user' {
+    /**
+     * 全局 power_user 单例（含 persona_description 人设字段 :322；
+     * 本仓只读该字段，不写）。
+     * @hostAnchor scripts/power-user.js:136 export const power_user = {
+     */
+    export const power_user: Record<string, unknown>;
+}
+
+declare module '@sillytavern/scripts/world-info' {
+    /**
+     * 世界书激活扫描（chat 需倒序数组——最新消息在前；返回
+     * worldInfoBefore/After/Examples/Depth/anBefore/anAfter 桶，
+     * world-info.js:1005-1018）。globalScanData 键集见
+     * world-info.js:279-287 defaultGlobalScanData。
+     * @hostAnchor scripts/world-info.js:988 export async function getWorldInfoPrompt(chat, maxContext, isDryRun, globalScanData) {
+     */
+    export function getWorldInfoPrompt(
+        chat: string[],
+        maxContext: number,
+        isDryRun: boolean,
+        globalScanData?: Record<string, unknown>,
+    ): Promise<unknown>;
 }

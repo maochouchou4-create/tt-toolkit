@@ -23,6 +23,28 @@ export { executeSlashCommand, getChatMessages, getTavernContext } from './contex
 export type { ChatMessage, TavernContextLike } from './context';
 export { appendWandMenuEntry, attachHostDrag, getSavedMovingUIState, hostWindow } from './dom';
 export type { MovingUIStateEntry, WandMenuEntry } from './dom';
+export {
+    callGenerateEndpoint,
+    normalizeApiUrl,
+    buildGenerateBody,
+    type GenerateMessage,
+    type GenerateRequestConfig,
+    type GenerateResult,
+    type OutputContract,
+} from './generate';
+export {
+    getChatHistory,
+    getPersonaDescription,
+    getSendTextareaValue,
+    listExtensionPromptSlots,
+    runWorldInfoScan,
+    sendInputMessage,
+    setSendTextareaValue,
+    substituteMacros,
+    type ExtensionPromptSlot,
+    type WorldInfoBuckets,
+    type WorldInfoScanInput,
+} from './chat';
 export { createTtlog } from './ttlog';
 export type { Ttlog, TtlogEntry } from './ttlog';
 export { formatProbeResults, probeHost } from './probe';

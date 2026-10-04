@@ -45,6 +45,27 @@
       </div>
       <pre v-if="navDump" class="tt-dump">{{ navDump }}</pre>
     </div>
+
+    <div class="tt-card">
+      <div class="tt-card-title">选项解析回退调试（批B 判据）</div>
+      <div class="tt-card-sub">
+        「强制畸形输出」开启后，点选项条「生成选项」会跳过 API、直接用固定畸形样本走解析路径——
+        回退解析结果应显示 4 条带标题选项，且选项条标注「回退解析」。
+      </div>
+      <div class="tt-switch-row">
+        <input
+          id="tt-debug-force-raw"
+          type="checkbox"
+          :checked="forceRaw"
+          @change="onToggleForceRaw"
+        >
+        <label for="tt-debug-force-raw">生成时强制喂畸形输出（走回退解析路径）</label>
+      </div>
+      <div class="tt-actions">
+        <button type="button" @click="runMalformedParse">直接解析固定畸形样本</button>
+      </div>
+      <pre v-if="malformedResult" class="tt-dump">{{ malformedResult }}</pre>
+    </div>
   </div>
 </template>
 
@@ -52,11 +73,15 @@
 import { ref } from 'vue';
 import { formatProbeResults, probeHost, type ProbeResult } from '@/host';
 import { dumpStorage, runStorageRoundtrip, type RoundtripReport } from '@/storage';
+import { DEBUG_MALFORMED_RAW, parseOptions } from '@/modules/choice/parse';
+import { choiceStorage } from '@/modules/choice/api';
 
 const roundtrip = ref<RoundtripReport[]>([]);
 const probeResults = ref<ProbeResult[]>([]);
 const dump = ref('');
 const navDump = ref('');
+const forceRaw = ref(choiceStorage.readDomain().gen.debugForceRaw);
+const malformedResult = ref('');
 
 function runRoundtrip(): void {
     roundtrip.value = runStorageRoundtrip();
@@ -72,5 +97,23 @@ function readNavDump(): string {
     const nav = (globalThis as { __TT_NAV__?: { dump?: () => string } }).__TT_NAV__;
     if (typeof nav?.dump !== 'function') return '（nav 模块尚未初始化，__TT_NAV__ 不在场）';
     return nav.dump();
+}
+
+function onToggleForceRaw(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    choiceStorage.updateGenParams({ debugForceRaw: checked });
+    forceRaw.value = checked;
+}
+
+function runMalformedParse(): void {
+    const report = parseOptions(DEBUG_MALFORMED_RAW, 4);
+    const lines = [
+        `解析路径：${report.path}（期望 bracket_fallback）`,
+        `解析条数：${report.options.length}（期望 4）`,
+        '',
+        ...report.options.map((o, i) => `[${i + 1}] ${o.title}｜${o.content}`),
+    ];
+    malformedResult.value = lines.join('\n');
+    console.info(`[tt-toolkit][debug] 畸形样本解析：${report.path} / ${report.options.length} 条`);
 }
 </script>

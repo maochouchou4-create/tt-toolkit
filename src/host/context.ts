@@ -37,6 +37,10 @@ export interface TavernContextLike {
         movingUI: boolean;
         movingUIState: Record<string, Record<string, unknown>>;
     };
+    /** 请求头装配（st-context.js:135 转发 script.js:1041 getRequestHeaders） */
+    getRequestHeaders?: () => Record<string, string>;
+    /** 宿主通用注入槽位表转发（st-context.js:158：extensionPrompts: extension_prompts） */
+    extensionPrompts?: Record<string, unknown>;
 }
 
 /** 宿主上下文（可能为 null：无聊天打开时部分字段缺席）。 */

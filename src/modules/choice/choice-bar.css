@@ -1,0 +1,115 @@
+/*
+ * 聊天选项条样式：卡片化克制风，颜色走宿主 SmartTheme 变量（与壳同
+ * 体系，明暗主题自动跟随）。停靠在输入框上方（#send_form 之前）。
+ */
+
+.tt-choice-bar {
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 8px;
+    background: var(--SmartThemeBlurTintColor, var(--SmartThemeChatTintColor, rgba(30, 30, 30, 0.9)));
+    padding: 6px 8px;
+    margin: 4px 0;
+}
+
+.tt-choice-bar-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.tt-choice-bar-title {
+    font-weight: bold;
+    font-size: 0.85em;
+    opacity: 0.85;
+    user-select: none;
+}
+
+.tt-choice-bar-parse {
+    font-size: 0.72em;
+    opacity: 0.55;
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 4px;
+    padding: 0 4px;
+    user-select: none;
+}
+
+.tt-choice-bar-gen {
+    margin-left: auto;
+    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.15));
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.tt-choice-bar-gen:hover {
+    filter: brightness(1.15);
+}
+
+.tt-choice-bar-gen--cancel {
+    opacity: 0.85;
+}
+
+.tt-choice-bar-error {
+    color: var(--SmartThemeQuoteColor, #c58a36);
+    font-size: 0.8em;
+    padding: 4px 0;
+    word-break: break-all;
+    max-height: 3.6em;
+    overflow-y: auto;
+}
+
+.tt-choice-bar-empty {
+    font-size: 0.8em;
+    opacity: 0.6;
+    padding: 6px 0;
+}
+
+.tt-choice-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 40dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.tt-choice-option {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 0.9em;
+    cursor: pointer;
+    line-height: 1.45;
+}
+
+.tt-choice-option:hover {
+    border-color: var(--SmartThemeBorderColor, #666);
+    filter: brightness(1.1);
+}
+
+.tt-choice-option-title {
+    font-weight: bold;
+    white-space: nowrap;
+    flex-shrink: 0;
+    max-width: 12em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tt-choice-option-content {
+    word-break: break-word;
+}
