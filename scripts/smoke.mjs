@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
  * 批A 判据机判：node 驱动 dist（storage 写读 roundtrip + host 适配层
- * API 探测清单逐项打印）。
+ * API 探测清单逐项打印 + P1 时序回归）。
  *
  * 机制：module.register 挂 stub-loader（@sillytavern 外置说明符 → 内存
  * 存根），globalThis.__TT_SMOKE_STUBS__ 提供可变单例与函数桩；随后
- * import dist/index.js——其入口检测无 document 走冒烟分支，输出探测
- * 清单与 roundtrip 结果。退出码：探测/roundtrip 全 PASS 为 0，
- * 任一 FAIL 为 1。
+ * import dist/index.js——其入口为唯一环境分支点，无 document 走冒烟
+ * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
+ * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
  *
  * 边界：node 冒烟验证「产物可加载、导入链可解析、storage 逻辑正确、
- * 探测机制工作」；宿主真实在场性归浏览器验收（用户侧）。
+ * 探测机制工作、初始化时序正确」；宿主真实在场性归浏览器验收（用户侧）。
  */
 
 import { register } from 'node:module';
@@ -25,6 +25,18 @@ if (!existsSync(fileURLToPath(DIST_ENTRY))) {
 }
 
 // ---------------------------------------------------------------------------
+// localStorage 存根：node 无 localStorage；P1 回归预置旧 nav 键＝关态
+// （'0'），验证「initStorage 迁移 → store 读到 false」的时序链路
+// ---------------------------------------------------------------------------
+const localStorageData = new Map([['tt_msg_nav_auto_top', '0']]);
+globalThis.localStorage = {
+    getItem: key => (localStorageData.has(key) ? localStorageData.get(key) : null),
+    setItem: (key, value) => localStorageData.set(key, String(value)),
+    removeItem: key => localStorageData.delete(key),
+    clear: () => localStorageData.clear(),
+};
+
+// ---------------------------------------------------------------------------
 // 宿主存根：与 src/host 导入面对齐（stub-loader.mjs 的 STUB_EXPORTS 表）
 // ---------------------------------------------------------------------------
 const noop = () => {};
@@ -34,13 +46,11 @@ globalThis.__TT_SMOKE_STUBS__ = {
     extension_settings: {},
     chat_metadata: {},
     characters: [],
-    this_chid: 0,
-    // 落盘调度（node 下 noop；roundtrip 只测内存写读链路）
+    this_chid: '0',
+    // 全局 settings 防抖落盘（node 下 noop；roundtrip 只测内存写读链路）
     saveSettingsDebounced: noop,
-    saveMetadataDebounced: noop,
-    cancelDebouncedMetadataSave: noop,
-    // 事件总线
-    eventSource: { on: noop, once: noop, off: noop, emit: noop },
+    // 事件总线（真实 API 面无 off，摘除监听为 removeListener）
+    eventSource: { on: noop, once: noop, emit: noop },
     event_types: {
         APP_READY: 'app_ready',
         CHAT_CHANGED: 'chat_id_changed',
@@ -63,8 +73,14 @@ globalThis.__TT_SMOKE_STUBS__ = {
         chatId: null,
         groupId: null,
         characterId: null,
+        // 斜令执行器故意缺席：node 冒烟不模拟宿主执行
         executeSlashCommandsWithOptions: undefined,
+        // chat 域立即保存通道（调用计数供断言：writeChatMetadata 是否真的走它）
+        saveMetadata: async () => {
+            globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls++;
+        },
     }),
+    saveMetadataCalls: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -116,9 +132,27 @@ if (!nav || typeof nav.dump !== 'function') {
     failures.push('nav dump 输出异常');
 }
 
+// P1 回归：预置旧键 'tt_msg_nav_auto_top'='0' → initStorage 迁移 →
+// nav 初始化 → store 读透传应得 false（dump 面回显 autoTop=off）
+if (nav && typeof nav.dump === 'function' && !String(nav.dump()).includes('autoTop=off')) {
+    failures.push('P1 回归失败：旧键 tt_msg_nav_auto_top=0 未迁移为关态（nav dump 应显示 autoTop=off）');
+}
+
+// node 最小初始化确实注册了全部 /ttnav-* 命令
+const registeredCommands = ['ttnav-top', 'ttnav-prev', 'ttnav-next', 'ttnav-auto']
+    .filter(c => c in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands);
+if (registeredCommands.length < 4) {
+    failures.push(`nav 最小初始化未注册全部 /ttnav-* 命令（仅注册：${registeredCommands.join(' ') || '无'}）`);
+}
+
+// chat 域写入走立即保存通道（writeChatMetadata → getContext().saveMetadata）
+if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
+    failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
+}
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过。`);
