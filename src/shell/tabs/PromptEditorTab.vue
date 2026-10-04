@@ -55,16 +55,8 @@
             <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(effective.id, mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
-          <select
-            class="tt-prompt-module-role"
-            :value="mod.role"
-            title="消息角色"
-            @change="prompts.updateModuleRole(effective.id, mod.id, ($event.target as HTMLSelectElement).value as PromptModule['role'])"
-          >
-            <option value="system">system</option>
-            <option value="user">user</option>
-            <option value="assistant">assistant</option>
-          </select>
+          <!-- 角色不设下拉：system/user 是消息内部概念，由引擎按默认模板固定。
+               旧版（fork）同样不暴露此字段，用户实测无需可调。 -->
           <span class="tt-prompt-module-ops">
             <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
             <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
@@ -98,19 +90,8 @@
             <input type="checkbox" :checked="mod.enabled" @change="prompts.toggleModule(effective.id, mod.id, ($event.target as HTMLInputElement).checked)">
             <span>{{ mod.name }}</span>
           </label>
-          <!-- chat_history 的 role 被引擎忽略（历史消息按楼层原始角色展开）——
-            呈现可改但不生效的字段＝契约谎言，禁用并说明真实语义 -->
-          <select
-            class="tt-prompt-module-role"
-            :value="mod.role"
-            :disabled="mod.source === 'chat_history'"
-            :title="mod.source === 'chat_history' ? '消息角色由聊天楼层本身决定（user/assistant），模块角色不参与' : '消息角色'"
-            @change="prompts.updateModuleRole(effective.id, mod.id, ($event.target as HTMLSelectElement).value as PromptModule['role'])"
-          >
-            <option value="system">system</option>
-            <option value="user">user</option>
-            <option value="assistant">assistant</option>
-          </select>
+          <!-- chat_history 的楼层角色由聊天本身决定（user/assistant）；
+               其余注入模块角色由引擎固定。UI 不暴露角色概念（旧版同样如此）。 -->
           <span class="tt-prompt-module-ops">
             <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
             <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
@@ -146,7 +127,7 @@
         <div v-else class="tt-prompt-empty">当前没有插件写入槽位——点了「重新扫描」仍为空，说明记忆/摘要类插件未挂载或未写入。</div>
       </div>
       <div v-if="effective" class="tt-prompt-slots">
-        <div class="tt-card-sub">对应管线模块（位置与角色；启停由上面的开关承载，不设第二道门）</div>
+        <div class="tt-card-sub">对应管线模块（只管位置排序；启停由上面的开关承载，不设第二道门）</div>
         <div
           v-for="mod in externalModules"
           :key="mod.id"
@@ -154,16 +135,6 @@
         >
           <div class="tt-prompt-module-head">
             <span class="tt-prompt-module-name">{{ mod.name }}</span>
-            <select
-              class="tt-prompt-module-role"
-              :value="mod.role"
-              title="消息角色"
-              @change="prompts.updateModuleRole(effective.id, mod.id, ($event.target as HTMLSelectElement).value as PromptModule['role'])"
-            >
-              <option value="system">system</option>
-              <option value="user">user</option>
-              <option value="assistant">assistant</option>
-            </select>
             <span class="tt-prompt-module-ops">
               <button type="button" title="上移" :disabled="isFirst(mod)" @click="prompts.moveModule(effective.id, mod.id, -1)">↑</button>
               <button type="button" title="下移" :disabled="isLast(mod)" @click="prompts.moveModule(effective.id, mod.id, 1)">↓</button>
@@ -416,20 +387,6 @@ onMounted(() => {
 
 .tt-prompt-module-name {
     font-size: 0.85em;
-}
-
-.tt-prompt-module-role {
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 4px;
-    font-size: 0.75em;
-    flex-shrink: 0;
-}
-
-.tt-prompt-module-role:disabled {
-    opacity: 0.35;
-    cursor: default;
 }
 
 .tt-prompt-module-ops {
