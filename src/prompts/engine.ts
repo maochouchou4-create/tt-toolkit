@@ -143,9 +143,13 @@ function resolveInjectContent(
         }
         case 'external_slot': {
             if (sources.externalSlots.length === 0) return { content: '', note: '未勾选任何宿主注入槽位' };
-            const blocks = sources.externalSlots.map(s => s.value.trim()).filter(Boolean);
-            if (blocks.length === 0) return { content: '', note: '勾选的槽位内容全为空' };
-            return { content: wrapTag('external_memory', blocks.join('\n\n'), sources), note: '' };
+            const filled = sources.externalSlots.filter(s => s.value.trim());
+            if (filled.length === 0) return { content: '', note: '勾选的槽位内容全为空' };
+            // 逐槽位标注：每段带槽位 key 前缀——dump/trace 的「逐项可见」
+            // 落到槽位粒度（多槽位搬入时能核对各自内容是否在场）
+            const blocks = filled.map(s => `[槽位 ${s.key}]\n${s.value.trim()}`);
+            const keys = filled.map(s => s.key).join('、');
+            return { content: wrapTag('external_memory', blocks.join('\n\n'), sources), note: `已搬入槽位：${keys}` };
         }
         case 'baibai':
             return sources.baibaiSummary && sources.baibaiSummary.trim()
@@ -228,8 +232,10 @@ export function assembleMessages(modules: PromptModule[], sources: AssemblySourc
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
             continue;
         }
+        // 注入成功的 trace 保留 resolve 给的 note（如 external_slot 的
+        // 逐槽位清单）——「逐项可见」的粒度与注入内容一致，不降级为空注记
         pushMessage(messages, { role: mod.role, content: content.trim() });
-        trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note: '' });
+        trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
     }
 
     return { messages, trace };

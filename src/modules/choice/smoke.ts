@@ -63,8 +63,11 @@ function runAssemblyChecks(): string {
     // baibai 合成源传 null → trace 记录未注入原因（默认关的可观测性）
     const baibaiTrace = result.trace.find(t => t.moduleId === 'inject_baibai');
     check('柏宝书默认关＝不注入且 trace 留痕', baibaiTrace?.injected === false && baibaiTrace.note.includes('不可用'), `note=${baibaiTrace?.note ?? '（无 trace）'}`);
-    // 外部槽位：合成源给了已勾选槽位内容 → 注入可见（勾选即生效单步链路）
-    check('外部注入槽位搬入可见（<external_memory> 段）', allText.includes('<external_memory>') && allText.includes('两人在酒馆发生过争执'));
+    // 外部槽位：合成源给了已勾选槽位内容 → 注入可见（勾选即生效单步链路）。
+    // 逐槽位标注：内容段带槽位 key 前缀、trace note 同粒度（逐项可见到槽位）
+    check('外部注入槽位搬入可见（<external_memory> 段逐槽位标注）', allText.includes('<external_memory>') && allText.includes('[槽位 1_memory]') && allText.includes('两人在酒馆发生过争执'));
+    const injectedExtTrace = result.trace.find(t => t.moduleId === 'inject_external_slot');
+    check('外部槽位 trace 注记到槽位粒度', injectedExtTrace?.injected === true && injectedExtTrace.note.includes('1_memory'), `note=${injectedExtTrace?.note ?? '（无 trace）'}`);
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
