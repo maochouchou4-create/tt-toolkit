@@ -5,12 +5,13 @@
  * 职责：
  *   1. 从 vite.config.ts 机读 @sillytavern 说明符的相对上溯级数（单一
  *      真相源，不在脚本里复写数字）；
- *   2. 扫 src 树（.ts/.vue）提取全部 @sillytavern 导入（清单从源码机
- *      生成，禁人工维护）：出现在 src/host/ 之外 → exit 1（适配层隔离
- *      约束）；host 内每条按「无后缀 + resolver 补 .js」规则折算为期望
- *      的 dist 相对说明符；
- *   3. 扫 dist/index.js 提取实际外置说明符（from'…' / from"…"）及各自
- *      ../ 级数；
+ *   2. 扫 src 树（.ts/.vue/.js/.mjs/.tsx/.jsx）提取全部 @sillytavern
+ *      导入（清单从源码机生成，禁人工维护）：出现在 src/host/ 之外
+ *      → exit 1（适配层隔离约束）；host 内每条按「无后缀 + resolver
+ *      补 .js」规则折算为期望的 dist 相对说明符。导入形态覆盖三种：
+ *      from '…'（含 re-export）、动态 import('…')、裸副作用 import '…'；
+ *   3. 扫 dist/index.js 提取实际外置说明符（同样三形态）及各自 ../
+ *      级数；
  *   4. 逐条对照（双向差集 + 逐条级数断言，不按总数——总数断言锁不住
  *      单条错配）。任一失败 → exit 1。
  *
@@ -53,18 +54,37 @@ function walkFiles(dir, exts, acc = []) {
     return acc;
 }
 
-const SPECIFIER_RE = /from\s*['"]@sillytavern\/([^'"]+)['"]/g;
+// 三种导入形态：from '…'（含 re-export）、动态 import('…')、裸副作用
+// import '…'。捕获组＝@sillytavern/ 之后的说明符尾部。
+const SPECIFIER_FORMS = [
+    /from\s*['"]@sillytavern\/([^'"]+)['"]/g,
+    /import\s*\(\s*['"]@sillytavern\/([^'"]+)['"]\s*\)/g,
+    /import\s*['"]@sillytavern\/([^'"]+)['"]/g,
+];
+
+// 剥离注释再匹配：import '…' / import('…') 形态会命中注释里的示例
+// 文字（如 host 文件头写的 import '@sillytavern/…'）——注释不是导入。
+// 线注释的负向断言保护字符串里的协议斜杠（https: 等）。
+function stripComments(text) {
+    return text
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
 
 /**
  * @returns {{ file: string, specifier: string }[]} 全部 @sillytavern 导入
  */
 function collectSourceImports() {
-    const files = walkFiles(SRC_DIR, ['.ts', '.vue']);
+    const files = walkFiles(SRC_DIR, ['.ts', '.tsx', '.jsx', '.js', '.mjs', '.vue']);
     const imports = [];
     for (const file of files) {
-        const text = readFileSync(file, 'utf8');
-        for (const match of text.matchAll(SPECIFIER_RE)) {
-            imports.push({ file: relative(ROOT, file).replaceAll('\\', '/'), specifier: match[1] });
+        const text = stripComments(readFileSync(file, 'utf8'));
+        for (const re of SPECIFIER_FORMS) {
+            re.lastIndex = 0;
+            for (const match of text.matchAll(re)) {
+                imports.push({ file: relative(ROOT, file).replaceAll('\\', '/'), specifier: match[1] });
+            }
         }
     }
     return imports;
@@ -72,12 +92,20 @@ function collectSourceImports() {
 
 // ---- 3. dist 扫描：外置说明符 -------------------------------------------
 
-const DIST_SPECIFIER_RE = /from\s*['"](\.\.\/[^'"]+)['"]/g;
+// dist 同三形态（产物经 esbuild 压缩，import 与引号间可能无空白）
+const DIST_SPECIFIER_FORMS = [
+    /from\s*['"](\.\.\/[^'"]+)['"]/g,
+    /import\s*\(\s*['"](\.\.\/[^'"]+)['"]\s*\)/g,
+    /import\s*['"](\.\.\/[^'"]+)['"]/g,
+];
 
 function collectDistSpecifiers(text) {
     const specifiers = new Set();
-    for (const match of text.matchAll(DIST_SPECIFIER_RE)) {
-        specifiers.add(match[1]);
+    for (const re of DIST_SPECIFIER_FORMS) {
+        re.lastIndex = 0;
+        for (const match of text.matchAll(re)) {
+            specifiers.add(match[1]);
+        }
     }
     return specifiers;
 }
