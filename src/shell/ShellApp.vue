@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { attachHostDrag } from '@/host';
+import { attachHostDrag, getSavedMovingUIState } from '@/host';
 import { version } from '@/version';
 import { useShellStore } from './store';
 import type { ShellTab } from './types';
@@ -79,6 +79,19 @@ function syncActiveTab(): void {
 onMounted(() => {
     dragAttached = attachHostDrag('ttToolkitShell');
     if (!dragAttached) console.warn('[tt-toolkit][shell] 宿主 dragElement 不可用，浮层不可拖动（功能不受影响）');
+    // 拖动位置自恢复：dragElement 把位置写进宿主 movingUIState，但宿主的
+    // 恢复流程先于扩展挂载、覆盖不到本元素——挂载时自行读回套用。
+    // 只取 top/left/width/height：宿主的全字段套用会同时设 top+bottom 把
+    // 自适应高度的浮层拉伸变形（.tt-shell 无定高），right/bottom 有意不取
+    const el = document.getElementById('ttToolkitShell');
+    const saved = getSavedMovingUIState('ttToolkitShell');
+    if (el && saved) {
+        if (typeof saved.top === 'number') el.style.top = `${saved.top}px`;
+        if (typeof saved.left === 'number') el.style.left = `${saved.left}px`;
+        if (typeof saved.width === 'number') el.style.width = `${saved.width}px`;
+        if (typeof saved.height === 'number') el.style.height = `${saved.height}px`;
+        if (saved.margin) el.style.margin = saved.margin;
+    }
 });
 
 // tab 内容延迟到浮层首次打开才挂载（未打开时零初始化开销）

@@ -20,6 +20,7 @@ const STUB_EXPORTS = {
     'script.js': ['chat_metadata', 'characters', 'saveSettingsDebounced', 'this_chid'],
     'scripts/extensions.js': ['extension_settings'],
     'scripts/events.js': ['eventSource', 'event_types'],
+    'scripts/RossAscends-mods.js': ['dragElement'],
     'scripts/slash-commands/SlashCommandParser.js': ['SlashCommandParser'],
     'scripts/slash-commands/SlashCommand.js': ['SlashCommand'],
     'scripts/st-context.js': ['getContext'],

@@ -68,6 +68,9 @@ globalThis.__TT_SMOKE_STUBS__ = {
     SlashCommand: {
         fromProps: props => props,
     },
+    // dragElement 存根：dist 顶层导入链需要它在场（壳挂载只在浏览器路径
+    // 发生，node 冒烟不会真正调用）
+    dragElement: noop,
     getContext: () => ({
         chat: [],
         chatId: null,

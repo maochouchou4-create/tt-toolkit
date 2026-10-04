@@ -119,6 +119,27 @@ declare module '@sillytavern/scripts/st-context' {
         executeSlashCommandsWithOptions?: (command: string) => Promise<unknown>;
         /** 当前 chat_metadata 的立即保存通道（script.js:11175，async 无参） */
         saveMetadata?: () => Promise<unknown>;
+        /**
+         * power_user 的转发：movingUIState 持久化各浮层拖动位置
+         * （dragElement 写入），壳挂载时自恢复读取。
+         * @hostAnchor scripts/st-context.js:235 powerUserSettings: power_user,
+         */
+        powerUserSettings?: {
+            movingUI: boolean;
+            movingUIState: Record<string, Record<string, unknown>>;
+        };
         [key: string]: unknown;
     } | null;
+}
+
+declare module '@sillytavern/scripts/RossAscends-mods' {
+    /**
+     * dragElement 是 ESM 导出函数，不是 jQuery 插件（$.fn 上没有它；
+     * 宿主自身用法＝import 后调用，见 initMovingUI :681-685——曾在
+     * jQuery 包装对象上找 .dragElement 导致永远走降级分支的实锤）。
+     * 拖把手契约：目标元素需有 id，把手 selector 固定 #<id>header 且
+     * 须带 .drag-grabber 类（:648-656 才绑 mousedown）。
+     * @hostAnchor scripts/RossAscends-mods.js:498 export function dragElement($elmnt) {
+     */
+    export function dragElement($elmnt: unknown): void;
 }

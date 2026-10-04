@@ -15,8 +15,9 @@
  *     localStorage 键，旧键保留只读、清理归批E）；
  *   - 日志转发走 host/ttlog（createTtlog 工厂），target 仍为 "msgnav"，
  *     落盘 tauritavern.log.*；
- *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（四按钮，
- *     消息体为 /ttnav-* 斜令），命令亦可直接在输入框敲。
+ *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（四导航键
+ *     ＋末位「工具箱」键，消息体为 /ttnav-* 与 /tt-toolbox 斜令），
+ *     命令亦可直接在输入框敲。
  * - 初始化为显式导出（initNav / initNavMinimal），由 main.ts 统一做
  *   环境分支后调用——模块求值期不自启动：storage 必须先初始化（旧
  *   localStorage 键迁移），否则 store 首读会拿到迁移前的旧值。
@@ -32,10 +33,12 @@ import {
     getChatMessages,
     getTavernContext,
     hostWindow,
+    isSlashCommandRegistered,
     registerSlashCommand,
     type ChatMessage,
     type Ttlog,
 } from '@/host';
+import { TOOLBOX_COMMAND } from '@/shell';
 import { getNavState, setNavState } from '@/storage';
 import { useNavStore } from './store';
 
@@ -491,6 +494,14 @@ async function toggleAutoTop(): Promise<void> {
 //    可用，不静默降级。
 // --------------------------------------------------------
 const QR_SET_NAME = 'tt-toolkit 导航';
+// QR 集末位的「工具箱」按钮（用户拍板的入口形态：比魔棒菜单顺手）。
+// message 指向 shell 注册的命令——TOOLBOX_COMMAND 常量由 shell 导出，
+// 命令名字面量全仓唯一（防双侧硬编码漂移静默断链）。
+const TOOLBOX_QR = Object.freeze({
+    label: '工具箱',
+    title: '打开 TT 工具箱',
+    message: `/${TOOLBOX_COMMAND}`,
+});
 // quickReplyApi 等待轮询参数（QR 扩展 init 同步挂载 api、先于 APP_READY，
 // 但扩展加载顺序不受本模块控制，等待期按最坏情况放宽）
 const QR_POLL_INTERVAL_MS = 250;
@@ -598,13 +609,34 @@ async function ensureNavQrSet(): Promise<void> {
             }
         }
 
+        // 工具箱按钮＝集末位第五键，补缺/对齐纪律与导航四键一致
+        // （已存在只对齐 message，保护用户自定义）。建键前先校验命令
+        // 在场：壳侧注册被占（重名）时按钮会静默指向别人的命令——
+        // fail fast，跳过建键并留痕，四键导航不受影响
+        if (!isSlashCommandRegistered(TOOLBOX_COMMAND)) {
+            toast(`工具箱入口未建立：/${TOOLBOX_COMMAND} 命令不在场`, 'warning');
+            ttlog.warn(`toolbox QR skipped: /${TOOLBOX_COMMAND} not registered`);
+        } else {
+            const qr = api.getQrByLabel(QR_SET_NAME, TOOLBOX_QR.label);
+            if (!qr) {
+                await api.createQuickReply(QR_SET_NAME, TOOLBOX_QR.label, {
+                    message: TOOLBOX_QR.message,
+                    title: TOOLBOX_QR.title,
+                });
+            } else if (qr.message !== TOOLBOX_QR.message) {
+                await api.updateQuickReply(QR_SET_NAME, TOOLBOX_QR.label, {
+                    message: TOOLBOX_QR.message,
+                });
+            }
+        }
+
         // 激活一次制：仅首次把集挂入全局列表并置位；用户此后手动移除该集
         // 不复活（尊重用户对快速回复栏的自主管理）
         if (!qrActivated()) {
             await api.addGlobalSet(QR_SET_NAME);
             markQrActivated();
         }
-        ttlog.info(`QR set "${QR_SET_NAME}" ready (activated=${qrActivated()}, buttons=${NAV_ACTIONS.length})`);
+        ttlog.info(`QR set "${QR_SET_NAME}" ready (activated=${qrActivated()}, buttons=${NAV_ACTIONS.length + 1} 含工具箱)`);
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         ttlog.error('QR set ensure failed', msg);

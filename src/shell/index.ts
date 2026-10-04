@@ -12,7 +12,7 @@
  */
 
 import { createApp } from 'vue';
-import { appendWandMenuEntry, eventBus, event_types } from '@/host';
+import { appendWandMenuEntry, eventBus, event_types, registerSlashCommand } from '@/host';
 import { pinia } from '@/pinia';
 import { version } from '@/version';
 import ShellApp from './ShellApp.vue';
@@ -21,6 +21,12 @@ import type { ShellTab } from './types';
 
 const MOUNT_ID = 'tt-shell-mount';
 const WAND_ENTRY_ID = 'tt-toolkit-wand-entry';
+
+/**
+ * 工具箱入口斜令名——单一事实源，导出给 nav 消费（QR「工具箱」按钮的
+ * message）：命令名字面量只允许出现这一处，防双侧各自硬编码漂移断链。
+ */
+export const TOOLBOX_COMMAND = 'tt-toolbox';
 
 // 魔棒入口等待参数：#extensionsMenu 理论先于扩展脚本在场（host/dom.ts
 // 头注核实），三段等待为纵深防御——轮询仍按最坏情况放宽
@@ -50,6 +56,28 @@ function installWandEntry(): void {
     const app = createApp(ShellApp);
     app.use(pinia);
     app.mount(mount);
+
+    // 壳的斜令通道：QR「工具箱」按钮（nav 集末位）与魔棒入口共用，
+    // 命令名经 TOOLBOX_COMMAND 常量导出给 nav（单一事实源）。
+    // 注册返回值必须消费：重名被占＝命令通道不可用，nav 建键前会校验
+    // 并跳过按钮创建，此处留痕供排障（fail fast，不静默）。
+    const registered = registerSlashCommand({
+        name: TOOLBOX_COMMAND,
+        helpString: '打开/收起 TT 工具箱面板（QR「工具箱」按钮与魔棒入口共用此通道）',
+        callback: () => {
+            toggleShell();
+            return '';
+        },
+    });
+    if (!registered) {
+        console.warn(`[tt-toolkit][shell] /${TOOLBOX_COMMAND} 注册被占（重名），工具箱按钮入口将不创建`);
+    }
+
+    // 排障口：开合状态类问题（如「要点两遍才唤起」）的观测面——
+    // devtools 直取 __TTK_DEBUG__.isOpen() 对比肉眼可见状态即可定位
+    // 「状态与显示脱钩」还是「事件没送达」（freeze 同 __TT_NAV__ 先例）
+    const dbg = globalThis as Record<string, unknown>;
+    dbg.__TTK_DEBUG__ = Object.freeze({ version, isOpen: () => useShellStore().open });
 
     tryWandEntry();
 }
