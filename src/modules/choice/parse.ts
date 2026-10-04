@@ -1,8 +1,9 @@
 /**
  * 选项输出解析（方案 §1 P-JSON：服务商结构化输出为主＋客户端解析兜底）。
  *
- * 主路径：JSON 数组（输出契约要求；LLM 常见畸形先修复——尾随逗号、
- * markdown 代码围栏、单对象包裹、思维链标签前缀）。
+ * 主路径：JSON 对象契约 {"options":[...]}（与 json_object 档「输出必须
+ * 是对象」的规范对齐；裸数组容错保留，兼容旧输出）。LLM 常见畸形先
+ * 修复——尾随逗号、markdown 代码围栏、思维链标签前缀。
  * 兜底路径：行首 [标题]/【标题】括号启发式——response_format 不被
  * 支持/被忽略/解析失败时的确定性回退。
  * 纯函数：畸形输入的回退行为可确定性触发与断言（批B 判据）。
@@ -173,7 +174,8 @@ export function parseOptions(text: string, count: number): ParseReport {
     c = stripCodeFence(c);
     if (!c) return { path: 'empty', options: [] };
 
-    // 单对象包裹形态（契约是数组但模型偶发 {"options":[...]}）：解出数组走主路径
+    // 对象契约形态（主契约：{"options":[...]}——与 json_object 档「输出
+    // 必须是对象」的规范对齐）：解出 options 数组走主路径
     if (c.startsWith('{')) {
         try {
             const obj = JSON.parse(fixTrailingCommas(c)) as Record<string, unknown>;
@@ -185,6 +187,7 @@ export function parseOptions(text: string, count: number): ParseReport {
             // 落回退
         }
     }
+    // 裸数组容错（回退吸收保留）：兼容旧契约输出与不守对象契约的模型
     if (c.startsWith('[')) {
         const json = parseJsonArray(c);
         if (json) return { path: 'json', options: json.slice(0, count) };

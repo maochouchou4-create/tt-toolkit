@@ -17,22 +17,34 @@ import { choiceStorage, resolveActiveApi } from './api';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { useChoiceStore } from './store';
 
-/** 选项 JSON 契约 schema（json_schema 档位的结构化输出定义；与 output_format
- * 模块文本同一契约：顶层数组、元素 {title,content}——schema 与提示词说
- * 的是同一件事，不各说各话）。数量不在 schema 硬编码（{{count}} 运行时
- * 变化），由提示词约束。 */
+/**
+ * 选项 JSON 契约 schema（json_schema 档位的结构化输出定义；与 output_format
+ * 模块文本同一契约：顶层 {"options":[...]} 对象、元素 {title,content}——
+ * schema 与提示词说的是同一件事，不各说各话）。
+ * 顶层用对象而非裸数组：json_object 档的规范只保证「输出是 JSON 对象」，
+ * 顶层数组契约与之矛盾；统一对象形态让两档语义一致。数量不在 schema
+ * 硬编码（{{count}} 运行时变化），由提示词约束。客户端解析对裸数组
+ * 仍容错（parse 回退吸收，兼容旧输出与不守契约的模型）。
+ */
 const OPTIONS_JSON_SCHEMA = {
-    type: 'array',
-    items: {
-        type: 'object',
-        properties: {
-            title: { type: 'string', description: '简短标题（10字内）' },
-            content: { type: 'string', description: '选项正文（具体的行动描述）' },
+    type: 'object',
+    properties: {
+        options: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string', description: '简短标题（10字内）' },
+                    content: { type: 'string', description: '选项正文（具体的行动描述）' },
+                },
+                required: ['title', 'content'],
+                additionalProperties: false,
+            },
+            minItems: 1,
         },
-        required: ['title', 'content'],
-        additionalProperties: false,
     },
-    minItems: 1,
+    required: ['options'],
+    additionalProperties: false,
 } as const;
 
 /** 外部取消信号（选项条「取消」按钮）。 */
@@ -102,8 +114,8 @@ export async function generateOptions(): Promise<void> {
                 maxTokens: api.maxTokens,
                 stream: api.stream,
                 outputContract: api.outputContract,
-                // 根数组 schema 已在 GG（流式）/CC（双态）实测合规；ds 端点
-                // 不支持 json_schema——用户应配 json_object 档
+                // 对象 schema 与提示词契约同步（顶层 {"options":[...]}）；
+                // 端点对 json_schema 档的支持度实测结论见 api.ts 文件头
                 jsonSchema: api.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,
             };
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);

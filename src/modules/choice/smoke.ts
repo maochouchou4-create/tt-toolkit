@@ -94,20 +94,20 @@ function runParseChecks(): void {
     check('畸形样本正文解析（首条含推开动作）', (report.options[0]?.content ?? '').includes('推开那扇厚重的木门'), `content=${report.options[0]?.content}`);
     check('【】混用标题解析（查看告示牌）', report.options.some(o => o.title === '查看告示牌'));
 
-    // 尾随逗号 JSON：修复后走主路径
+    // 尾随逗号 JSON：修复后走主路径（裸数组＝容错路径，兼容旧契约输出）
     const trailingJson = '[{"title":"A","content":"甲",}, {"title":"B","content":"乙"},]';
     const jsonReport = parseOptions(trailingJson, 4);
-    check('尾随逗号 JSON 修复走主路径（json）', jsonReport.path === 'json' && jsonReport.options.length === 2, `path=${jsonReport.path} count=${jsonReport.options.length}`);
+    check('尾随逗号 JSON 修复走主路径（json，裸数组容错）', jsonReport.path === 'json' && jsonReport.options.length === 2, `path=${jsonReport.path} count=${jsonReport.options.length}`);
 
     // 代码围栏包裹的 JSON
     const fenced = '```json\n[{"title":"A","content":"甲"}]\n```';
     const fencedReport = parseOptions(fenced, 4);
     check('代码围栏剥离后走主路径', fencedReport.path === 'json' && fencedReport.options.length === 1, `path=${fencedReport.path}`);
 
-    // 单对象包裹形态
+    // 对象契约（主契约形态：与 json_object 档「输出必须是对象」对齐）
     const wrapped = '{"options":[{"title":"A","content":"甲"}]}';
     const wrappedReport = parseOptions(wrapped, 4);
-    check('单对象包裹解出数组走主路径', wrappedReport.path === 'json' && wrappedReport.options.length === 1, `path=${wrappedReport.path}`);
+    check('对象契约 {"options":[...]} 走主路径', wrappedReport.path === 'json' && wrappedReport.options.length === 1, `path=${wrappedReport.path}`);
 
     // 空输入
     const empty = parseOptions('', 4);
