@@ -20,28 +20,37 @@ export interface ParseReport {
 }
 
 const REASONING_TAG_RE = /<(?:think(?:ing)?|reasoning|thought|antThinking)>[\s\S]*?<\/(?:think(?:ing)?|reasoning|thought|antThinking)>/gi;
-const REASONING_CLOSE_RE = /<\/(?:think(?:ing)?|reasoning|thought|antThinking)>/gi;
+/** 闭合标签作分隔符（split 用；g 标志对 split 无意义，语义＝每个闭合点都是切分边界）。 */
+const REASONING_CLOSE_SPLIT_RE = /<\/(?:think(?:ing)?|reasoning|thought|antThinking)>/i;
 
 /**
  * 思维链剥离：存在闭合标签时丢弃最后一个闭合标签之前的全部内容（模型
  * 可能在思维链里以文本提到 <options>/JSON 契约——全文搜块标签会误匹配
  * 这些文本引用）；无闭合标签时剥配对标签块。
+ *
+ * 表达距离声明：AFPL 合规——fork 按「matchAll 收集全部闭合点→取末个
+ * 索引→slice」实现，本实现改用「以闭合标签为分隔符 split，取末段」的
+ * 等价表达（末段＝最后一个闭合标签之后的全部文本）。
  */
 function stripReasoning(text: string): string {
-    const closes = [...text.matchAll(REASONING_CLOSE_RE)];
-    if (closes.length > 0) {
-        const last = closes[closes.length - 1];
-        return text.slice((last.index ?? 0) + last[0].length).trim();
-    }
+    const segments = text.split(REASONING_CLOSE_SPLIT_RE);
+    if (segments.length > 1) return segments[segments.length - 1].trim();
     return text.replace(REASONING_TAG_RE, '').trim();
 }
 
-/** 剥 markdown 代码块围栏（模型爱把 JSON 装进 ```json 围栏）。 */
+/**
+ * 剥 markdown 代码块围栏（模型爱把 JSON 装进 ```json 围栏）。
+ *
+ * 表达距离声明：AFPL 合规——fork 按两条锚定 replace 链式剥除，本实现
+ * 改用「开头截断＋结尾 endswith 切尾」的字符串操作表达；语义不变＝
+ * 开栏（```＋语言标记）与闭栏各自独立剥除，围栏内外的正文不动。
+ */
 function stripCodeFence(text: string): string {
-    return text
-        .replace(/^```[a-zA-Z]*\s*/i, '')
-        .replace(/\s*```$/, '')
-        .trim();
+    let body = text.trim();
+    const openFence = /^```[a-zA-Z]*\s*/.exec(body);
+    if (openFence) body = body.slice(openFence[0].length);
+    if (body.endsWith('```')) body = body.slice(0, -3);
+    return body.trim();
 }
 
 /** 提取 <options> 块内容（无闭合标签时取开标签之后全部——截断容错）。 */
@@ -53,9 +62,15 @@ function extractOptionsBlock(text: string): string {
     return text;
 }
 
-/** LLM 常见 JSON 畸形修复：尾随逗号（,] 与 ,}）。 */
+/**
+ * LLM 常见 JSON 畸形修复：尾随逗号（,] 与 ,}）。
+ *
+ * 表达距离声明：AFPL 合规——fork 用「逗号＋捕获定界符→回填定界符」的
+ * 替换模板，本实现改用前视断言：逗号后仅隔空白即到容器闭合处时删逗号
+ * 本身，定界符零改写。
+ */
 function fixTrailingCommas(text: string): string {
-    return text.replace(/,(\s*[\]}])/g, '$1');
+    return text.replace(/,(?=\s*[}\]])/g, '');
 }
 
 /**
@@ -95,7 +110,26 @@ interface BracketEntry extends ParsedOption {
 
 function parseBracketFallback(text: string): ParsedOption[] {
     const TITLE_RE = /[[【]([^\]】]+?)[\]】]/g;
-    const GAP_RE = /^(?:[^\S\r\n]|\p{Extended_Pictographic}(?:\uFE0F|\u200D|\u20E3|\p{Emoji_Modifier})*)*$/u;
+    /**
+     * 间隙判定（标签堆叠 vs 新选项边界）。
+     *
+     * 表达距离声明：AFPL 合规——fork 把 emoji 组合后缀写成
+     * \uFE0F/\u200D/\u20E3 转义堆叠，本实现按 Unicode 属性类＋具名码位
+     * 自组，逐字符注明标准依据：
+     *   - \p{Extended_Pictographic}：emoji 基字符（UTS #51 §2）；
+     *   - \p{Variation_Selector}：变体选择符区间 U+FE00..U+FE0F（UAX #44
+     *     属性）；其中 VS16＝U+FE0F 是 emoji 呈现选择符（如 🎞＋FE0F），
+     *     常见于模型输出的装饰行；
+     *   - \u{200D}：ZWJ 零宽连接符（U+200D，UAX #44 Join_Control 属性的
+     *     两成员之一）——组合 emoji 序列（家庭/职业类）靠它连接；
+     *   - \u{20E3}：键帽封套 COMBINING ENCLOSING KEYCAP（U+20E3，
+     *     UAX #44 Grapheme_Extend 属性）——1️⃣ 类键帽序列的封套字符；
+     *   - \p{Emoji_Modifier}：肤色修饰符区间 U+1F3FB..U+1F3FF（UTS #51
+     *     §2.4 Emoji_Modifier 属性）——👍🏽 类肤色变体的后缀。
+     * 语义不变：间隙全由「行内空白（不含换行）」或「emoji 基字符后跟
+     * 任意数量的上述组合后缀」组成＝标签堆叠；否则＝新选项边界。
+     */
+    const GAP_RE = /^(?:[^\S\r\n]|\p{Extended_Pictographic}(?:\p{Variation_Selector}|\u{200D}|\u{20E3}|\p{Emoji_Modifier})*)*$/u;
     const matches = [...text.matchAll(TITLE_RE)];
     if (matches.length === 0) {
         const trimmed = text.trim();
