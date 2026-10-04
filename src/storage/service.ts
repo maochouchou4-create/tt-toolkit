@@ -5,8 +5,8 @@
  *   - 全局域 extension_settings.ttToolkit：提示词配置集、条目池、API 配置、
  *     UI 偏好、nav 迁移数据、schema version（批B/C 扩展内容域）。
  *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置（批B 落）。
- *     写入纪律：切换窗口内排队延后（host/settings.ts 的 quiet 窗口），
- *     防止 saveMetadataDebounced 在 characterId/groupId 变更窗口静默丢存。
+ *     写入纪律：同步变更当前 chat_metadata + 立即 getContext().saveMetadata
+ *     显式保存（host/settings.ts，无防抖无排队、目标即当前活跃聊天）。
  *   - 角色域 character.data.extensions.ttToolkit：配置绑定，归批C（配置
  *     绑定功能落地时一并实现 /api/characters/edit 全量合并通道——该通道
  *     契约届时按 TT 源码核实，严禁 saveCharacterDebounced，方案 §2.2）。
@@ -26,13 +26,18 @@ const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
 const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
 
 // schema version：存储结构演进时 bump；旧档缺字段由默认值补齐
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface NavStorageState {
     /** 自动回顶开关（旧 localStorage 键迁移而来） */
     autoTop: boolean;
     /** QR 集「首次激活」标记（激活一次制，见 nav 模块） */
     qrActivated: boolean;
+    /**
+     * 迁移时旧键 autoTop 值的快照（幂等增量基线）；null＝旧键缺席。
+     * 后续启动旧键值偏离快照＝用户回滚旧版期间改过，采纳为新意图。
+     */
+    legacyAutoTopSnapshot?: boolean | null;
 }
 
 export interface GlobalDomain {
@@ -60,9 +65,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 深快照：读取返回值与宿主可变单例彻底解耦——调用方改返回值不会
+ * 污染 extension_settings / chat_metadata。设置域为小对象非热路径，
+ * 正确性优先；structuredClone 缺席（宿主环境裁剪）时降级浅拷贝。
+ */
+function deepSnapshot<T>(value: T): T {
+    if (value === null || typeof value !== 'object') return value;
+    try {
+        return structuredClone(value);
+    } catch {
+        return Array.isArray(value) ? ([...value] as T) : ({ ...(value as object) } as T);
+    }
+}
+
+/**
  * 初始化全局域：确保命名空间与结构在场、迁移旧 nav localStorage 键。
- * 幂等——每次启动跑一遍，storage 值已在场时不覆盖（防回滚旧版再升回时
- * 丢增量：旧版只写 localStorage，storage 已有值则尊重 storage）。
+ * 幂等——每次启动跑一遍，storage 值已在场时不覆盖；旧键幂等增量：
+ * 记录迁移时的旧键值快照，后续启动旧键值偏离快照（＝用户回滚旧版
+ * 期间改过）即采纳为新意图并前移快照——防「回滚旧版用一段再升回、
+ * 增量静默丢失」（persona 迁移同款纪律，单布尔低配版）。
  */
 export function initStorage(): void {
     writeExtensionSettings(settings => {
@@ -77,26 +98,41 @@ export function initStorage(): void {
         if (typeof nav.qrActivated !== 'boolean') {
             nav.qrActivated = readLegacyBoolean(LEGACY_NAV_QR_ACTIVATED_KEY, false);
         }
+        if (nav.legacyAutoTopSnapshot === undefined) {
+            // 首次迁移或旧 schema 升级：以当前旧键值为基线快照（不采纳
+            // ——此时无法区分「用户改过」与「本来就如此」）
+            nav.legacyAutoTopSnapshot = readLegacyBooleanOrNull(LEGACY_NAV_AUTO_TOP_KEY);
+        }
+        const legacyAutoTopNow = readLegacyBooleanOrNull(LEGACY_NAV_AUTO_TOP_KEY);
+        if (legacyAutoTopNow !== null && legacyAutoTopNow !== nav.legacyAutoTopSnapshot) {
+            // 旧键偏离基线＝回滚旧版期间用户改过，采纳为新意图
+            nav.autoTop = legacyAutoTopNow;
+            nav.legacyAutoTopSnapshot = legacyAutoTopNow;
+        }
         domain.nav = nav as NavStorageState;
         settings[GLOBAL_KEY] = domain;
     });
 }
 
-function readLegacyBoolean(key: string, fallback: boolean): boolean {
+function readLegacyBooleanOrNull(key: string): boolean | null {
     try {
         const v = localStorage.getItem(key);
         if (v === '1') return true;
         if (v === '0') return false;
     } catch {
-        // localStorage 不可用（隐私模式等）：落到默认值，仅影响迁移
+        // localStorage 不可用（隐私模式等）：视为旧键缺席
     }
-    return fallback;
+    return null;
 }
 
-/** 读全局域子域（浅快照，调用方不得原地改返回值——写入走 setGlobal）。 */
+function readLegacyBoolean(key: string, fallback: boolean): boolean {
+    return readLegacyBooleanOrNull(key) ?? fallback;
+}
+
+/** 读全局域子域（真深快照：返回值与存储单例解耦，写入走 setGlobal）。 */
 export function getGlobal<T>(key: string): T | undefined {
     const domain = readGlobalDomain();
-    return domain[key] as T | undefined;
+    return deepSnapshot(domain[key]) as T | undefined;
 }
 
 /** 写全局域子域：整体替换该 key 下的对象并调度落盘。 */
@@ -108,13 +144,13 @@ export function setGlobal(key: string, value: unknown): void {
     });
 }
 
-/** 读聊天域子域。 */
+/** 读聊天域子域（真深快照：返回值与存储单例解耦，写入走 setChat）。 */
 export function getChat<T>(key: string): T | undefined {
     const domain = readChatDomain();
-    return domain[key] as T | undefined;
+    return deepSnapshot(domain[key]) as T | undefined;
 }
 
-/** 写聊天域子域：整体替换该 key 并走切换感知的落盘调度。 */
+/** 写聊天域子域：整体替换该 key，经 host 层立即显式保存。 */
 export function setChat(key: string, value: unknown): void {
     writeChatMetadata(metadata => {
         const domain = (isRecord(metadata[CHAT_KEY]) ? metadata[CHAT_KEY] : {}) as ChatDomain;
@@ -123,10 +159,11 @@ export function setChat(key: string, value: unknown): void {
     });
 }
 
-/** nav 域便捷读写（高频小字段，避免各处拼对象）。 */
+/** nav 域便捷读取（深快照；写入走 setNavState）。 */
 export function getNavState(): NavStorageState {
-    const domain = readGlobalDomain();
-    return domain.nav ?? { autoTop: true, qrActivated: false };
+    const nav = readGlobalDomain().nav;
+    if (!isRecord(nav)) return { autoTop: true, qrActivated: false, legacyAutoTopSnapshot: null };
+    return deepSnapshot(nav as unknown as NavStorageState);
 }
 
 export function setNavState(patch: Partial<NavStorageState>): void {
@@ -160,6 +197,8 @@ function randomToken(): string {
 /**
  * storage 写读 roundtrip：全局域与聊天域各写一个随机 token 再读回比对。
  * 读回走同一读取路径（getGlobal/getChat），链路＝用户实际数据链路。
+ * 比对完成后经正式变更器删除 _smoke 键——测试残留会随用户数据落盘
+ * 并出现在调试 dump 里。
  */
 export function runStorageRoundtrip(): RoundtripReport[] {
     const reports: RoundtripReport[] = [];
@@ -184,6 +223,15 @@ export function runStorageRoundtrip(): RoundtripReport[] {
         written: chatToken,
         readBack: String(chatRead),
         at: new Date().toISOString(),
+    });
+
+    writeExtensionSettings(settings => {
+        const domain = settings[GLOBAL_KEY];
+        if (isRecord(domain)) delete domain[SMOKE_KEY];
+    });
+    writeChatMetadata(metadata => {
+        const domain = metadata[CHAT_KEY];
+        if (isRecord(domain)) delete domain[SMOKE_KEY];
     });
 
     return reports;
