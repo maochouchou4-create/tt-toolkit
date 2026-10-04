@@ -59,7 +59,8 @@ const parsePathLabel = computed(() => {
 });
 
 const parsePathLabelTitle = computed(() => {
-    if (store.lastParsePath === 'bracket_fallback') return '结构化输出未命中/解析失败，已走括号格式回退解析';
+    // G5 拍板文案：回退解析＝宽松解析安全网，细节留在调试 tab
+    if (store.lastParsePath === 'bracket_fallback') return '模型输出不合 JSON 约定时的宽松解析安全网（详见调试 tab）';
     if (store.lastParsePath === 'json') return '模型输出符合 JSON 契约';
     return '';
 });

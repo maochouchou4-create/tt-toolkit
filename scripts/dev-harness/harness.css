@@ -1,0 +1,280 @@
+/*
+ * dev-harness 样式：模拟宿主（SillyTavern/TauriTavern）的骨架布局与
+ * SmartTheme 变量体系。tt-toolkit 自身样式来自 dist/index.css；本文件
+ * 只补宿主侧的皮肤与结构（.drawer-content/.panelControlBar/.mes/顶栏/
+ * 输入区/FontAwesome 字符兜底），让壳在无宿主环境下呈现接近真实的视觉。
+ * SmartTheme 双主题：:root=浅色默认，body.theme-dark=深色覆盖。
+ */
+
+:root {
+    --topBarBlockSize: 48px;
+    --SmartThemeBodyColor: #242424;
+    --SmartThemeBorderColor: #8b8b8b;
+    --SmartThemeChatTintColor: rgba(128, 128, 128, 0.12);
+    --SmartThemeBlurTintColor: rgba(245, 244, 238, 0.94);
+    --SmartThemeQuoteColor: #b3742a;
+    --SmartThemeEmColor: #7a5c2e;
+}
+
+/* 宿主全局基线（TauriTavern src/style.css:144 `* { box-sizing: border-box }`）。
+   缺了它 .tt-shell 的 width:min(560px,100vw-24px) 按内容盒计算，
+   窄视口下外盒＝width+padding+border 会越出视口 1px——这是仿真误差
+   不是产品 bug，故在此对齐宿主。 */
+* {
+    box-sizing: border-box;
+}
+
+body.theme-dark {
+    --SmartThemeBodyColor: #e6e6e6;
+    --SmartThemeBorderColor: #454545;
+    --SmartThemeChatTintColor: rgba(255, 255, 255, 0.08);
+    --SmartThemeBlurTintColor: rgba(24, 24, 27, 0.92);
+    --SmartThemeQuoteColor: #c98a3d;
+    --SmartThemeEmColor: #d9b57a;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15px;
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    overflow: hidden;
+}
+
+/* ---------- 仿宿主顶栏 ---------- */
+#topBar {
+    height: var(--topBarBlockSize);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    background: var(--SmartThemeBlurTintColor);
+    z-index: 1000;
+}
+
+#topBar .harness-title {
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+#topBar .harness-note {
+    font-size: 0.75em;
+    opacity: 0.55;
+}
+
+#topBar .harness-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.harness-btn {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    background: var(--SmartThemeChatTintColor);
+    color: var(--SmartThemeBodyColor);
+    padding: 3px 10px;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.harness-btn:hover {
+    filter: brightness(1.1);
+}
+
+/* ---------- 仿宿主聊天区 + 输入区 ---------- */
+#sheld {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 18px;
+    scroll-behavior: smooth;
+}
+
+.mes {
+    margin: 10px 0;
+    padding: 6px 12px;
+    border-left: 3px solid var(--SmartThemeChatTintColor);
+    line-height: 1.55;
+}
+
+.mes.is_user {
+    border-left-color: var(--SmartThemeQuoteColor);
+}
+
+.mes.is_system {
+    opacity: 0.6;
+    font-style: italic;
+}
+
+.mes_name {
+    font-size: 0.78em;
+    font-weight: 600;
+    opacity: 0.7;
+    margin-bottom: 2px;
+}
+
+#form_sheld {
+    flex-shrink: 0;
+    padding: 8px 12px 14px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    position: relative;
+}
+
+#send_form {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+#send_textarea {
+    flex: 1;
+    min-height: 44px;
+    max-height: 200px;
+    resize: vertical;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    padding: 8px 10px;
+    font: inherit;
+}
+
+#send_but,
+#mes_stop {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background: var(--SmartThemeChatTintColor);
+    color: var(--SmartThemeBodyColor);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+#mes_stop {
+    display: none;
+}
+
+/* ---------- 仿宿主魔棒菜单（#extensionsMenu 常开显示） ---------- */
+#extensionsMenu {
+    position: fixed;
+    right: 12px;
+    bottom: 110px;
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    padding: 5px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+    z-index: 20000;
+}
+
+.list-group-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.list-group-item:hover {
+    background: var(--SmartThemeChatTintColor);
+}
+
+/* ---------- 宿主公共类兜底 ---------- */
+.flex-container {
+    display: flex;
+}
+
+.flexGap5 {
+    gap: 5px;
+}
+
+/* FontAwesome 兜底：无字体时按类名补 Unicode 字符（宿主内真实图标） */
+.fa-solid,
+.fa-fw {
+    font-style: normal;
+    font-family: inherit;
+}
+
+.fa-fw {
+    width: 1.25em;
+    text-align: center;
+}
+
+.fa-toolbox::before {
+    content: "▦";
+}
+
+.fa-circle-xmark::before {
+    content: "✕";
+}
+
+/* 宿主抽屉皮肤（壳根节点 .drawer-content 依赖宿主样式，harness 手工供给） */
+.drawer-content {
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    padding: 6px;
+    font-size: 14px;
+}
+
+.panelControlBar {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+/* 通用表单控件主题化（tab 内原生控件在宿主内继承宿主样式） */
+#ttToolkitShell textarea,
+#ttToolkitShell select,
+#ttToolkitShell input {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    font: inherit;
+    padding: 3px 6px;
+}
+
+#ttToolkitShell button {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    background: var(--SmartThemeChatTintColor);
+    color: var(--SmartThemeBodyColor);
+    font: inherit;
+    cursor: pointer;
+}
+
+#ttToolkitShell button:hover {
+    filter: brightness(1.1);
+}

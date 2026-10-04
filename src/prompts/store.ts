@@ -15,6 +15,7 @@
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
 import { createDefaultPromptConfig } from './defaults';
+import { moduleGroupOf } from './types';
 import type { DirectionPreset, ExternalInjectionConfig, PromptConfig, StoryDirection } from './types';
 
 const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
@@ -162,15 +163,24 @@ export const usePromptsStore = defineStore('tt-prompts', {
             if (!cfg) return;
             this.replaceModules(configId, cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
         },
-        /** 模块排序交换（order 值互换——相邻上移/下移） */
+        /**
+         * 模块排序交换（order 值互换）。编辑器按 G5 三分组渲染，移动的
+         * 交换对象限定同组相邻模块——跨组位置由各组分段天然隔开，跨组
+         * 交换会让另一组里凭空多/少一行，视觉上＝乱跳。
+         */
         moveModule(configId: string, moduleId: string, direction: -1 | 1) {
             const d = readPromptDomain();
             const cfg = d.promptConfigs.find(c => c.id === configId);
             if (!cfg) return;
             const sorted = [...cfg.modules].sort((a, b) => a.order - b.order);
             const idx = sorted.findIndex(m => m.id === moduleId);
-            const target = idx + direction;
-            if (idx < 0 || target < 0 || target >= sorted.length) return;
+            if (idx < 0) return;
+            const group = moduleGroupOf(sorted[idx]);
+            let target = idx + direction;
+            while (target >= 0 && target < sorted.length && moduleGroupOf(sorted[target]) !== group) {
+                target += direction;
+            }
+            if (target < 0 || target >= sorted.length) return;
             const orderA = sorted[idx].order;
             sorted[idx] = { ...sorted[idx], order: sorted[target].order };
             sorted[target] = { ...sorted[target], order: orderA };

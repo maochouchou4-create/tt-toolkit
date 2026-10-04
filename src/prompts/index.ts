@@ -7,6 +7,7 @@ export type {
     ExternalInjectionConfig,
     InjectModule,
     InjectionSource,
+    ModuleGroupId,
     ModuleTrace,
     PromptConfig,
     PromptModule,
@@ -14,6 +15,7 @@ export type {
     StoryDirection,
     TextModule,
 } from './types';
+export { moduleGroupOf } from './types';
 export { assembleMessages, historyToMessages, type AssemblySources, type AssemblyResult, type HistoryEntry } from './engine';
 export { collectAssemblySources } from './sources';
 export { createDefaultPromptConfig, createPromptConfigFromDefault } from './defaults';

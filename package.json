@@ -14,7 +14,8 @@
         "lint": "eslint .",
         "check-imports": "node scripts/check-imports.mjs",
         "check:host": "node scripts/check-host-anchors.mjs",
-        "smoke": "node scripts/smoke.mjs"
+        "smoke": "node scripts/smoke.mjs",
+        "harness": "node scripts/dev-harness/build.mjs"
     },
     "dependencies": {
         "pinia": "^3.0.4",

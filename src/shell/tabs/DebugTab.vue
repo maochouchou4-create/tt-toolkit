@@ -47,8 +47,22 @@
     </div>
 
     <div class="tt-card">
+      <div class="tt-card-title">消息组装 dump</div>
+      <div class="tt-card-sub">
+        用当前宿主数据跑一次完整组装（与实际发送同一管线）——各模块注入与否逐项可见。控制台口：__TTK_PROMPTS__.dump()
+      </div>
+      <div class="tt-actions">
+        <button type="button" :disabled="dumpRunning" @click="runDump">{{ dumpRunning ? '组装中…' : '运行组装' }}</button>
+        <button v-if="promptDumpText" type="button" @click="copyDump">复制</button>
+      </div>
+      <pre v-if="promptDumpText" class="tt-dump">{{ promptDumpText }}</pre>
+      <div v-else-if="promptDumpError" class="tt-dump-error">{{ promptDumpError }}</div>
+    </div>
+
+    <div class="tt-card">
       <div class="tt-card-title">选项解析回退调试（批B 判据）</div>
       <div class="tt-card-sub">
+        「回退解析」是模型输出不合 JSON 约定时的宽松解析安全网（主编辑面不出现，只在选项条上以小标注提示）。
         「强制畸形输出」开启后，点选项条「生成选项」会跳过 API、直接用固定畸形样本走解析路径——
         回退解析结果应显示 4 条带标题选项，且选项条标注「回退解析」。
       </div>
@@ -75,6 +89,8 @@ import { formatProbeResults, probeHost, type ProbeResult } from '@/host';
 import { dumpStorage, runStorageRoundtrip, type RoundtripReport } from '@/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from '@/modules/choice/parse';
 import { choiceStorage } from '@/modules/choice/api';
+import { assembleCurrent } from '@/modules/choice/generator';
+import { useChoiceStore } from '@/modules/choice/store';
 
 const roundtrip = ref<RoundtripReport[]>([]);
 const probeResults = ref<ProbeResult[]>([]);
@@ -82,6 +98,11 @@ const dump = ref('');
 const navDump = ref('');
 const forceRaw = ref(choiceStorage.readDomain().gen.debugForceRaw);
 const malformedResult = ref('');
+// 消息组装 dump（G5 从提示词主编辑面迁入调试 tab 的黑话面）
+const promptDumpText = ref('');
+const promptDumpError = ref('');
+const dumpRunning = ref(false);
+const choiceStore = useChoiceStore();
 
 function runRoundtrip(): void {
     roundtrip.value = runStorageRoundtrip();
@@ -105,6 +126,28 @@ function onToggleForceRaw(event: Event): void {
     forceRaw.value = checked;
 }
 
+async function runDump(): Promise<void> {
+    dumpRunning.value = true;
+    promptDumpError.value = '';
+    try {
+        const { dumpText: text } = await assembleCurrent();
+        promptDumpText.value = text;
+        choiceStore.lastDump = text;
+    } catch (e) {
+        promptDumpError.value = `组装失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+        dumpRunning.value = false;
+    }
+}
+
+async function copyDump(): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(promptDumpText.value);
+    } catch {
+        // 剪贴板权限拒绝：无提示降级（内容已在 <pre> 中可手选）
+    }
+}
+
 function runMalformedParse(): void {
     const report = parseOptions(DEBUG_MALFORMED_RAW, 4);
     const lines = [
@@ -117,3 +160,10 @@ function runMalformedParse(): void {
     console.info(`[tt-toolkit][debug] 畸形样本解析：${report.path} / ${report.options.length} 条`);
 }
 </script>
+
+<style>
+.tt-dump-error {
+    color: var(--SmartThemeQuoteColor, #c58a36);
+    font-size: 0.8em;
+}
+</style>
