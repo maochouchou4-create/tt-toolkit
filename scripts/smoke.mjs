@@ -148,6 +148,12 @@ if (registeredCommands.length < 4) {
     failures.push(`nav 最小初始化未注册全部 /ttnav-* 命令（仅注册：${registeredCommands.join(' ') || '无'}）`);
 }
 
+// 工具箱斜令在模块求值期注册（不依赖浏览器挂载路径）——QR 按钮入口的
+// 契约断言：命令必须在任何挂载发生前就进入命令表
+if (!('tt-toolbox' in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands)) {
+    failures.push('模块求值期未注册 /tt-toolbox（QR「工具箱」按钮依赖此命令）');
+}
+
 // chat 域写入走立即保存通道（writeChatMetadata → getContext().saveMetadata）
 if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
     failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
