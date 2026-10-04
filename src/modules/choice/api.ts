@@ -9,7 +9,7 @@
  * 档），GG 类端点用户按 UI 提示改 json_schema＋开流式。
  */
 import { getGlobal, setGlobal } from '@/storage';
-import type { OutputContract } from '@/host';
+import type { OutputContract, ReasoningEffort } from '@/host';
 
 const GLOBAL_CHOICE_KEY = 'choice';
 
@@ -23,6 +23,8 @@ export interface ApiConfig {
     model: string;
     /** 输出契约档位（见文件头实测结论） */
     outputContract: OutputContract;
+    /** 思考强度（off＝不发送字段；转发语义见 generate.ts buildGenerateBody 注释） */
+    reasoningEffort: ReasoningEffort;
     /** 流式（GG 假流式端点硬需求；流式同时是长请求的防挂死姿势） */
     stream: boolean;
     temperature: number;
@@ -62,7 +64,12 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
 function readDomain(): ChoiceDomain {
     const raw = getGlobal<Partial<ChoiceDomain>>(GLOBAL_CHOICE_KEY);
     return {
-        apis: Array.isArray(raw?.apis) ? (raw.apis as ApiConfig[]) : [],
+        // 旧存档没有 reasoningEffort 字段：缺省补 'off'（＝不发送，行为
+        // 与加字段前完全一致）。存档条目历来由 upsertApi 以完整 ApiConfig
+        // 写入——除新增字段外其余键必然在场（as 收窄成立的前提）
+        apis: Array.isArray(raw?.apis)
+            ? raw.apis.map(a => ({ ...a, reasoningEffort: a.reasoningEffort ?? 'off' }) as ApiConfig)
+            : [],
         activeApiId: typeof raw?.activeApiId === 'string' ? raw.activeApiId : '',
         gen: { ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) },
     };
@@ -88,6 +95,7 @@ export function createApiConfig(name: string): ApiConfig {
         key: '',
         model: '',
         outputContract: 'json_object',
+        reasoningEffort: 'off',
         stream: true,
         temperature: 0.7,
         maxTokens: 2048,

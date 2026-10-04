@@ -56,6 +56,16 @@
             <option value="prompt_only">纯提示词（不传 response_format）</option>
           </select>
         </label>
+        <label class="tt-choice-field">
+          <span>思考强度</span>
+          <select :value="settings.draft.reasoningEffort" @change="onDraftEffortChange">
+            <option value="off">不发送（默认）</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </label>
+        <div class="tt-choice-note">思考强度：仅部分端点支持，发错档会被端点忽略或报错，默认不发</div>
         <label class="tt-choice-switch">
           <input v-model="settings.draft.stream" type="checkbox">
           <span>流式请求（假流式端点必开；长请求防挂死）</span>
@@ -106,32 +116,44 @@
     <div class="tt-card">
       <div class="tt-card-title">剧情走向</div>
       <div class="tt-card-sub">
-        走向答「剧情往哪走」（随当前聊天保存）；「放任自流」＝不注入走向。
-        选项怎么写的通用约束在提示词编辑器的「写作规则」模块里改；旧池配置的
-        rules（用户手写的池级规则）是另一层，批C 导入后作为独立的池配置规则注入层生效，不与模板写作规则混写。
-      </div>
-      <div class="tt-choice-tags">
-        <button
-          v-for="tag in directionTags"
-          :key="tag.id"
-          type="button"
-          class="tt-choice-tag"
-          :class="{ 'tt-choice-tag--active': prompts.storyDirection.tag === tag.id }"
-          :title="tag.guidance || '不注入走向指引'"
-          @click="prompts.setStoryDirection({ tag: tag.id })"
-        >
-          {{ tag.label }}
-        </button>
+        走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）；
+        留空＝不注入走向。选项怎么写的通用约束在提示词编辑器的「写作规则」模块里改。
       </div>
       <label class="tt-choice-field tt-choice-field--block">
-        <span>补充指引（自由文本，可空）</span>
+        <span>走向指引（自由文本，主位）</span>
         <textarea
           :value="prompts.storyDirection.freeText"
           rows="3"
-          placeholder="如：这轮重点描写她对昨夜事件的隐瞒态度"
+          placeholder="如：让林霜主动坦白昨夜去向的真相，并暴露她与斗篷人的旧关联"
           @input="onDirectionTextInput"
         />
       </label>
+      <div class="tt-choice-presets">
+        <div class="tt-choice-presets-head">
+          <span>我的预设</span>
+          <button type="button" :disabled="!prompts.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
+        </div>
+        <div v-if="prompts.directionPresets.length === 0" class="tt-choice-empty">
+          还没有预设——写好走向指引后点「存为预设」，以后一条点击应用
+        </div>
+        <div v-else class="tt-choice-tags">
+          <button
+            v-for="preset in prompts.directionPresets"
+            :key="preset.id"
+            type="button"
+            class="tt-choice-tag"
+            :class="{ 'tt-choice-tag--active': prompts.storyDirection.presetText === preset.text }"
+            :title="preset.text"
+            @click="togglePreset(preset)"
+          >
+            {{ presetLabel(preset) }}
+            <span class="tt-choice-tag-del" title="删除该预设（不影响已应用的聊天）" @click.stop="removePreset(preset)">×</span>
+          </button>
+        </div>
+        <div v-if="prompts.storyDirection.presetText" class="tt-choice-note">
+          已应用预设：{{ prompts.storyDirection.presetText }}（再点同一预设可取消应用）
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -140,14 +162,13 @@
 import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import type { ApiConfig, ChoiceGenParams } from '@/modules/choice/api';
-import { STORY_DIRECTION_TAG_DEFS, usePromptsStore } from '@/prompts';
+import { usePromptsStore, type DirectionPreset } from '@/prompts';
 
 const settings = useChoiceSettingsStore();
 const prompts = usePromptsStore();
-const directionTags = STORY_DIRECTION_TAG_DEFS;
 
 // 自由文本防抖：每击键立即 setStoryDirection＝每击键一次 chat 域立即保存
-// （saveMetadata 通道）——保存风暴。停输入 300ms 才落盘；走向标签切换
+// （saveMetadata 通道）——保存风暴。停输入 300ms 才落盘；预设应用/取消
 // 是单次点击、保持立即保存，不进防抖。
 const DIRECTION_TEXT_DEBOUNCE_MS = 300;
 let directionTextTimer: ReturnType<typeof setTimeout> | undefined;
@@ -159,6 +180,33 @@ function onDirectionTextInput(event: Event): void {
         directionTextTimer = undefined;
         prompts.setStoryDirection({ freeText: value });
     }, DIRECTION_TEXT_DEBOUNCE_MS);
+}
+
+function presetLabel(preset: DirectionPreset): string {
+    // 预设无独立名字段（G4 最小形态：预设＝文本本体）——标签条显示
+    // 截断文本，完整内容在 title 悬浮
+    const text = preset.text.trim();
+    return text.length > 12 ? `${text.slice(0, 12)}…` : text;
+}
+
+/** 点击预设＝应用（写入 presetText 快照）；再点同一预设＝取消应用。 */
+function togglePreset(preset: DirectionPreset): void {
+    if (prompts.storyDirection.presetText === preset.text) {
+        prompts.setStoryDirection({ presetText: '' });
+    } else {
+        prompts.setStoryDirection({ presetText: preset.text });
+    }
+}
+
+function saveCurrentTextAsPreset(): void {
+    const text = prompts.storyDirection.freeText.trim();
+    if (!text) return;
+    prompts.addDirectionPreset(text);
+}
+
+function removePreset(preset: DirectionPreset): void {
+    if (!confirm(`删除预设「${presetLabel(preset)}」？（已应用该预设的聊天不受影响）`)) return;
+    prompts.deleteDirectionPreset(preset.id);
 }
 
 // 防抖挂起期间离开设置页（含切聊天后卸载）：不落盘半截文本——
@@ -173,6 +221,10 @@ function targetValue(event: Event): string {
 
 function onDraftContractChange(event: Event): void {
     settings.updateDraft({ outputContract: targetValue(event) as ApiConfig['outputContract'] });
+}
+
+function onDraftEffortChange(event: Event): void {
+    settings.updateDraft({ reasoningEffort: targetValue(event) as ApiConfig['reasoningEffort'] });
 }
 
 function onDraftTemperatureChange(event: Event): void {
@@ -322,6 +374,12 @@ function confirmRemove(api: ApiConfig): void {
     gap: 4px;
 }
 
+.tt-choice-note {
+    font-size: 0.75em;
+    opacity: 0.6;
+    padding: 0 0 4px calc(9em + 8px);
+}
+
 .tt-choice-field input,
 .tt-choice-field select,
 .tt-choice-field textarea {
@@ -375,5 +433,46 @@ function confirmRemove(api: ApiConfig): void {
     opacity: 1;
     background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.2));
     font-weight: bold;
+}
+
+.tt-choice-presets {
+    margin-top: 4px;
+}
+
+.tt-choice-presets-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85em;
+    opacity: 0.8;
+    margin-bottom: 4px;
+}
+
+.tt-choice-presets-head button {
+    background: transparent;
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: 2px 10px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.tt-choice-presets-head button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.tt-choice-tag-del {
+    /* 删除叉与标签文本同为按钮内容——独立悬浮态只归删除叉 */
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 2px;
+    opacity: 0.55;
+}
+
+.tt-choice-tag-del:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #c58a36);
 }
 </style>

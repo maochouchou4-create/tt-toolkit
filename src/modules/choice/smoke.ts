@@ -7,6 +7,7 @@
  * scripts/smoke.mjs 收口断言。
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry } from '@/prompts';
+import { buildGenerateBody } from '@/host';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
@@ -36,7 +37,7 @@ function syntheticSources(): AssemblySources {
         worldInfoDepthBefore: '【三年前】她曾与斗篷人有过一面之缘。',
         worldInfoDepthAfter: '',
         history,
-        storyDirection: { tag: 'suspense', freeText: '重点描写她的回避态度' },
+        storyDirection: { presetText: '让剧情围绕未解之谜展开，逐步加深悬念。', freeText: '重点描写她的回避态度' },
         externalSlots: [{ key: '1_memory', value: '此前剧情摘要：两人在酒馆发生过争执。' }],
         baibaiSummary: null,
         count: 4,
@@ -61,7 +62,14 @@ function runAssemblyChecks(): string {
     check('世界书前插注入可见（<world_info> 段）', allText.includes('一栋老写字楼'));
     check('世界书深度桶（深组）注入可见', allText.includes('【三年前】'));
     check('聊天历史注入（末条 AI 楼层 <current_scene> 包裹）', allText.includes('<current_scene>') && allText.includes('她垂下眼帘'));
-    check('story_direction 注入可见（<direction> 段含走向指引＋自由文本）', allText.includes('<direction>') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
+    check('story_direction 注入可见（<direction> 段＝预设正文＋自由文本拼接）', allText.includes('<direction>') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
+    // G4 走向重设计：自由文本为主＋预设拼接；两者皆空＝模块按未启用处理
+    const emptyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '' } });
+    const emptyDirTrace = emptyDirection.trace.find(t => t.moduleId === 'inject_story_direction');
+    check('story_direction 两者皆空＝不注入（trace 留痕）', emptyDirTrace?.injected === false && emptyDirTrace.note.includes('未设置'), `note=${emptyDirTrace?.note ?? '（无 trace）'}`);
+    const freeOnlyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '重点描写她的回避态度' } });
+    const freeOnlyText = freeOnlyDirection.messages.map(m => m.content).join('\n');
+    check('story_direction 仅自由文本也注入（无预设可用）', freeOnlyText.includes('<direction>') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
     // 默认关的模块（外部搬运模块本体参与管线，但默认无勾选/开关关闭）：
     // baibai 合成源传 null → trace 记录未注入原因（默认关的可观测性）
     const baibaiTrace = result.trace.find(t => t.moduleId === 'inject_baibai');
@@ -72,6 +80,12 @@ function runAssemblyChecks(): string {
     const injectedExtTrace = result.trace.find(t => t.moduleId === 'inject_external_slot');
     check('外部槽位 trace 注记到槽位粒度', injectedExtTrace?.injected === true && injectedExtTrace.note.includes('1_memory'), `note=${injectedExtTrace?.note ?? '（无 trace）'}`);
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
+    // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
+    check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件发展') && allText.includes('主动行为或反应'));
+    check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
+    check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
+    check('few-shot 三条混合视角示例', allText.includes('反客为主') && allText.includes('骤然断电'));
+    check('生成指令口径＝可选的推进方向', allText.includes('为当前剧情提供') && allText.includes('可选的推进方向'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
 
@@ -123,6 +137,25 @@ function runParseChecks(): void {
 }
 
 /**
+ * G3 思考强度机判：buildGenerateBody 的 reasoning_effort 字段纪律
+ * （非 off 才发送；off/缺省不出现该键——默认行为与加字段前逐字节一致）。
+ */
+function runReasoningEffortChecks(): void {
+    const messages = [{ role: 'user' as const, content: 'x' }];
+    const base = {
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'sk-test',
+        model: 'test-model',
+        stream: true,
+        outputContract: 'prompt_only' as const,
+    };
+    const withHigh = buildGenerateBody(messages, { ...base, reasoningEffort: 'high' });
+    check('reasoningEffort 非 off 时发送 reasoning_effort', (withHigh as Record<string, unknown>).reasoning_effort === 'high', `body=${JSON.stringify(withHigh)}`);
+    const withOff = buildGenerateBody(messages, { ...base, reasoningEffort: 'off' });
+    check('reasoningEffort off 时不发送该字段', !('reasoning_effort' in withOff), `body=${JSON.stringify(withOff)}`);
+}
+
+/**
  * debugForceRaw 调试开关机判（批B 判据：生成管线接线）。
  *
  * 置开关后走完整 generateOptions 管线（组装→跳过 API→直喂畸形样本→
@@ -149,6 +182,7 @@ export async function runChoiceSmoke(): Promise<void> {
     console.info('=== 组装 dump 全文 ===');
     console.info(dumpText);
     runParseChecks();
+    runReasoningEffortChecks();
     await runDebugForceRawChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);

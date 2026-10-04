@@ -7,18 +7,20 @@
  *
  * 存储落点（方案 §2.2）：
  *   - 全局域 extension_settings.ttToolkit：promptConfigs（含 modules）、
- *     promptActiveId、externalInjections（外部注入搬运配置）；
- *   - 聊天域 chat_metadata.ttToolkit：storyDirection（走向标签＋自由
- *     文本）——写走 writeChatMetadata 立即保存通道。
+ *     promptActiveId、externalInjections（外部注入搬运配置）、
+ *     directionPresets（用户自建走向预设列表——G4）；
+ *   - 聊天域 chat_metadata.ttToolkit：storyDirection（已应用预设正文
+ *     ＋自由文本）——写走 writeChatMetadata 立即保存通道。
  */
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
 import { createDefaultPromptConfig } from './defaults';
-import type { ExternalInjectionConfig, PromptConfig, StoryDirection } from './types';
+import type { DirectionPreset, ExternalInjectionConfig, PromptConfig, StoryDirection } from './types';
 
 const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
 const GLOBAL_PROMPT_ACTIVE_KEY = 'promptActiveId';
 const GLOBAL_EXTERNAL_KEY = 'externalInjections';
+const GLOBAL_DIRECTION_PRESETS_KEY = 'directionPresets';
 const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 
 /** 全局域整体结构（批B 落的 prompts 命名空间；choice 侧另有自己的键）。 */
@@ -90,8 +92,25 @@ export const usePromptsStore = defineStore('tt-prompts', {
         },
         storyDirection(): StoryDirection {
             void this.revision;
-            const d = getChat<StoryDirection>(CHAT_STORY_DIRECTION_KEY);
-            return { tag: d?.tag === undefined ? 'free' : d.tag, freeText: typeof d?.freeText === 'string' ? d.freeText : '' };
+            const d = getChat<Partial<StoryDirection>>(CHAT_STORY_DIRECTION_KEY);
+            // 旧档案是 {tag, freeText} 形态（G4 前六选一标签）：tag 已废弃
+            // （用户拍板固定标签不保留）——读档只取 freeText，tag 丢弃；
+            // presetText 旧档案没有，缺省空串
+            return {
+                presetText: typeof d?.presetText === 'string' ? d.presetText : '',
+                freeText: typeof d?.freeText === 'string' ? d.freeText : '',
+            };
+        },
+        directionPresets(): DirectionPreset[] {
+            void this.revision;
+            const raw = getGlobal<unknown>(GLOBAL_DIRECTION_PRESETS_KEY);
+            if (!Array.isArray(raw)) return [];
+            // 逐项守门：外部写坏的条目（缺 id/text 或类型不对）剔除而非抛错
+            // ——预设列表是用户可重建的辅助数据，不值得 Fail Fast 打断组装
+            return raw.filter(
+                (p): p is DirectionPreset =>
+                    typeof p === 'object' && p !== null && typeof (p as DirectionPreset).id === 'string' && typeof (p as DirectionPreset).text === 'string',
+            );
         },
     },
     actions: {
@@ -177,6 +196,20 @@ export const usePromptsStore = defineStore('tt-prompts', {
         setStoryDirection(patch: Partial<StoryDirection>) {
             const current = this.storyDirection;
             setChat(CHAT_STORY_DIRECTION_KEY, { ...current, ...patch });
+            this.revision++;
+        },
+        /** 把当前自由文本存为预设（G4：「我的预设」可添加当前文本为预设）。 */
+        addDirectionPreset(text: string): void {
+            const value = text.trim();
+            if (!value) return;
+            const preset: DirectionPreset = { id: `dir-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text: value };
+            setGlobal(GLOBAL_DIRECTION_PRESETS_KEY, [...this.directionPresets, preset]);
+            this.revision++;
+        },
+        deleteDirectionPreset(id: string): void {
+            // 只删全局列表；已应用聊天存的是正文快照，不受影响（见 types
+            // 注释——快照自包含，删除预设不清空已应用的走向）
+            setGlobal(GLOBAL_DIRECTION_PRESETS_KEY, this.directionPresets.filter(p => p.id !== id));
             this.revision++;
         },
         setExternalInjections(patch: Partial<ExternalInjectionConfig>) {

@@ -42,6 +42,12 @@ export interface GenerateMessage {
 /** 输出契约档位（方案 §1 P-JSON：服务商结构化输出优先＋客户端解析兜底）。 */
 export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
 
+/**
+ * 思考强度档位（G3）。'off'＝不发送该字段（默认——见 UI 端点配置的
+ * 说明文案）；'low'|'medium'|'high' 映射为 OpenAI reasoning_effort 值。
+ */
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+
 export interface GenerateRequestConfig {
     /** API base（宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径） */
     baseUrl: string;
@@ -52,6 +58,8 @@ export interface GenerateRequestConfig {
     maxTokens?: number;
     stream: boolean;
     outputContract: OutputContract;
+    /** 思考强度（off＝不发送，见 ReasoningEffort 注释） */
+    reasoningEffort?: ReasoningEffort;
     /** json_schema 模式的 schema 本体（name/strict 由调用方语义固定） */
     jsonSchema?: unknown;
 }
@@ -140,6 +148,22 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     } else if (config.outputContract === 'json_object') {
         // json_object 形态宿主原样透传（openai.rs:288-293）
         body.response_format = { type: 'json_object' };
+    }
+    if (config.reasoningEffort && config.reasoningEffort !== 'off') {
+        // 思考强度（G3）：值域对齐 OpenAI reasoning_effort（low/medium/high）。
+        // 宿主侧两级语义（复核 D:\code\repos\TauriTavern\src-tauri\rewrite 施工时
+        // HEAD）：
+        // ①入站捕获：chat_completion_dto.rs ChatCompletionGenerateRequestDto
+        //   payload 用 `#[serde(flatten)] Map<String,Value>`（:41-45），未知
+        //   字段（含 reasoning_effort）整包进 Rust payload map；
+        // ②出站白名单：openai.rs build_chat_completion_payload 按白名单逐键
+        //   组装上游请求（:153-173），reasoning_effort 仅在
+        //   should_forward_openai_reasoning_effort（openai_reasoning.rs:41-46）
+        //   命中 OpenAI 推理系模型名（o1/o3/gpt-5.x…）时转发（openai.rs:
+        //   188-199），其余模型名在宿主翻译层被静默丢弃。
+        // 故该字段仅对推理系模型名真实生效——与端点配置 UI 的「仅部分端点
+        // 支持，发错档会被端点忽略或报错，默认不发」说明口径一致。
+        body.reasoning_effort = config.reasoningEffort;
     }
     // prompt_only：不发 response_format——纯提示词契约＋客户端解析兜底
     return body;

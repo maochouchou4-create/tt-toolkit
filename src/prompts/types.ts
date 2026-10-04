@@ -63,19 +63,22 @@ export interface PromptConfig {
     modules: PromptModule[];
 }
 
-/** 剧情走向标签（六选一起步，方案 §7 P-走向；''＝放任自流不注入）。 */
-export type StoryDirectionTag = 'advance' | 'conflict' | 'warm' | 'suspense' | 'foreshadow' | 'free';
-
-export interface StoryDirectionTagDef {
-    id: StoryDirectionTag;
-    label: string;
-    /** 注入给模型的走向指令（free 不注入，guidance 不消费） */
-    guidance: string;
+/** 用户自建剧情走向预设（全局域；G4 拍板：自定义预设取代固定六标签）。 */
+export interface DirectionPreset {
+    id: string;
+    /** 预设正文（应用后注入 <direction> 段的走向指令本体） */
+    text: string;
 }
 
-/** 剧情趋向（chat 域：走向标签＋自由文本，答「剧情往哪走」）。 */
+/**
+ * 剧情趋向（chat 域，答「剧情往哪走」）：已应用预设正文＋自由文本。
+ * presetText 是应用时刻的快照——预设日后编辑/删除不影响已应用聊天
+ * （快照自包含，无悬空引用）；两者皆空＝模块按未启用处理（不注入）。
+ */
 export interface StoryDirection {
-    tag: StoryDirectionTag;
+    /** 已应用预设正文（空串＝未应用） */
+    presetText: string;
+    /** 自由补充文本（空串＝没有） */
     freeText: string;
 }
 

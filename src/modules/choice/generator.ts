@@ -114,6 +114,7 @@ export async function generateOptions(): Promise<void> {
                 maxTokens: api.maxTokens,
                 stream: api.stream,
                 outputContract: api.outputContract,
+                reasoningEffort: api.reasoningEffort,
                 // 对象 schema 与提示词契约同步（顶层 {"options":[...]}）；
                 // 端点对 json_schema 档的支持度实测结论见 api.ts 文件头
                 jsonSchema: api.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,

@@ -31,6 +31,7 @@ export {
     type GenerateRequestConfig,
     type GenerateResult,
     type OutputContract,
+    type ReasoningEffort,
 } from './generate';
 export {
     getChatHistory,

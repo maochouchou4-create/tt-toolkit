@@ -12,9 +12,7 @@ import type {
     ModuleTrace,
     PromptModule,
     StoryDirection,
-    StoryDirectionTagDef,
 } from './types';
-import { STORY_DIRECTION_TAG_DEFS } from './directions';
 
 /** 聊天历史条目（原始 user/assistant 楼层；<current_scene> 包裹在引擎内做）。 */
 export interface HistoryEntry {
@@ -41,7 +39,7 @@ export interface AssemblySources {
     worldInfoDepthAfter: string;
     /** 原始历史（不含 <current_scene>——包裹在本引擎做，位置固定末条 AI 楼层） */
     history: HistoryEntry[];
-    /** 剧情走向（放任自流/未设置传 null——story_direction 模块跳过） */
+    /** 剧情走向（null＝未设置——story_direction 模块按未启用处理） */
     storyDirection: StoryDirection | null;
     /** 用户勾选搬入的宿主通用注入槽位（顺序＝勾选列表顺序） */
     externalSlots: Array<{ key: string; value: string }>;
@@ -135,11 +133,14 @@ function resolveInjectContent(
             // （本函数返回单串表达不了多消息）——此分支只为 switch 穷尽性
             return { content: '', note: '聊天历史为空' };
         case 'story_direction': {
-            if (!sources.storyDirection) return { content: '', note: '剧情走向＝放任自流或未设置（不注入）' };
-            const def = directionDefOf(sources.storyDirection.tag);
-            const free = sources.storyDirection.freeText.trim();
-            const body = free ? `${def.guidance}\n补充指引：${free}` : def.guidance;
-            return { content: wrapTag('direction', body, sources), note: '' };
+            // G4 拍板：<direction> 段＝已应用预设正文＋自由文本拼接
+            // （预设文本与自由文本同为走向指令，不做二级标注）；两者
+            // 皆空＝模块按未启用处理（不注入、trace 留痕）
+            const preset = sources.storyDirection?.presetText.trim() ?? '';
+            const free = sources.storyDirection?.freeText.trim() ?? '';
+            if (!preset && !free) return { content: '', note: '剧情走向未设置（不注入）' };
+            const note = preset && free ? '预设＋自由文本' : preset ? '预设' : '自由文本';
+            return { content: wrapTag('direction', [preset, free].filter(Boolean).join('\n'), sources), note };
         }
         case 'external_slot': {
             if (sources.externalSlots.length === 0) return { content: '', note: '未勾选任何宿主注入槽位' };
@@ -170,20 +171,6 @@ function resolveInjectContent(
 /** 分段标签包裹（§2.3 制版原则：结构化分段标签）＋占位符填充。 */
 function wrapTag(tag: string, body: string, sources: AssemblySources): string {
     return fillPlaceholders(`<${tag}>\n${body}\n</${tag}>`, sources);
-}
-
-/**
- * 走向标签查定义：未知标签显式报错（Fail Fast）。
- *
- * 与导入校验（validate.ts）同族：chat 域数据若被外部写坏（枚举外标签），
- * 静默回退首项＝悄悄改写用户意图；报错让坏数据在组装口当场暴露。
- */
-function directionDefOf(tag: string): StoryDirectionTagDef {
-    const def = STORY_DIRECTION_TAG_DEFS.find(d => d.id === tag);
-    if (!def) {
-        throw new Error(`未知的剧情走向标签「${tag}」——storyDirection 数据损坏，请重设剧情走向`);
-    }
-    return def;
 }
 
 /**

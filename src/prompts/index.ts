@@ -3,6 +3,7 @@
  */
 export type {
     AssemblyMessage,
+    DirectionPreset,
     ExternalInjectionConfig,
     InjectModule,
     InjectionSource,
@@ -11,10 +12,8 @@ export type {
     PromptModule,
     PromptRole,
     StoryDirection,
-    StoryDirectionTag,
     TextModule,
 } from './types';
-export { STORY_DIRECTION_TAG_DEFS, directionLabelOf } from './directions';
 export { assembleMessages, historyToMessages, type AssemblySources, type AssemblyResult, type HistoryEntry } from './engine';
 export { collectAssemblySources } from './sources';
 export { createDefaultPromptConfig, createPromptConfigFromDefault } from './defaults';

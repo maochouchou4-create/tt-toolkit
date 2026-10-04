@@ -7,10 +7,10 @@
  *   - 结构化分段标签：注入模块由引擎包裹 <persona>/<character>/…
  *     分段标签，文本模块自身保持短小；
  *   - 指令条目化短而刚性：每条规则一行一事，不写长段落；
- *   - 正向示例＋few-shot 为主：few_shot 模块给一个完整示例（可关），
- *     各规则写「要做什么」而非「不许做什么」；
- *   - 负向禁令最少化：只保留一条结构性禁令（不替角色行动——这条
- *     不写会导致选项系统性跑偏，属结构约束而非风格禁令）；
+ *   - 正向示例＋few-shot 为主：few_shot 模块给覆盖三种视角的完整示例
+ *     （可关），各规则写「要做什么」而非「不许做什么」；
+ *   - 负向禁令最少化：仅保留第三人称叙述口径这一条结构性约束（选项
+ *     视角失控会导致输出系统性跑偏，属结构约束而非风格禁令）；
  *   - 占位符：{{count}}/{{min_chars}}/{{max_chars}}/{{user}}/{{char}}。
  */
 import type { PromptConfig } from './types';
@@ -28,9 +28,7 @@ export function createDefaultPromptConfig(): PromptConfig {
                 role: 'system',
                 order: 10,
                 enabled: true,
-                content: [
-                    '你是沉浸式角色扮演的主持人。用户（{{user}}）与角色（{{char}}）的对话正在进行，你为用户准备下一组可选行动。',
-                ].join('\n'),
+                content: '你是沉浸式角色扮演的主持人。用户（{{user}}）与角色（{{char}}）的对话正在进行，你为当前剧情提供下一组可选的推进方向。',
             },
             {
                 kind: 'inject',
@@ -153,11 +151,12 @@ export function createDefaultPromptConfig(): PromptConfig {
                 enabled: true,
                 content: [
                     '<example>',
-                    '输出示例（仅演示格式与写法，内容与当前剧情无关）：',
+                    '输出示例（仅演示格式与写法，内容与当前剧情无关；三种视角各一条：{{user}} 的行动、{{char}} 的主动行为、场景层面的事件）：',
                     '{',
                     '  "options": [',
-                    '    {"title": "询问昨夜去向", "content": "你压下心头的疑惑，放缓语气问道：「昨天夜里，你到底去了哪里？」"},',
-                    '    {"title": "悄悄跟上", "content": "你不动声色地告别，转身拐进街角，等她走远后缀了上去。"}',
+                    '    {"title": "询问昨夜去向", "content": "{{user}} 压下心头的疑惑，放缓语气问道：「昨天夜里，你到底去了哪里？」"},',
+                    '    {"title": "反客为主", "content": "{{char}} 忽然放下茶杯，直视 {{user}} 的眼睛：「在问别人之前，先解释一下你袖口上沾的口红印吧。」"},',
+                    '    {"title": "骤然断电", "content": "整层楼的灯骤然熄灭，黑暗中传来玻璃碎裂声，电梯井的方向有人惊呼了一句什么。"}',
                     '  ]',
                     '}',
                     '</example>',
@@ -173,11 +172,10 @@ export function createDefaultPromptConfig(): PromptConfig {
                 content: [
                     '<rules>',
                     '写作规则：',
-                    '1. 每条选项是用户（{{user}}）可执行的一个具体行动，以用户视角写。',
-                    '2. 行动贴合 {{user}} 的人设与当前场景，优先使用场景内已有的对象、人物与线索。',
+                    '1. 每条选项是一个具体的剧情推进动作：可以是 {{user}} 的行动，也可以是其他角色（如 {{char}}）的主动行为或反应，还可以是场景层面的事件发展。',
+                    '2. 全部以第三人称叙述书写：用角色名或他／她指代，不用「你」。内容贴合相关角色的人设与当前场景，优先使用场景内已有的对象、人物与线索。',
                     '3. 恰好 {{count}} 条，各条角度错开（如：推进对话、试探、采取行动、暂且回避）。',
                     '4. 每条正文 {{min_chars}}～{{max_chars}} 字，写出具体的动作与言语，可含一句直接对白。',
-                    '5. 只写 {{user}} 自己能做的事；{{char}} 与其他角色的反应留给后续剧情。',
                     '</rules>',
                 ].join('\n'),
             },
@@ -203,7 +201,7 @@ export function createDefaultPromptConfig(): PromptConfig {
                 role: 'user',
                 order: 140,
                 enabled: true,
-                content: '请根据以上设定与 <current_scene> 中的当前场景，为 {{user}} 生成 {{count}} 条行动选项。',
+                content: '请根据以上设定与 <current_scene> 中的当前场景，为当前剧情提供 {{count}} 条可选的推进方向。',
             },
         ],
     };
