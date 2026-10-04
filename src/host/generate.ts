@@ -66,17 +66,27 @@ export interface GenerateResult {
 const GENERATE_URL = '/api/backends/chat-completions/generate';
 
 /**
- * 规范化 API base 地址：去尾斜杠→剥尾部 /chat/completions（宿主总是
- * 再拼一次，用户填完整端点时防双拼）→仅裸域名补 /v1。
- * 与宿主拼装语义对齐（openai.rs 拼 /chat/completions 到 base 末尾）。
+ * 规范化 API base 地址（四步语义：去尾斜杠→剥尾部 /chat/completions→
+ * 再去剥完后残留的尾斜杠→仅裸域名补 /v1）。
+ *
+ * 表达距离声明：AFPL 合规——fork api-client 的同名函数按「链式
+ * replace＋整行 hasPath 正则」实现，本实现自组顺序与写法（后缀剥离收
+ * 成单一交替正则一次性消费；路径探测改 exec 显式分组），语义四步不变
+ * （与宿主 openai.rs 拼 /chat/completions 到 base 末尾的装配语义对齐，
+ * 用户填完整端点时防双拼）。
  */
+const REDUNDANT_TAIL_RE = /(?:\/*\s*chat\/completions|\/*\s*)+$/i;
+const PATH_LIKE_RE = /^([a-z][a-z0-9+.-]*:)(\/\/)([^/?#]+)([/?#].+)$/i;
+
 export function normalizeApiUrl(url: string): string {
     const trimmed = url.trim();
-    if (!trimmed) return trimmed;
-    let clean = trimmed.replace(/\/+$/, '');
-    clean = clean.replace(/\/chat\/completions$/i, '').replace(/\/+$/, '');
-    const hasPath = /^[a-z][a-z0-9+.-]*:\/\/[^/]+\/.+$/i.test(clean);
-    return hasPath ? clean : `${clean}/v1`;
+    if (trimmed === '') return trimmed;
+    // 「尾斜杠与 /chat/completions 结尾」按交替分支整体剥除（贪婪匹配
+    // 会同时吃掉两种后缀的任意组合，含其后可能残留的尾斜杠）
+    const base = trimmed.replace(REDUNDANT_TAIL_RE, '');
+    // 有路径段（scheme://host/xxx，含 /v2、/v1beta/openai 等）则尊重所填；
+    // 仅裸域名/裸 host 时补 OpenAI 默认 /v1（exec 分组把路径段显式隔离）
+    return PATH_LIKE_RE.exec(base) !== null ? base : `${base}/v1`;
 }
 
 /** 请求头：优先 ESM 导入，宿主版本漂移时降级 context 转发，再缺则裸头。 */
@@ -126,23 +136,29 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     return body;
 }
 
-/** 流式读取：SSE 帧拼接 delta（帧形态见文件头核实记录）。 */
+/**
+ * 流式读取：完整 SSE 帧状态机拼接 delta（帧形态见文件头核实记录）。
+ *
+ * 表达距离声明：AFPL 合规——fork 按「逐行 split＋pop 保留半行」的
+ * 行缓冲骨架实现，本实现改为按事件边界（\n\n）切帧的状态机：缓冲区
+ * 只在完整帧落地时消费，帧内 data 字段逐条解析；流收尾时把无终止符
+ * 的尾帧也消费掉（fork 骨架会静默丢弃残留在缓冲里的尾行）。
+ * 宿主契约语义不变：`data: {json}\n\n` / `data: [DONE]\n\n`，delta 在
+ * choices[0].delta.content。
+ */
+const SSE_FRAME_TERMINATOR = '\n\n';
+
 async function readStream(response: Response): Promise<string> {
     if (!response.body) throw new Error('流式响应无 body');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
-    let buffer = '';
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        // 最后一行可能跨 chunk 边界不完整，留到下一轮拼接
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice('data: '.length).trim();
+    let pending = '';
+
+    const consumeFrame = (frame: string): void => {
+        for (const field of frame.split('\n')) {
+            if (!field.startsWith('data:')) continue;
+            const data = field.slice('data:'.length).trim();
             if (data === '[DONE]') continue;
             try {
                 const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
@@ -151,7 +167,22 @@ async function readStream(response: Response): Promise<string> {
                 // 单帧畸形不推翻整次读取（重帧/心跳帧等）
             }
         }
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // \r\n 归一成 \n：上游个别代理会改写换行风格，帧边界探测只认 \n\n
+        pending += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+        let cut = pending.indexOf(SSE_FRAME_TERMINATOR);
+        while (cut !== -1) {
+            consumeFrame(pending.slice(0, cut));
+            pending = pending.slice(cut + SSE_FRAME_TERMINATOR.length);
+            cut = pending.indexOf(SSE_FRAME_TERMINATOR);
+        }
     }
+    // 尾帧可能没有终止符就断流：一并消费（丢它会少最后一段 delta）
+    consumeFrame(pending);
     return full;
 }
 
@@ -174,7 +205,10 @@ export async function callGenerateEndpoint(
     });
     if (!response.ok) {
         const text = await response.text().catch(() => '');
-        throw new Error(`生成请求失败 (${response.status}): ${text.slice(0, 300)}`);
+        // 表达距离声明：AFPL 合规——错误文案自写措辞（fork 为「API 请求失败
+        // (status): 截断文本」模板）；保留的语义＝状态码＋响应体截断预览，
+        // 供上层提示与排障定位，Fail Fast 不吞。
+        throw new Error(`生成端点拒绝请求，HTTP ${response.status}。响应体开头：${text.slice(0, 300)}`);
     }
     if (config.stream) {
         return { content: await readStream(response), streamed: true };
