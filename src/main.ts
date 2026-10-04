@@ -1,8 +1,9 @@
 /**
  * 扩展引导：唯一环境分支点（批A 修复：模块不再自行探测环境自启动）。
  *
- * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
- * → initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋选项条挂载）
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
+ * → initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋选项条挂载
+ * ＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav()。node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：
  * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化
  * → initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()。
@@ -16,7 +17,7 @@
 import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
-import { createChoiceSettingsTab, createDebugTab, createNavSettingsTab, createPromptEditorTab } from '@/shell/tabs';
+import { createChoiceSettingsTab, createDebugTab, createNavSettingsTab, createPoolTab, createPromptEditorTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
     initStorage();
     mountShell();
     registerTab(createChoiceSettingsTab());
+    registerTab(createPoolTab());
     registerTab(createPromptEditorTab());
     registerTab(createNavSettingsTab());
     registerTab(createDebugTab());

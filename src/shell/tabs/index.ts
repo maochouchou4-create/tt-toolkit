@@ -9,6 +9,7 @@ import type { ShellTab } from '@/shell/types';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import DebugTab from './DebugTab.vue';
 import NavSettingsTab from './NavSettingsTab.vue';
+import PoolTab from './PoolTab.vue';
 import PromptEditorTab from './PromptEditorTab.vue';
 
 export function createDebugTab(): ShellTab {
@@ -53,6 +54,18 @@ export function createPromptEditorTab(): ShellTab {
         tabTitle: '提示词',
         mount(container) {
             const app = createApp(PromptEditorTab);
+            app.use(pinia);
+            app.mount(container);
+        },
+    };
+}
+
+export function createPoolTab(): ShellTab {
+    return {
+        id: 'pool',
+        tabTitle: '条目池',
+        mount(container) {
+            const app = createApp(PoolTab);
             app.use(pinia);
             app.mount(container);
         },

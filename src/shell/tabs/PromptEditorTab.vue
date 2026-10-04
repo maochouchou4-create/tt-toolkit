@@ -184,6 +184,8 @@ const SOURCE_DESCRIPTIONS: Record<InjectionSource, string> = {
     wi_depth_after: '世界书：按对话深度插入到历史后段的条目。',
     chat_history: '聊天历史：最近几轮对话（层数在「选项生成」页设置）；最新一条 AI 回复会标为当前场景。',
     story_direction: '剧情走向：「选项生成」页写的方向文本与已应用预设。',
+    pool_entries: '条目池：池条目按固定必发（pinned）＋抽签候选两区注入，每次生成现场重抽（「条目池」页管理）。',
+    pool_rules: '池规则：当前生效池配置的规则原文，作为独立段落与模板写作规则分开注入。',
     external_slot: '其他插件注入到酒馆通用槽位的内容，按上方勾选搬入。',
     baibai: 'STBaiBaiBook（柏宝书）插件生成的剧情摘要。',
 };
