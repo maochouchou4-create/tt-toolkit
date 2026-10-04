@@ -68,8 +68,6 @@ export async function collectAssemblySources(params: {
         worldInfoAfter: '',
         worldInfoExamples: [] as string[],
         worldInfoDepth: [] as Array<{ depth: number; entries: string[] }>,
-        anBefore: [] as string[],
-        anAfter: [] as string[],
     };
     try {
         worldInfo = await runWorldInfoScan({

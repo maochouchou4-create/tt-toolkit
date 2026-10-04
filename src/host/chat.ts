@@ -18,7 +18,8 @@
  * - **世界书**：scripts/world-info.js:988
  *   `getWorldInfoPrompt(chat, maxContext, isDryRun, globalScanData)`
  *   （ESM 导出；chat 要求倒序数组——最新消息在前，主生成同口径；
- *   返回 worldInfoBefore/After/Examples/Depth/anBefore/anAfter 桶）。
+ *   返回 worldInfoBefore/After/Examples/Depth/anBefore/anAfter 桶。本层
+ *   只消费前四类；an 桶走注入槽位通道搬运——见 WorldInfoBuckets 注释）。
  * - **注入槽位表**：script.js:1021 `export let extension_prompts = {}`
  *   （:10647 setExtensionPrompt 写入 {value, position, depth, scan,
  *   role, filter}）；st-context.js:158 经 context 转发
@@ -45,14 +46,18 @@ export interface WorldInfoScanInput {
     creatorNotes: string;
 }
 
-/** 世界书激活结果桶（world-info.js:1005-1018 返回结构）。 */
+/**
+ * 世界书激活结果桶（world-info.js:1005-1018 返回结构的消费子集）。
+ *
+ * anBefore/anAfter（作者注释桶）刻意不采集：本旁路请求不消费它们，
+ * 采集后弃用＝契约含糊。作者注释的搬运走外部注入槽位扫描通道
+ * （listExtensionPromptSlots，见下），用户勾选后随 external_slot 注入。
+ */
 export interface WorldInfoBuckets {
     worldInfoBefore: string;
     worldInfoAfter: string;
     worldInfoExamples: string[];
     worldInfoDepth: Array<{ depth: number; entries: string[] }>;
-    anBefore: string[];
-    anAfter: string[];
 }
 
 /** 通用注入槽位条目（script.js:10648-10655 写入形态）。 */
@@ -102,8 +107,6 @@ export async function runWorldInfoScan(input: WorldInfoScanInput): Promise<World
                 entries: Array.isArray(d?.entries) ? d.entries.filter(x => typeof x === 'string') : [],
             }))
             : [],
-        anBefore: Array.isArray(result.anBefore) ? result.anBefore.filter(x => typeof x === 'string') : [],
-        anAfter: Array.isArray(result.anAfter) ? result.anAfter.filter(x => typeof x === 'string') : [],
     };
 }
 

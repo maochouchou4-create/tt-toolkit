@@ -65,8 +65,6 @@ globalThis.__TT_SMOKE_STUBS__ = {
         worldInfoAfter: '',
         worldInfoExamples: [],
         worldInfoDepth: [],
-        anBefore: [],
-        anAfter: [],
     }),
     // 事件总线（真实 API 面无 off，摘除监听为 removeListener）
     eventSource: { on: noop, once: noop, emit: noop },
