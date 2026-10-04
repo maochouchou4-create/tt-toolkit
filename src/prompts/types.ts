@@ -41,7 +41,8 @@ export interface TextModule {
 
 /**
  * 注入模块：内容来自运行时上下文，不可编辑文本（可调启停/顺序/role）。
- * external_slot 专用 slotKey 绑定宿主通用注入槽位（用户勾选搬入）。
+ * 槽位选择不在本类型（双语义残留已清）：external_slot 源搬哪些槽位由
+ * ExternalInjectionConfig.selectedSlots 决定，与模块定义解耦。
  */
 export interface InjectModule {
     kind: 'inject';
@@ -51,7 +52,6 @@ export interface InjectModule {
     order: number;
     enabled: boolean;
     source: InjectionSource;
-    slotKey?: string;
 }
 
 export type PromptModule = TextModule | InjectModule;

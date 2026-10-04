@@ -51,7 +51,15 @@
           <span class="tt-prompt-module-kind" :title="mod.kind === 'inject' ? `注入源：${mod.source}` : '文本模块'">
             {{ mod.kind === 'inject' ? '注入' : '文本' }}
           </span>
-          <select class="tt-prompt-module-role" :value="mod.role" title="消息角色" @change="prompts.updateModuleRole(effective.id, mod.id, ($event.target as HTMLSelectElement).value as PromptModule['role'])">
+          <!-- chat_history 的 role 被引擎忽略（历史消息按楼层原始角色展开）——
+            呈现可改但不生效的字段＝契约谎言，禁用并说明真实语义 -->
+          <select
+            class="tt-prompt-module-role"
+            :value="mod.role"
+            :disabled="mod.kind === 'inject' && mod.source === 'chat_history'"
+            :title="roleSelectTitle(mod)"
+            @change="prompts.updateModuleRole(effective.id, mod.id, ($event.target as HTMLSelectElement).value as PromptModule['role'])"
+          >
             <option value="system">system</option>
             <option value="user">user</option>
             <option value="assistant">assistant</option>
@@ -147,6 +155,13 @@ function isLast(mod: PromptModule): boolean {
 
 function toggleEdit(mod: PromptModule): void {
     editingId.value = editingId.value === mod.id ? '' : mod.id;
+}
+
+function roleSelectTitle(mod: PromptModule): string {
+    if (mod.kind === 'inject' && mod.source === 'chat_history') {
+        return '消息角色由聊天楼层本身决定（user/assistant），模块角色不参与';
+    }
+    return '消息角色';
 }
 
 function createConfig(): void {
@@ -342,6 +357,11 @@ onMounted(() => {
     border-radius: 4px;
     font-size: 0.75em;
     flex-shrink: 0;
+}
+
+.tt-prompt-module-role:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 .tt-prompt-module-ops {
