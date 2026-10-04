@@ -246,8 +246,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
 // 批B 37 条＋批C 37 条（抽取分布 5/导入 9/注入 8/绑定 5/自动生成 10，含
 // stub 在场 1 条）＝74；双复核修复轮 +3（pinned≥count 覆盖语义、
-// safeWeight fork 语义、非数字 messageId 跳过）＝77。
-const CHOICE_PASS_EXPECTED = 77;
+// safeWeight fork 语义、非数字 messageId 跳过）＝77；批C.2 只读化 +11
+//（asset 静态形状 7＋同步行为 4）＝88。
+const CHOICE_PASS_EXPECTED = 88;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

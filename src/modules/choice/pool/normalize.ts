@@ -13,6 +13,12 @@ import { safeWeight } from './resolver';
 export interface PoolDomainData {
     masterPool: PoolEntry[];
     poolConfigs: PoolConfig[];
+    /**
+     * 内置池内容版本标记（批C.2 只读化引入）：default-pool.json 的 version，
+     * 由 syncAssetPool 写入。normalize 默认丢弃未知字段，这里显式保真——
+     * 它是「内容是否需要随插件更新重刷」的判据，丢了会每次启动都重写一遍池。
+     */
+    assetVersion?: number;
 }
 
 export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [], poolConfigs: [] };
@@ -20,7 +26,9 @@ export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [], poolConfigs: []
 /** 池抽取参数缺省值（与 fork 旧数据 generation 块的实测值对齐：oversample 100/send_all/shuffle）。 */
 export const DEFAULT_POOL_GEN_PARAMS: PoolGenParams = {
     oversamplePct: 100,
-    categoriesEnabled: false,
+    // 批C.2 拍板：按分类轮询默认开（每轮选项尽量来自不同分类，保证多样性）。
+    // 旧用户存了 false 的由 syncAssetPool 首次同步做一次性翻转，之后纯用户域。
+    categoriesEnabled: true,
     pinnedOverflow: 'send_all',
     shuffleFinal: true,
     autoGenerate: true,
@@ -110,7 +118,9 @@ export function normalizePoolData(raw: unknown): PoolDomainData {
         seenConfig.add(config.id);
         poolConfigs.push(config);
     }
-    return { masterPool, poolConfigs };
+    // assetVersion 保真（见 PoolDomainData 注释）；非 number 视为未标记（首次/异常档）。
+    const assetVersion = typeof r.assetVersion === 'number' ? r.assetVersion : undefined;
+    return assetVersion === undefined ? { masterPool, poolConfigs } : { masterPool, poolConfigs, assetVersion };
 }
 
 /**

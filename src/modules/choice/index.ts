@@ -13,6 +13,7 @@ import { version } from '@/version';
 import { installAutoGenerate } from './auto';
 import { assembleCurrent } from './generator';
 import { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
+import { syncAssetPool } from './pool/asset';
 import OptionsBar from './OptionsBar.vue';
 
 const BAR_MOUNT_ID = 'tt-choice-bar-mount';
@@ -80,15 +81,17 @@ function installGlobalPort(): void {
  */
 export function initChoice(): void {
     ensurePromptConfigs();
+    syncAssetPool();
     installGlobalPort();
     installAutoGenerate();
     mountBarWithRetry();
     console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TTK_PROMPTS__）`);
 }
 
-/** node 冒烟最小初始化：默认配置落盘＋全局口在场（dump 走存根数据机判），不挂 DOM。 */
+/** node 冒烟最小初始化：默认配置落盘＋asset 池同步＋全局口在场（dump 走存根数据机判），不挂 DOM。 */
 export function initChoiceMinimal(): void {
     ensurePromptConfigs();
+    syncAssetPool();
     installGlobalPort();
     installAutoGenerate();
 }

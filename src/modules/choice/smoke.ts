@@ -15,7 +15,8 @@ import { useChoiceStore } from './store';
 import { drawAmount, effectivePool, resolvePool, resolvePoolConfig, safeWeight } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
 import { exportPoolBackup, importLegacyChoice, parsePoolBackup } from './pool/import';
-import { deletePoolConfig, readChatPoolConfigId, readPoolData, setChatPoolConfigId, upsertPoolConfig } from './pool/storage';
+import { deletePoolConfig, readChatPoolConfigId, readPoolData, setChatPoolConfigId, upsertPoolConfig, upsertPoolEntry } from './pool/storage';
+import { ASSET_POOL_CONFIG_ID, buildAssetPool, syncAssetPool } from './pool/asset';
 
 const failures: string[] = [];
 
@@ -131,6 +132,65 @@ function runPoolChecks(): void {
         if (buckets.size < 2) catOk = false;
     }
     check('分组轮询：候选覆盖多个 category 桶（≥2 桶）', catOk);
+}
+
+/**
+ * 1.5) 池 asset（批C.2 只读化）：内置池静态形状＋syncAssetPool 行为机判。
+ *
+ * 顺序契约：本区放在导入往返之前，且结尾把池域重置回空——导入断言的
+ * 前置条件是「导入前池=空」（模拟全新安装），而 initChoiceMinimal 的
+ * asset 同步已经落过 110 条，不重置会让导入后条目数变成 113。
+ */
+function runAssetPoolChecks(): void {
+    // ---- 静态形状（纯函数，不依赖存储态）----
+    const { masterPool, poolConfigs } = buildAssetPool();
+    check('asset：内置池 110 条（112−2 重复）', masterPool.length === 110, `实际 ${masterPool.length}`);
+    const cats = new Set(masterPool.map(e => e.category));
+    check('asset：整理后 17 个分类（20−3 合并）', cats.size === 17, `实际 ${cats.size}`);
+    const transition = masterPool.find(e => e.type === '转场推进');
+    check('asset：转场推进转固定（pinned 且旧 rule 清空）', !!transition && transition.pinned && transition.rule === '', `pinned=${String(transition?.pinned)} rule=${JSON.stringify(transition?.rule ?? '(缺条目)')}`);
+    check(
+        'asset：配置唯一且默认（asset-default）',
+        poolConfigs.length === 1 && poolConfigs[0].id === ASSET_POOL_CONFIG_ID && poolConfigs[0].isDefault,
+        `configs=${poolConfigs.length} id=${poolConfigs[0]?.id}`,
+    );
+    check('asset：引用层全量镜像', poolConfigs[0].entries.length === masterPool.length, `refs=${poolConfigs[0].entries.length}/${masterPool.length}`);
+    check('asset：池规则非空（反 OOC 规则随仓发布）', poolConfigs[0].rules.length > 0, `${poolConfigs[0].rules.length} 字`);
+    const ids = new Set(masterPool.map(e => e.id));
+    check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
+
+    // ---- 同步行为（存储态驱动）----
+    const resetPool = () => {
+        choiceStorage.writeDomain(d => {
+            d.pool = { masterPool: [], poolConfigs: [] };
+        });
+    };
+    // 首次同步：旧默认 false 被一次性翻转为 true（拍板：轮询默认开）
+    resetPool();
+    choiceStorage.updateGenParams({ categoriesEnabled: false });
+    syncAssetPool();
+    let domain = choiceStorage.readDomain();
+    check('asset 首次同步：空池覆盖为 110 条并标记 assetVersion', domain.pool.masterPool.length === 110 && domain.pool.assetVersion === 1, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
+    check('asset 首次同步：categoriesEnabled 旧 false 翻转为 true', domain.gen.categoriesEnabled === true, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
+    // 用户手动关：后续同步不得回翻（gen 纯用户域）
+    choiceStorage.updateGenParams({ categoriesEnabled: false });
+    syncAssetPool();
+    domain = choiceStorage.readDomain();
+    check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
+    // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
+    upsertPoolEntry({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', rule: '', category: 'x', pinned: false, weight: 1 });
+    choiceStorage.writeDomain(d => {
+        d.pool.assetVersion = 0;
+    });
+    syncAssetPool();
+    domain = choiceStorage.readDomain();
+    check(
+        'asset 版本变更：污染池全量恢复（垃圾清除、配置归一、gen 不动）',
+        domain.pool.masterPool.length === 110 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.poolConfigs.length === 1 && domain.pool.assetVersion === 1 && domain.gen.categoriesEnabled === false,
+        `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
+    );
+    // 还原导入测试前置：导入断言假定「导入前池=空」（模拟全新安装）
+    resetPool();
 }
 
 /** 2) 导入往返：\r fixture（假密钥）→导入→读出→导出→字段级 diff＋幂等。 */
@@ -539,8 +599,9 @@ export async function runChoiceSmoke(): Promise<void> {
     runParseChecks();
     runReasoningEffortChecks();
     await runDebugForceRawChecks();
-    console.info('=== choice 池抽取/导入/注入/绑定/自动生成机判（批C）===');
+    console.info('=== choice 池抽取/asset 同步/导入/注入/绑定/自动生成机判（批C/C.2）===');
     runPoolChecks();
+    runAssetPoolChecks();
     runImportRoundTrip();
     runInjectionChecks();
     runBindingCascadeChecks();
@@ -550,5 +611,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、旧数据导入往返＋幂等、池注入分区与分层、绑定级联、MESSAGE_RECEIVED 守卫链全部通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（110 条/17 分类/首次翻转/幂等不回翻/污染恢复）、旧数据导入往返＋幂等、池注入分区与分层、绑定级联、MESSAGE_RECEIVED 守卫链全部通过。');
 }
