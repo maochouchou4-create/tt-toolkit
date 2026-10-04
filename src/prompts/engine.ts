@@ -156,7 +156,9 @@ function resolveInjectContent(
                 ? {
                       content: wrapTag(
                           'past_events',
-                          `以下是记忆系统对已离开当前上下文窗口的历史剧情摘要，供保持剧情连贯参考：\n${sources.baibaiSummary.trim()}`,
+                          // 引导句措辞自写（AFPL：fork 对此句有同义近句，不搬其表达）。
+                          // 语义保留＝说明这段是旧剧情摘录＋用途（衔接前情）
+                          `这段文字来自记忆插件，概括的是较早前发生、已不在当前上下文里的剧情。利用它可以衔接前情、避免与旧事件矛盾，但不要在选项里复述或引用它的原文：\n${sources.baibaiSummary.trim()}`,
                           sources,
                       ),
                       note: '',
