@@ -34,14 +34,18 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { choiceStorage } from './api';
 import { applyOption, cancelGeneration, generateOptions, isGenerating } from './generator';
+import { useChoiceSettingsStore } from './settings';
 import { useChoiceStore } from './store';
 
 const store = useChoiceStore();
+const settings = useChoiceSettingsStore();
 
 const behaviorHint = computed(() => {
-    const behavior = choiceStorage.readDomain().gen.clickBehavior;
+    // storage 域是宿主的非响应式对象，直接读 choiceStorage 计算后不会失效
+    // （改了点击行为，悬停提示仍是旧文案）——走 settings store 的读透传
+    // getter（nav store revision 同款失效信号：写方 bump、getter 重算）
+    const behavior = settings.gen.clickBehavior;
     if (behavior === 'send') return '点击后直接发送';
     if (behavior === 'append') return '点击后追加到输入框末尾';
     return '点击后填入输入框（可编辑后手动发送）';

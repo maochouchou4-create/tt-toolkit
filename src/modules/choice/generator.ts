@@ -5,7 +5,7 @@
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施（批B 验收断言的
  * 依赖设施——用户靠它核对各注入模块逐项可见）。
  */
-import { callGenerateEndpoint, sendInputMessage, setSendTextareaValue, type GenerateRequestConfig } from '@/host';
+import { callGenerateEndpoint, getSendTextareaValue, sendInputMessage, setSendTextareaValue, type GenerateRequestConfig } from '@/host';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -152,9 +152,9 @@ export function applyOption(content: string): void {
         return;
     }
     if (behavior === 'append') {
-        const el = document.querySelector<HTMLTextAreaElement>('#send_textarea');
-        if (!el) return;
-        setSendTextareaValue(el.value + content);
+        // 追加＝读当前值＋整体写回：textarea 的取值/赋值（含 input 事件
+        // 派发）已封装在 host/chat——选择器逻辑不在业务侧重复第二份
+        setSendTextareaValue(getSendTextareaValue() + content);
         return;
     }
     setSendTextareaValue(content);
