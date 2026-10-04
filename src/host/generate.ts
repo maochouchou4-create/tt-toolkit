@@ -122,6 +122,15 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
         temperature: config.temperature ?? 0.7,
         max_tokens: config.maxTokens ?? 2048,
         stream: config.stream,
+        // 防 fetch 层改写：酒馆助手类预设脚本会 patch 主窗口 fetch 拦截
+        // backends generate 请求并注入工具调用指令，tool_choice:"none" 是
+        // 其 callerControlsTools 旁路信号（原样转发）。本请求无 tools、
+        // 纯文本输出，语义自洽；对不 patch fetch 的环境该字段惰性。上游
+        // 兼容性经验实证：同端点集（GG/ds/CC）携此字段日常运行长期无异常。
+        // 宿主 agent 快照路径对 tool_choice 有显式拒绝（script.js:7092
+        // assertAgentPromptSnapshotHasNoExternalTools）——本请求走 quiet
+        // 旁路路由，不经过该断言。
+        tool_choice: 'none',
     };
     if (config.outputContract === 'json_schema' && config.jsonSchema) {
         // 走宿主原生 json_schema 字段：服务端补 name/strict 默认并转
