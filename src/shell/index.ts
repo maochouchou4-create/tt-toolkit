@@ -5,8 +5,10 @@
  *   - #movingDivs 下建 <div id="tt-shell-mount">，Vue app 渲染浮层本体
  *     （#movingDivs 是宿主 movable 面板容器，#floatingPrompt 同款待遇，
  *     host/dom.ts 核实记录）；
- *   - #extensionsMenu 注入魔棒入口（caption 先例）；菜单晚于扩展脚本
- *     创建，走「立查 → APP_READY → 轮询」三段等待（nav QR 同款纪律）。
+ *   - #extensionsMenu 注入魔棒入口（裸 div，官方样式选择器覆盖，
+ *     host/dom.ts 核实记录）；菜单理论先于扩展脚本在场
+ *     （extensions.js:406-418 uiReady 先于 :2069 activateExtensions），
+ *     「立查 → APP_READY → 轮询」三段等待是纵深防御而非必要条件。
  */
 
 import { createApp } from 'vue';
@@ -20,8 +22,8 @@ import type { ShellTab } from './types';
 const MOUNT_ID = 'tt-shell-mount';
 const WAND_ENTRY_ID = 'tt-toolkit-wand-entry';
 
-// 魔棒入口等待参数：#extensionsMenu 创建晚于扩展加载（extensions.js
-// ensureExtensionsUiReady 异步挂菜单），轮询按最坏情况放宽
+// 魔棒入口等待参数：#extensionsMenu 理论先于扩展脚本在场（host/dom.ts
+// 头注核实），三段等待为纵深防御——轮询仍按最坏情况放宽
 const WAND_POLL_INTERVAL_MS = 250;
 const WAND_POLL_MAX_TRIES = 40;
 

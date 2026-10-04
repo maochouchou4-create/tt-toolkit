@@ -3,14 +3,17 @@
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - **#extensionsMenu 魔棒菜单**：`scripts/extensions.js:919-954`
- *   addExtensionsButtonAndMenu() 用 wandMenu 模板挂出
+ *   addExtensionsButtonAndMenu() 用 wandMenu/wandButton 模板挂出
  *   `#extensionsMenu`（document.body 下）+ 输入框左侧
- *   `#extensionsMenuButton`；注入先例＝caption 扩展（scripts/extensions/
- *   caption/index.js:469-476）：向 `#extensionsMenu` append
- *   `.list-group-item.flex-container.flexGap5` 容器（内含
- *   `.extensionsMenuExtensionButton` 图标 div + 文本 span），点击即触发。
- *   `#extensionsMenu` 的创建晚于扩展脚本加载（ensureExtensionsUiReady
- *   异步执行），注入入口必须等待其出现。
+ *   `#extensionsMenuButton`。注入先例有二：caption 扩展走**专用容器**
+ *   （wandMenu.html:5 模板内建的 `#caption_wand_container`，
+ *   caption/index.js:476 向其 append）；直接向 `#extensionsMenu`
+ *   append 的裸 div 是官方支持的形态——style.css:1203/1218/1225 的
+ *   选择器（`#extensionsMenu>div:not(.extension_container)` 的配色与
+ *   hover 态）明确覆盖非容器子项。菜单先于扩展脚本在场：
+ *   extensions.js:406-418 的 uiReady（ensureExtensionsUiReady）先于
+ *   :2069 activateExtensions（第三方扩展脚本在此加载）——本层的
+ *   三段等待是纵深防御，不是必要条件。
  * - **dragElement 拖动**：`scripts/RossAscends-mods.js:498` 导出
  *   `dragElement($elmnt)`——参数为 jQuery 包装对象；要求目标元素有 id，
  *   拖把手 selector 固定为 `#<id>header`（:506-508）；内部会把位置写入
@@ -66,8 +69,9 @@ export interface WandMenuEntry {
 }
 
 /**
- * 向 #extensionsMenu 注入一个魔棒入口（caption 先例结构）。
- * 菜单尚未创建（扩展加载先于 wandMenu 挂载）时返回 false，调用方按
+ * 向 #extensionsMenu 注入一个魔棒入口（裸 div 形态，官方样式选择器
+ * 覆盖，见文件头）。菜单理论先于扩展脚本在场，但此处仍防御性处理
+ * 缺席（宿主加载流程变更时不至于崩）：返回 false，调用方按
  * APP_READY/轮询重试。静态模板无插值，innerHTML 注入无 XSS 面。
  */
 export function appendWandMenuEntry(entry: WandMenuEntry, elementId: string): boolean {
