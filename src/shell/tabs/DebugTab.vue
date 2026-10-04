@@ -1,0 +1,76 @@
+<template>
+  <div class="tt-debug-tab">
+    <div class="tt-card">
+      <div class="tt-card-title">storage 写读 roundtrip</div>
+      <div class="tt-card-sub">向全局域与聊天域各写一个随机 token 并读回比对（与用户数据同链路）</div>
+      <div class="tt-actions">
+        <button type="button" @click="runRoundtrip">运行 roundtrip</button>
+      </div>
+      <ul v-if="roundtrip.length" class="tt-probe-list">
+        <li v-for="r in roundtrip" :key="r.scope">
+          <span :class="r.ok ? 'tt-roundtrip-ok' : 'tt-roundtrip-fail'">{{ r.ok ? 'PASS' : 'FAIL' }}</span>
+          {{ r.scope }} 域：写入 {{ r.written }} / 读回 {{ r.readBack }} @ {{ r.at }}
+        </li>
+      </ul>
+    </div>
+
+    <div class="tt-card">
+      <div class="tt-card-title">host 适配层 API 探测清单</div>
+      <div class="tt-card-sub">适配层依赖的宿主能力逐项在场/缺席检查（批A 判据载体）</div>
+      <div class="tt-actions">
+        <button type="button" @click="runProbe">运行探测</button>
+      </div>
+      <ul v-if="probeResults.length" class="tt-probe-list">
+        <li v-for="p in probeResults" :key="p.name">
+          <span class="tt-probe-tag" :class="p.present ? 'tt-probe-tag--present' : 'tt-probe-tag--absent'">
+            {{ p.present ? '在场' : '缺席' }}
+          </span>
+          {{ p.name }} — {{ p.detail }}
+        </li>
+      </ul>
+    </div>
+
+    <div class="tt-card">
+      <div class="tt-card-title">storage 快照</div>
+      <div class="tt-actions">
+        <button type="button" @click="dump = dumpStorage()">刷新快照</button>
+      </div>
+      <pre v-if="dump" class="tt-dump">{{ dump }}</pre>
+    </div>
+
+    <div class="tt-card">
+      <div class="tt-card-title">nav 模块日志（__TT_NAV__.dump()）</div>
+      <div class="tt-actions">
+        <button type="button" @click="navDump = readNavDump()">刷新 nav dump</button>
+      </div>
+      <pre v-if="navDump" class="tt-dump">{{ navDump }}</pre>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { formatProbeResults, probeHost, type ProbeResult } from '@/host';
+import { dumpStorage, runStorageRoundtrip, type RoundtripReport } from '@/storage';
+
+const roundtrip = ref<RoundtripReport[]>([]);
+const probeResults = ref<ProbeResult[]>([]);
+const dump = ref('');
+const navDump = ref('');
+
+function runRoundtrip(): void {
+    roundtrip.value = runStorageRoundtrip();
+}
+
+function runProbe(): void {
+    probeResults.value = probeHost();
+    // 同时落 console：机判/排障可从控制台直接读全量
+    console.info(`[tt-toolkit][debug] host 探测清单：\n${formatProbeResults(probeResults.value)}`);
+}
+
+function readNavDump(): string {
+    const nav = (globalThis as { __TT_NAV__?: { dump?: () => string } }).__TT_NAV__;
+    if (typeof nav?.dump !== 'function') return '（nav 模块尚未初始化，__TT_NAV__ 不在场）';
+    return nav.dump();
+}
+</script>
