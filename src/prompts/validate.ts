@@ -23,6 +23,8 @@ const INJECTION_SOURCES: readonly InjectionSource[] = [
     'story_direction',
     'external_slot',
     'baibai',
+    'pool_entries',
+    'pool_rules',
 ];
 
 export type PromptModulesValidation =

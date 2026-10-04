@@ -16,7 +16,7 @@ export type {
     TextModule,
 } from './types';
 export { moduleGroupOf } from './types';
-export { assembleMessages, historyToMessages, type AssemblySources, type AssemblyResult, type HistoryEntry } from './engine';
+export { assembleMessages, historyToMessages, type AssemblySources, type AssemblyResult, type HistoryEntry, type PoolEntryLine, type PoolInjectionSupply } from './engine';
 export { collectAssemblySources } from './sources';
 export { createDefaultPromptConfig, createPromptConfigFromDefault } from './defaults';
 export { getBaibaiSummary, listSlotPreviews, type SlotPreview } from './external';

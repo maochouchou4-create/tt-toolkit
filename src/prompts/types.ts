@@ -26,7 +26,9 @@ export type InjectionSource =
     | 'chat_history'
     | 'story_direction'
     | 'external_slot'
-    | 'baibai';
+    | 'baibai'
+    | 'pool_entries'
+    | 'pool_rules';
 
 /** 文本模块：用户可编辑的规则/任务/格式文本。 */
 export interface TextModule {

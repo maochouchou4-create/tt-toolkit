@@ -143,6 +143,28 @@ export function createDefaultPromptConfig(): PromptConfig {
                 source: 'story_direction',
             },
             {
+                // 批C：池条目注入。默认参与管线——空池/无绑定自然跳过（trace
+                // 留痕说明原因），不是「默认关」：有池数据就该在场
+                kind: 'inject',
+                id: 'inject_pool_entries',
+                name: '池条目',
+                role: 'system',
+                order: 98,
+                enabled: true,
+                source: 'pool_entries',
+            },
+            {
+                // 批C：池配置规则独立段（与 core_rules 模板写作规则分层）。
+                // 空规则自然跳过
+                kind: 'inject',
+                id: 'inject_pool_rules',
+                name: '池规则',
+                role: 'system',
+                order: 102,
+                enabled: true,
+                source: 'pool_rules',
+            },
+            {
                 kind: 'text',
                 id: 'few_shot',
                 name: '示例（可关）',

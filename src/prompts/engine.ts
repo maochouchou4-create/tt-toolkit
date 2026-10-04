@@ -45,10 +45,36 @@ export interface AssemblySources {
     externalSlots: Array<{ key: string; value: string }>;
     /** 柏宝书摘要文本（缺席/未开传 null） */
     baibaiSummary: string | null;
+    /**
+     * 池注入供给（批C）。null＝池整体未启用（pool_entries/pool_rules 模块
+     * 按未启用处理）；条目由 generator 现场抽取后传入——prompts 层不回读
+     * choice 域（单向供给，引擎保持纯函数）。
+     */
+    poolInjection: PoolInjectionSupply | null;
     /** 占位符值 */
     count: number;
     minChars: number;
     maxChars: number;
+}
+
+/**
+ * 池注入供给形状（批C）。字段取 PoolEntry 的子集（结构兼容：PoolEntry
+ * 可直接赋进来）——prompts 层只关心渲染所需的三个文本字段，不知道池的
+ * id/weight/绑定概念，保持两层解耦。
+ */
+export interface PoolEntryLine {
+    type: string;
+    content: string;
+    rule: string;
+}
+
+export interface PoolInjectionSupply {
+    /** 必发区（pinned，每轮必须在场的条目） */
+    pinned: PoolEntryLine[];
+    /** 候选区（加权抽取，数量可多于实际所需——菜单模式） */
+    drawn: PoolEntryLine[];
+    /** 生效池配置的规则原文（独立 pool_rules 段，与模板写作规则分层） */
+    rules: string;
 }
 
 export interface AssemblyResult {
@@ -165,7 +191,43 @@ function resolveInjectContent(
                       note: '',
                   }
                 : { content: '', note: '柏宝书摘要不可用（插件缺席或未返回）' };
+        case 'pool_entries': {
+            // 分区呈现：pinned＝必发（每轮都在场），drawn＝候选菜单（多于
+            // 所需，AI 按场景贴合挑选）——菜单模式语义写在提示词文本里，
+            // 不是条目行自己标注；逐条可见（dump 验收靠它）。
+            const pool = sources.poolInjection;
+            if (!pool) return { content: '', note: '池未启用（无池数据）' };
+            if (pool.pinned.length === 0 && pool.drawn.length === 0) {
+                return { content: '', note: '本聊天池为空（无条目被引用或全部停用）' };
+            }
+            const parts: string[] = [];
+            if (pool.pinned.length > 0) {
+                parts.push(`【必发条目】以下每条是一个行动方向，每轮选项都必须覆盖它们（共 ${pool.pinned.length} 条）：\n${pool.pinned.map(renderPoolLine).join('\n')}`);
+            }
+            if (pool.drawn.length > 0) {
+                parts.push(`【候选条目】以下是本轮抽出的候选行动方向，数量多于实际所需——按与当前剧情的贴合度挑选使用，不要求全用，未选中的不出现在选项里（共 ${pool.drawn.length} 条）：\n${pool.drawn.map(renderPoolLine).join('\n')}`);
+            }
+            const note = `必发 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条`;
+            return { content: wrapTag('pool_entries', parts.join('\n\n'), sources), note };
+        }
+        case 'pool_rules': {
+            // 独立段＝与模板自带写作规则分层（池配置规则绝不混进 core_rules，
+            // 方案 §3 批C 层边界）。空规则不注入、trace 留痕。
+            const rules = sources.poolInjection?.rules ?? '';
+            if (!rules.trim()) return { content: '', note: '池配置规则为空（不注入）' };
+            return { content: wrapTag('pool_rules', `本轮选项生成时，除通用写作规则外还需遵守以下池规则：\n${rules.trim()}`, sources), note: '' };
+        }
     }
+}
+
+/** 单条池条目渲染：`type：content [规则: rule]`（空段省略——与池层 renderEntryLine 同构约定）。 */
+function renderPoolLine(entry: PoolEntryLine): string {
+    let line = entry.type.trim();
+    const content = entry.content.trim();
+    if (content) line += `：${content}`;
+    const rule = entry.rule.trim();
+    if (rule) line += ` [规则: ${rule}]`;
+    return line;
 }
 
 /** 分段标签包裹（§2.3 制版原则：结构化分段标签）＋占位符填充。 */

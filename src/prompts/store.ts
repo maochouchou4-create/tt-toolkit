@@ -11,6 +11,8 @@
  *     directionPresets（用户自建走向预设列表——G4）；
  *   - 聊天域 chat_metadata.ttToolkit：storyDirection（已应用预设正文
  *     ＋自由文本）——写走 writeChatMetadata 立即保存通道。
+ *   - 批C 起读侧对旧存档补插池注入模块（inject_pool_entries/rules，
+ *     缺席才补——见 readPromptDomain 的 backfillPoolModules）。
  */
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
@@ -42,12 +44,47 @@ function readPromptDomain(): PromptGlobalDomain {
         // 首次启动：落默认模板集（一次性写穿；后续不再覆盖）
         list = [createDefaultPromptConfig()];
         setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
+    } else if (backfillPoolModules(list)) {
+        // 批C 补建：批C 之前落盘的配置没有池注入模块——补插两枚（照
+        // fork v59/v60 迁移先例语义，自写实现）；已有则幂等跳过
+        setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, list);
     }
     return {
         promptConfigs: list,
         promptActiveId: typeof activeId === 'string' ? activeId : list[0]?.id ?? '',
         externalInjections: { ...DEFAULT_EXTERNAL, ...(external ?? {}) },
     };
+}
+
+/** 池注入模块补建（就地修改 list；返回是否有改动）。 */
+function backfillPoolModules(list: PromptConfig[]): boolean {
+    let changed = false;
+    for (const config of list) {
+        if (!Array.isArray(config.modules)) continue;
+        if (config.modules.some(m => m.kind === 'inject' && (m.source === 'pool_entries' || m.source === 'pool_rules'))) continue;
+        config.modules.push(
+            {
+                kind: 'inject',
+                id: 'inject_pool_entries',
+                name: '池条目',
+                role: 'system',
+                order: 98,
+                enabled: true,
+                source: 'pool_entries',
+            },
+            {
+                kind: 'inject',
+                id: 'inject_pool_rules',
+                name: '池规则',
+                role: 'system',
+                order: 102,
+                enabled: true,
+                source: 'pool_rules',
+            },
+        );
+        changed = true;
+    }
+    return changed;
 }
 
 /** 外部注入搬运配置读取（非 store 上下文消费——sources 组装路径）。 */

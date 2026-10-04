@@ -16,7 +16,7 @@ import {
     this_chid,
 } from '@/host';
 import { getBaibaiSummary } from './external';
-import type { AssemblySources } from './engine';
+import type { AssemblySources, PoolInjectionSupply } from './engine';
 import { externalInjectionConfig } from './store';
 import type { StoryDirection } from './types';
 
@@ -45,8 +45,9 @@ function currentCharacter(): CharacterCardLike | null {
 }
 
 /**
- * 收集一次组装所需的全部上下文。storyDirection 由调用方传入（chat 域
- * 读取归 choice 侧 store 管——组装参数与存储调度分离）。
+ * 收集一次组装所需的全部上下文。storyDirection 与 poolInjection 由调用方
+ * 传入（chat 域/choice 域读取归 choice 侧管——组装参数与存储调度分离；
+ * 池供给由 generator 现场抽取，本层只做纯收集不回读 choice 域）。
  */
 export async function collectAssemblySources(params: {
     storyDirection: StoryDirection | null;
@@ -54,6 +55,7 @@ export async function collectAssemblySources(params: {
     count: number;
     minChars: number;
     maxChars: number;
+    poolInjection?: PoolInjectionSupply | null;
 }): Promise<AssemblySources> {
     const ch = currentCharacter();
     const card = ch?.data ?? {};
@@ -126,6 +128,8 @@ export async function collectAssemblySources(params: {
         storyDirection: params.storyDirection,
         externalSlots: selected,
         baibaiSummary: baibai,
+        // 池供给：调用方（generator）现场抽取后直传——null＝池未启用
+        poolInjection: params.poolInjection ?? null,
         count: params.count,
         minChars: params.minChars,
         maxChars: params.maxChars,
