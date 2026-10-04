@@ -2,11 +2,13 @@
   <!--
     壳浮层：复用宿主 drawer-content 体系（#floatingPrompt 先例）——配色/
     毛玻璃/边框来自宿主 .drawer-content（SmartTheme 变量），openDrawer
-    为显示态。拖把手 id 必须是 <根id>header（宿主 dragElement 契约）。
+    为显示态。拖把手 id 必须是 <根id>header 且带 .drag-grabber 类（宿主
+    dragElement 契约）；图标用 Unicode ⠿ 文本渲染——宿主 FontAwesome
+    字形在本扩展实测未渲染（空 div 零宽＝不可见不可抓），不依赖字体才稳。
   -->
   <div id="ttToolkitShell" class="drawer-content flexGap5 tt-shell" :class="{ openDrawer: store.open }">
     <div class="panelControlBar flex-container alignItemsBaseline">
-      <div id="ttToolkitShellheader" class="fa-fw fa-solid fa-grip drag-grabber" title="拖动" />
+      <div id="ttToolkitShellheader" class="drag-grabber tt-shell-grabber" title="拖动">⠿</div>
       <b class="tt-shell-title">TT 工具箱</b>
       <span class="tt-shell-version">v{{ version }}</span>
       <div class="tt-shell-close fa-fw fa-solid fa-circle-xmark floating_panel_close" title="收起" @click="store.toggle(false)" />

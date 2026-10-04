@@ -30,6 +30,24 @@
     user-select: none;
 }
 
+/* 拖把手：Unicode 字符自持渲染（不依赖宿主 FontAwesome——fa 字形实测
+   未套上，空 div 零宽不可见不可抓）；min 尺寸保证字符缺码位时仍有
+   可抓区域。dragElement 契约只认 .drag-grabber 类与本元素 id。 */
+.tt-shell-grabber {
+    cursor: move;
+    user-select: none;
+    padding: 0 6px;
+    margin-right: 2px;
+    opacity: 0.65;
+    line-height: 1;
+    min-width: 1.2em;
+    min-height: 1em;
+}
+
+.tt-shell-grabber:hover {
+    opacity: 1;
+}
+
 .tt-shell-version {
     font-size: 0.75em;
     opacity: 0.55;
