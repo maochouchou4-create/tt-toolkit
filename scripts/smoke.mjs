@@ -179,10 +179,13 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ---------------------------------------------------------------------------
 // 批B 机判：choice 组装/解析（[choice-smoke] 输出行收口）＋全局口在场
 // ---------------------------------------------------------------------------
+// PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
+// 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
+const CHOICE_PASS_EXPECTED = 28;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
-if (choicePassLines.length < 20 || choiceFailLines.length > 0) {
-    failures.push(`choice 机判异常：PASS ${choicePassLines.length} 条 / FAIL ${choiceFailLines.length} 条${choiceFailLines.length ? `（首条：${choiceFailLines[0]}）` : ''}`);
+if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
+    failures.push(`choice 机判异常：期望恰好 ${CHOICE_PASS_EXPECTED} 条 PASS，实际 ${choicePassLines.length} 条 / FAIL ${choiceFailLines.length} 条${choiceFailLines.length ? `（首条：${choiceFailLines[0]}）` : ''}`);
 }
 
 // 批B 判据的 dump 断言：组装 dump 全文出现在输出中，且关键注入段逐项可见
@@ -208,6 +211,13 @@ if (!promptsPort || typeof promptsPort.dump !== 'function' || typeof promptsPort
 // 已断言，这里锁输出行存在——机判判据独立可观测）
 if (!outputLines.some(l => l.includes('畸形样本走回退路径') && l.includes('PASS'))) {
     failures.push('畸形样本回退路径断言未见 PASS 输出');
+}
+
+// debugForceRaw 生成管线接线（批B 判据）：置开关跑完整 generateOptions、
+// 断言跳过 API 直喂畸形样本且走回退解析——该分支构造上不 fetch，node
+// 冒烟无网络依赖；开关与生成管线脱钩在此翻红
+if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('debugForceRaw'))) {
+    failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
 // 提示词配置初始化：默认模板集落进全局域 storage

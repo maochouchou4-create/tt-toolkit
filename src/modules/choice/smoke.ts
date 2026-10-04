@@ -8,6 +8,9 @@
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry } from '@/prompts';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
+import { choiceStorage } from './api';
+import { generateOptions } from './generator';
+import { useChoiceStore } from './store';
 
 const failures: string[] = [];
 
@@ -119,6 +122,26 @@ function runParseChecks(): void {
     check('标签堆叠不切分（1 条而非 2 条）', stackedReport.options.length === 1, `count=${stackedReport.options.length}`);
 }
 
+/**
+ * debugForceRaw 调试开关机判（批B 判据：生成管线接线）。
+ *
+ * 置开关后走完整 generateOptions 管线（组装→跳过 API→直喂畸形样本→
+ * 解析→store 会话态）：该分支构造上不 fetch（无网络依赖），断言产物
+ * 走回退解析且会话态正确——开关不接生成管线的回归在此翻红。
+ */
+async function runDebugForceRawChecks(): Promise<void> {
+    choiceStorage.updateGenParams({ debugForceRaw: true });
+    try {
+        await generateOptions();
+        const store = useChoiceStore();
+        check('debugForceRaw 走生成管线不报错（无 API 调用）', store.phase !== 'error' && store.options.length === 4, `phase=${store.phase} count=${store.options.length} error=${store.error}`);
+        check('debugForceRaw 解析路径＝回退（bracket_fallback）', store.lastParsePath === 'bracket_fallback', `path=${store.lastParsePath}`);
+        check('debugForceRaw dump 已更新（组装与发送同管线）', store.lastDump.includes('=== 消息组装 dump'), `dumpHead=${store.lastDump.slice(0, 40)}`);
+    } finally {
+        choiceStorage.updateGenParams({ debugForceRaw: false });
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用；返回失败清单长度供收口）。 */
 export async function runChoiceSmoke(): Promise<void> {
     console.info('=== choice 组装/解析机判（批B）===');
@@ -126,10 +149,11 @@ export async function runChoiceSmoke(): Promise<void> {
     console.info('=== 组装 dump 全文 ===');
     console.info(dumpText);
     runParseChecks();
+    await runDebugForceRawChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发全部通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过。');
 }
