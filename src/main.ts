@@ -1,9 +1,11 @@
 /**
  * 扩展引导：唯一环境分支点（批A 修复：模块不再自行探测环境自启动）。
  *
- * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTabs
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
+ * → initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋选项条挂载）
  * → initNav()。node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：
- * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化。
+ * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化
+ * → initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
  * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
