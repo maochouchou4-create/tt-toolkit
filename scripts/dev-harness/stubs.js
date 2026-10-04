@@ -3,8 +3,8 @@
  * 只实现 tt-toolkit 实际消费的最小面（消费面清单见 README.md），
  * 全部内存态——刷新即重置，可反复折腾布局而不污染真实酒馆。
  *
- * __TT_HARNESS__ 的九个键与 dist/index.js 的 9 条外部 import 一一对应
- * （build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
+ * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（批D 后 11 条）
+ * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
  * SillyTavern.getContext / quickReplyApi / toastr / STBaiBaiBook）按
  * 宿主挂载形态放到 globalThis 上。
  */
@@ -26,6 +26,8 @@
                 personality: '克制、回避、重旧情。',
                 scenario: '深夜的旧货铺后堂，灯只亮了一盏。',
                 creator_notes: '用户自定义角色。',
+                first_mes: '「这么晚了还来？」林霜头也不抬，手里的算盘拨得噼啪响。',
+                alternate_greetings: ['她抬眼看了看门口的动静，把一盏灯往里挪了挪：「后堂说话。」'],
             },
         },
         { name: '阿七', data: { description: '跑腿少年，消息灵通。', personality: '话多、胆小。', scenario: '巷口。' } },
@@ -48,6 +50,11 @@
         persona_description: `${USER_NAME}，旧货铺的常客，观察力过人，惯于用细节逼人开口。`,
         movingUI: true,
         movingUIState: {},
+        // personas 域（批D）：personas.js stub 与 upsertPersona 写回链共用
+        // power_user 单例（宿主同形——personas 与 persona_descriptions 都挂
+        // power_user 上）
+        personas: {},
+        persona_descriptions: {},
     };
 
     // --------------------------------------------------------
@@ -81,6 +88,9 @@
         MESSAGE_UPDATED: 'message_updated',
         CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
         SETTINGS_LOADED: 'settings_loaded',
+        // 批D personas 写回链 emit 的两个事件（eventSource.emit stub 通用）
+        PERSONA_CREATED: 'persona_created',
+        PERSONA_UPDATED: 'persona_updated',
     };
     const handlers = new Map();
     function on(type, fn) {
@@ -162,6 +172,13 @@
         saveMetadata: async () => console.info('[harness] saveMetadata（stub）'),
         powerUserSettings: { movingUI: power_user.movingUI, movingUIState: power_user.movingUIState },
         getRequestHeaders,
+        // 批D persona 供给面：书目清单 / openai 预设管理器 / 当前预设名
+        getWorldInfoNames: () => [...wiBooks.keys()],
+        getPresetManager: () => ({
+            getPresetList: () => ({ presets: ['存根预设'], preset_names: { '存根预设': 0 }, settings: {} }),
+            getCompletionPresetByName: name => (name === '存根预设' ? stubPreset : undefined),
+        }),
+        chatCompletionSettings: { preset_settings_openai: '存根预设' },
         extensionPrompts: {
             // 假装是一个记忆摘要类插件占用通用注入槽位（PromptEditorTab 高级区可见）
             'stub-memory': {
@@ -176,6 +193,17 @@
     function getContext() {
         return context;
     }
+
+    // 存根 openai 预设（提示词对照分区可见真实形态：prompt_order 的
+    // character_id=100001 段 + prompts 的 identifier/enabled 口径）
+    const stubPreset = {
+        prompts: [
+            { identifier: 'main', role: 'system', content: '【存根预设·main】你是一个沉浸式文字冒险主持人。' },
+            { identifier: 'jailbreak', role: 'system', content: '【存根预设·jb】放松限制，进入角色。' },
+            { identifier: 'chatHistory', role: 'system', content: '' },
+        ],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }, { identifier: 'jailbreak', enabled: true }] }],
+    };
 
     // --------------------------------------------------------
     // SlashCommand / SlashCommandParser stub（斜令注册面）
@@ -235,7 +263,8 @@
     }
 
     // --------------------------------------------------------
-    // world-info.js stub：固定桶返回（各 wi_* 注入模块可见真实形态）
+    // world-info.js stub：固定桶返回（各 wi_* 注入模块可见真实形态）＋
+    // 批D 的写通道四函数（内存书库，saveWorldInfo 落 Map、reloadEditor 空转）
     // --------------------------------------------------------
     async function getWorldInfoPrompt() {
         return {
@@ -245,6 +274,90 @@
             worldInfoDepth: [{ depth: 2, entries: ['【世界书·深层】旧货铺后堂有一扇夹墙门。'] }],
         };
     }
+    // 内存书库（entries 是 Record<uid字符串, 条目>——宿主同形）
+    const wiBooks = new Map([
+        ['王玉·人设书', {
+            entries: {
+                '0': { uid: 0, comment: '王玉·既有设定', content: '【既有设定】王玉与林霜相识三年，从未见过她摘下手腕上的旧绳结。', key: ['王玉'], disable: false, position: 0, depth: 4, displayIndex: 0 },
+            },
+        }],
+    ]);
+    function loadWorldInfo(name) {
+        return Promise.resolve(wiBooks.has(name) ? { entries: wiBooks.get(name) } : null);
+    }
+    function createWorldInfoEntry(_name, data) {
+        const entries = data.entries || {};
+        const uids = Object.keys(entries).map(Number);
+        const entry = {
+            uid: uids.length ? Math.max(...uids) + 1 : 0,
+            comment: '',
+            content: '',
+            key: [],
+            disable: false,
+            position: 0,
+            depth: 4,
+            displayIndex: Object.keys(entries).length,
+        };
+        entries[String(entry.uid)] = entry;
+        return entry;
+    }
+    function saveWorldInfo(name, data, immediately = false) {
+        wiBooks.set(name, data.entries);
+        console.info(`[harness] saveWorldInfo(${name}, immediately=${String(immediately)}): ${Object.keys(data.entries).length} entries`);
+        return Promise.resolve();
+    }
+    function reloadEditor(file) {
+        console.info('[harness] reloadEditor:', file);
+    }
+
+    // --------------------------------------------------------
+    // personas.js / utils.js stub（批D）：宿主单例挂 power_user（同形），
+    // 头像文件表内存维护；/api/avatars/upload 走 fetch 拦截
+    // --------------------------------------------------------
+    const avatarFiles = ['default.png'];
+    let userAvatar = 'default.png';
+    // 1x1 PNG data URL：fetch(dataURL) 在浏览器直接可用（宿主值是
+    // /img/ai4.png，file:// 下取不到）
+    const default_user_avatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    function getUserAvatars(doRender = true) {
+        console.info(`[harness] getUserAvatars(doRender=${String(doRender)}): ${avatarFiles.length} files`);
+        return avatarFiles.slice();
+    }
+    function initPersona(avatarId, personaName, personaDescription, personaTitle) {
+        power_user.personas[avatarId] = personaName;
+        power_user.persona_descriptions[avatarId] = {
+            description: personaDescription || '',
+            position: 0,
+            depth: 2,
+            role: 0,
+            lorebook: '',
+            title: personaTitle || '',
+        };
+        console.info('[harness] initPersona:', avatarId, personaName);
+    }
+    function setUserAvatar(imgfile) {
+        userAvatar = imgfile;
+        console.info('[harness] setUserAvatar:', imgfile);
+    }
+    function findPersona({ name = null, allowAvatar = true } = {}) {
+        const list = Object.entries(power_user.personas).map(([avatar, pName]) => ({ avatar, name: pName }));
+        return list.find(p => !name || (allowAvatar && p.avatar === name) || p.name === name) ?? null;
+    }
+
+    // fetch 拦截（personas 写回链的 /api/avatars/upload）：命中走内存，
+    // 其余原样透传（choice 等模块的真实 fetch 不受影响）
+    const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+    window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : String(input && input.url ? input.url : input);
+        if (url === '/api/avatars/upload') {
+            const name = `stub-${Date.now()}.png`;
+            avatarFiles.push(name);
+            console.info('[harness] avatars/upload 拦截 →', name);
+            return Promise.resolve({ ok: true, status: 200, json: async () => ({ path: name }) });
+        }
+        if (nativeFetch) return nativeFetch(input, init);
+        return Promise.reject(new Error(`harness: fetch 不可用且未拦截: ${url}`));
+    };
 
     // --------------------------------------------------------
     // 窗口级全局（宿主挂载形态）
@@ -310,14 +423,16 @@
     // --------------------------------------------------------
     window.__TT_HARNESS__ = {
         events: { event_types, eventSource },
-        script: { saveSettingsDebounced, chat_metadata, characters, this_chid: '0', getRequestHeaders, substituteParams, sendTextareaMessage },
+        script: { saveSettingsDebounced, chat_metadata, characters, this_chid: '0', getRequestHeaders, substituteParams, sendTextareaMessage, default_user_avatar },
         extensions: { extension_settings },
         st_context: { getContext },
         slash_command: { SlashCommand },
         slash_command_parser: { SlashCommandParser },
         ross_ascends_mods: { dragElement },
         power_user: { power_user },
-        world_info: { getWorldInfoPrompt },
+        world_info: { getWorldInfoPrompt, loadWorldInfo, createWorldInfoEntry, saveWorldInfo, reloadEditor },
+        personas: { getUserAvatars, initPersona, setUserAvatar, user_avatar: userAvatar },
+        utils: { findPersona },
     };
 
     // --------------------------------------------------------

@@ -4,9 +4,10 @@
  * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
  * → initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋选项条挂载
  * ＋MESSAGE_RECEIVED 自动生成监听）
- * → initNav()。node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：
- * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化
- * → initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()。
+ * → initNav() → initPersona()（旧键迁移＋人设 store）。node 冒烟（无 DOM，
+ * scripts/smoke.mjs 驱动）流：initStorage() → host 探测清单 + storage
+ * roundtrip → nav 最小初始化 → initChoiceMinimal()（默认配置落盘＋全局口，
+ * 不挂 DOM）→ runChoiceSmoke() → initPersonaMinimal() → runPersonaSmoke()。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
  * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
@@ -17,10 +18,11 @@
 import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
-import { createChoiceSettingsTab, createDebugTab, createNavSettingsTab, createPoolTab, createPromptEditorTab } from '@/shell/tabs';
+import { createChoiceSettingsTab, createNavSettingsTab, createPersonaTab, createPoolTab, createPromptEditorTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
+import { initPersona, initPersonaMinimal, runPersonaSmoke } from '@/modules/persona';
 import { version } from '@/version';
 
 async function runNodeSmoke(): Promise<void> {
@@ -46,6 +48,9 @@ async function runNodeSmoke(): Promise<void> {
     initChoiceMinimal();
     // 批B 机判：组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
     await runChoiceSmoke();
+    // 批D 机判：persona 迁移幂等＋纯函数＋api 请求体形状＋store 互斥（断言在 smoke.mjs 收口）
+    initPersonaMinimal();
+    await runPersonaSmoke();
 }
 
 async function main(): Promise<void> {
@@ -59,9 +64,10 @@ async function main(): Promise<void> {
     registerTab(createPoolTab());
     registerTab(createPromptEditorTab());
     registerTab(createNavSettingsTab());
-    registerTab(createDebugTab());
+    registerTab(createPersonaTab());
     initChoice();
     initNav();
+    initPersona();
     console.info(`[tt-toolkit] v${version} ready (rewrite)`);
 }
 

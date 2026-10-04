@@ -54,6 +54,12 @@ declare module '@sillytavern/script' {
      * @hostAnchor script.js:1021 export let extension_prompts = {};
      */
     export let extension_prompts: Record<string, unknown>;
+    /**
+     * 新建用户头像时复制的宿主默认头像文件路径（host/personas.ts
+     * 上传通道的 blob 来源）。
+     * @hostAnchor script.js:680 export const default_user_avatar = 'img/user-default.png';
+     */
+    export const default_user_avatar: string;
 }
 
 declare module '@sillytavern/scripts/extensions' {
@@ -77,6 +83,10 @@ declare module '@sillytavern/scripts/events' {
         MESSAGE_RECEIVED: string;
         CHARACTER_MESSAGE_RENDERED: string;
         SETTINGS_LOADED: string;
+        /** 批D persona：emit 形态 (avatarId: string)，personas.js:866 同款 */
+        PERSONA_CREATED: string;
+        /** 批D persona：emit 形态 (avatarId: string)，personas.js:871 同款（host/personas.ts 写回后触发） */
+        PERSONA_UPDATED: string;
         [key: string]: string;
     };
     /**
@@ -151,6 +161,28 @@ declare module '@sillytavern/scripts/st-context' {
             movingUI: boolean;
             movingUIState: Record<string, Record<string, unknown>>;
         };
+        /**
+         * 主 API 原始生成通道（script.js:5092 generateRaw 的转发；批D
+         * persona「主 API」模式，prompt 传消息数组原样透传）。
+         * @hostAnchor scripts/st-context.js:211 generateRaw,
+         */
+        generateRaw?: (options: { prompt?: unknown }) => Promise<unknown>;
+        /**
+         * oai_settings 的转发（当前激活 openai 预设名＝
+         * preset_settings_openai；批D persona 预设解析读取）。
+         * @hostAnchor scripts/st-context.js:233 chatCompletionSettings: oai_settings,
+         */
+        chatCompletionSettings?: Record<string, unknown>;
+        /**
+         * 全量世界书名快照（批D persona 书目/勾选分区）。
+         * @hostAnchor scripts/st-context.js:289 getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
+         */
+        getWorldInfoNames?: () => unknown;
+        /**
+         * 预设管理器转发（批D persona 预设清单/按名取预设）。
+         * @hostAnchor scripts/st-context.js:293 getPresetManager,
+         */
+        getPresetManager?: (apiId: string) => unknown;
         [key: string]: unknown;
     } | null;
 }
@@ -190,4 +222,103 @@ declare module '@sillytavern/scripts/world-info' {
         isDryRun: boolean,
         globalScanData?: Record<string, unknown>,
     ): Promise<unknown>;
+    /**
+     * 按书名装载世界书数据（entries 键是 uid 字符串；批D persona
+     * 的世界书勾选/条目读取通道，返回 null=书不存在）。
+     * @hostAnchor scripts/world-info.js:2241 export async function loadWorldInfo(name) {
+     */
+    export function loadWorldInfo(name: string): Promise<{ entries: Record<string, WorldInfoEntryHost> } | null>;
+    /**
+     * 世界书内新建条目（返回带 uid 的新 entry，宿主负责 uid 分配；
+     * null=uid 分配失败）。
+     * @hostAnchor scripts/world-info.js:4295 export function createWorldInfoEntry(_name, data) {
+     */
+    export function createWorldInfoEntry(
+        _name: string,
+        data: { entries: Record<string, WorldInfoEntryHost> },
+    ): WorldInfoEntryHost | null;
+    /**
+     * 世界书落盘（immediately 必须 true——批D persona 写回纪律；
+     * 漏 true 会「保存后读回为空」）。
+     * @hostAnchor scripts/world-info.js:4362 export async function saveWorldInfo(name, data, immediately = false) {
+     */
+    export function saveWorldInfo(
+        name: string,
+        data: { entries: Record<string, WorldInfoEntryHost> },
+        immediately?: boolean,
+    ): Promise<boolean>;
+    /**
+     * 刷新世界书编辑器视图（写回后调用，幂等）。
+     * @hostAnchor scripts/world-info.js:1144 export function reloadEditor(file, loadIfNotSelected = false) {
+     */
+    export function reloadEditor(file: string, loadIfNotSelected?: boolean): void;
+
+    /**
+     * 宿主世界书条目字段（本仓消费面子集；宽松形态见 host/worldinfo.ts 收窄）。
+     * @hostAnchor scripts/world-info.js:4303 const newEntry = { uid: newUid, ...structuredClone(newWorldInfoEntryTemplate) };
+     */
+    export interface WorldInfoEntryHost {
+        uid?: number;
+        key?: unknown[];
+        keysecondary?: unknown[];
+        comment?: string;
+        content?: string;
+        disable?: boolean;
+        selective?: boolean;
+        order?: number;
+        position?: number;
+        depth?: number;
+        displayIndex?: number;
+        [key: string]: unknown;
+    }
+}
+
+declare module '@sillytavern/scripts/personas' {
+    /**
+     * 当前选中用户头像 id（live binding：setUserAvatar 内部赋值，
+     * personas.js:153 user_avatar = avatar）。
+     * @hostAnchor scripts/personas.js:75 export let user_avatar = '';
+     */
+    export let user_avatar: string;
+    /**
+     * 头像即 persona 键：power_user.personas[avatarId]=名称。initPersona
+     * 建描述符+落盘+非 silent emit PERSONA_CREATED（批D 建档走
+     * silent:true，写回纪律在 host/personas.ts）。
+     * @hostAnchor scripts/personas.js:548 export async function initPersona(avatarId, personaName, personaDescription, personaTitle, {
+     */
+    export function initPersona(
+        avatarId: string,
+        personaName: string,
+        personaDescription: string,
+        personaTitle: string,
+        options?: { silent?: boolean; position?: number; depth?: number; role?: number; lorebook?: string },
+    ): Promise<void>;
+    /**
+     * 切换当前用户头像（toastPersonaNameChange:false 供 persona
+     * 写回静默切换）。
+     * @hostAnchor scripts/personas.js:168 export async function setUserAvatar(imgfile, {
+     */
+    export function setUserAvatar(
+        imgfile: string,
+        options?: { toastPersonaNameChange?: boolean; navigateToCurrent?: boolean },
+    ): Promise<void>;
+    /**
+     * 刷新头像/persona 列表视图（ghost 键防御用它取真实文件名集）。
+     * @hostAnchor scripts/personas.js:302 export async function getUserAvatars(doRender = true, openPageAt = '') {
+     */
+    export function getUserAvatars(doRender?: boolean, openPageAt?: string): Promise<unknown>;
+}
+
+declare module '@sillytavern/scripts/utils' {
+    /**
+     * 按名称查宿主 persona（upsert 写回通道用它判「已有同名档」）。
+     * @hostAnchor scripts/utils.js:2724 export function findPersona({ name = null, allowAvatar = true, insensitive = true, preferCurrentPersona = true, quiet = false } = {}) {
+     */
+    export function findPersona(options?: {
+        name?: string | null;
+        allowAvatar?: boolean;
+        insensitive?: boolean;
+        preferCurrentPersona?: boolean;
+        quiet?: boolean;
+    }): unknown;
 }

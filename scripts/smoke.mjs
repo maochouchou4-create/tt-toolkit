@@ -94,8 +94,14 @@ globalThis.__TT_SMOKE_STUBS__ = {
     getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
     // 宿主通用注入槽位表（空表——真实占用归浏览器验收）
     extension_prompts: {},
-    // power_user（人设空——persona 注入模块按「未设置」路径走）
-    power_user: { persona_description: '' },
+    // power_user（人设空——persona 注入模块按「未设置」路径走；
+    // 批D 起 personas/persona_descriptions 桶在场：host/personas.ts 写回通道
+    // 的防御性初始化走真实空桶路径）
+    power_user: {
+        persona_description: '',
+        personas: {},
+        persona_descriptions: {},
+    },
     // 世界书激活（空桶——真实条目归浏览器验收）
     getWorldInfoPrompt: async () => ({
         worldInfoBefore: '',
@@ -132,6 +138,8 @@ globalThis.__TT_SMOKE_STUBS__ = {
         MESSAGE_RECEIVED: 'message_received',
         CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
         SETTINGS_LOADED: 'settings_loaded',
+        PERSONA_CREATED: 'persona_created',
+        PERSONA_UPDATED: 'persona_updated',
     },
     // 斜令注册器（commands 表真实可查，探测项可验证）
     SlashCommandParser: {
@@ -148,6 +156,48 @@ globalThis.__TT_SMOKE_STUBS__ = {
     dragElement: noop,
     getContext: () => stubContext,
     saveMetadataCalls: 0,
+    // ------------------------------------------------------------------
+    // 批D persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
+    // ------------------------------------------------------------------
+    // script.js:680 default_user_avatar（createAvatarPersona 的素材头像）
+    default_user_avatar: 'img/user-default.png',
+    // personas.js：写回通道四件套（node 冒烟不真写宿主；调用计数供断言）
+    personasCalls: { initPersona: 0, setUserAvatar: 0, getUserAvatars: 0 },
+    user_avatar: 'user-default.png',
+    initPersona: (avatarId, name, description) => {
+        globalThis.__TT_SMOKE_STUBS__.personasCalls.initPersona++;
+        globalThis.__TT_SMOKE_STUBS__.user_avatar = avatarId;
+        globalThis.__TT_SMOKE_STUBS__.power_user.personas[avatarId] = name;
+        globalThis.__TT_SMOKE_STUBS__.power_user.persona_descriptions[avatarId] = { description };
+    },
+    setUserAvatar: async () => {
+        globalThis.__TT_SMOKE_STUBS__.personasCalls.setUserAvatar++;
+    },
+    getUserAvatars: async () => {
+        globalThis.__TT_SMOKE_STUBS__.personasCalls.getUserAvatars++;
+        return ['user-default.png'];
+    },
+    // utils.js:2724 findPersona（存档无同名 → 走建档路径）
+    findPersona: () => null,
+    // world-info.js 写侧（node 冒烟：空世界书＋条目 uid 计数器）
+    worldinfoCalls: { loadWorldInfo: 0, createWorldInfoEntry: 0, saveWorldInfo: 0, reloadEditor: 0 },
+    worldinfoEntryUid: 1000,
+    loadWorldInfo: async name => {
+        globalThis.__TT_SMOKE_STUBS__.worldinfoCalls.loadWorldInfo++;
+        return { entries: {} , name };
+    },
+    createWorldInfoEntry: (name, data) => {
+        globalThis.__TT_SMOKE_STUBS__.worldinfoCalls.createWorldInfoEntry++;
+        const uid = ++globalThis.__TT_SMOKE_STUBS__.worldinfoEntryUid;
+        data.entries[uid] = { uid };
+        return data.entries[uid];
+    },
+    saveWorldInfo: async () => {
+        globalThis.__TT_SMOKE_STUBS__.worldinfoCalls.saveWorldInfo++;
+    },
+    reloadEditor: () => {
+        globalThis.__TT_SMOKE_STUBS__.worldinfoCalls.reloadEditor++;
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -157,14 +207,19 @@ globalThis.__TT_SMOKE_STUBS__ = {
 const outputLines = [];
 const origLog = console.log;
 const origInfo = console.info;
+const origError = console.error;
 const tap = (prefix) => (...args) => {
     const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
     outputLines.push(line);
     if (prefix === 'log') origLog(line);
-    else origInfo(line);
+    else if (prefix === 'info') origInfo(line);
+    else origError(line);
 };
 console.log = tap('log');
 console.info = tap('info');
+// 批D：console.error 同样收口——persona/choice 冒烟的 FAIL 收尾行走
+// console.error（不打扰 stdout 的 PASS 流），收尾判据须能看到它
+console.error = tap('error');
 
 register('./stub-loader.mjs', import.meta.url);
 
@@ -180,14 +235,16 @@ try {
 // import 的解析先于后台异步链完成。批B 时整条链是纯微任务（先于本脚本
 // 断言排空，恰好全绿）；批C 自动生成断言含 setTimeout 轮询（宏任务），
 // 断言会抢在轮询前执行——截断输出。改为显式等收尾行（OK/FAIL）或超时。
+// 批D 起 persona 冒烟排在 choice 之后——收尾判据改盯末段 [persona-smoke]
+// OK 行（choice 的 FAIL 行同样提前触发收口）。
 // ---------------------------------------------------------------------------
-const SMOKE_DONE_RE = l => l.startsWith('[choice-smoke] OK：') || l.includes('项 FAIL：');
+const SMOKE_DONE_RE = l => l.startsWith('[persona-smoke] OK：') || l.includes('项 FAIL：');
 const deadline = Date.now() + 15000;
 while (!outputLines.some(SMOKE_DONE_RE) && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 50));
 }
 if (!outputLines.some(SMOKE_DONE_RE)) {
-    console.error('[smoke] FAIL: node 冒烟分支未在 15s 内收尾（runChoiceSmoke 挂起？）');
+    console.error('[smoke] FAIL: node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke 挂起？）');
     process.exit(1);
 }
 
@@ -299,9 +356,27 @@ if (!Array.isArray(promptDomain) || promptDomain.length !== 1 || !Array.isArray(
     failures.push('默认提示词配置未正确初始化（期望 1 套 18 模块）');
 }
 
+// ---------------------------------------------------------------------------
+// 批D 机判：persona 迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
+// ---------------------------------------------------------------------------
+// PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
+// 批D 41 条：迁移幂等 9（空启动写默认域/5 键搬入/localConfig 全家/
+// apiProfiles 收档/形状+淘汰字段/退休键清理/legacy 快照保留/二次启动
+// 零重写/域在场退休键仍清）＋prompts 4＋yaml·stripYamlFence·diff 8＋
+// api 8（端点规范化/请求体形状×2/测连 fetch 桩/SSE 双形态/\\r\\n 帧/
+// 错误帧/空流）＋worldbook·store·storage 12（触发词/无书 fail fast/
+// 上下文空桶/互斥×2/generateRaw 缺席/charKey 兜底/超时钳制/划词模板/
+// 保存点写域/normalize 丢未知/写域清理）。
+const PERSONA_PASS_EXPECTED = 41;
+const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
+const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
+if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
+    failures.push(`persona 机判异常：期望恰好 ${PERSONA_PASS_EXPECTED} 条 PASS，实际 ${personaPassLines.length} 条 / FAIL ${personaFailLines.length} 条${personaFailLines.length ? `（首条：${personaFailLines[0]}）` : ''}`);
+}
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链），__TTK_PROMPTS__ 全局口在场。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链），__TTK_PROMPTS__ 全局口在场；persona 机判 ${personaPassLines.length} 条全 PASS（批D 迁移幂等/prompts 常量/yaml·diff 纯函数/api 请求体形状与 SSE/世界书触发词/store 互斥与显式保存点）。`);

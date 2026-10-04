@@ -7,22 +7,10 @@ import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
-import DebugTab from './DebugTab.vue';
 import NavSettingsTab from './NavSettingsTab.vue';
+import PersonaTab from './PersonaTab.vue';
 import PoolTab from './PoolTab.vue';
 import PromptEditorTab from './PromptEditorTab.vue';
-
-export function createDebugTab(): ShellTab {
-    return {
-        id: 'debug',
-        tabTitle: '调试',
-        mount(container) {
-            const app = createApp(DebugTab);
-            app.use(pinia);
-            app.mount(container);
-        },
-    };
-}
 
 export function createNavSettingsTab(): ShellTab {
     return {
@@ -54,6 +42,18 @@ export function createPromptEditorTab(): ShellTab {
         tabTitle: '提示词',
         mount(container) {
             const app = createApp(PromptEditorTab);
+            app.use(pinia);
+            app.mount(container);
+        },
+    };
+}
+
+export function createPersonaTab(): ShellTab {
+    return {
+        id: 'persona',
+        tabTitle: '人设',
+        mount(container) {
+            const app = createApp(PersonaTab);
             app.use(pinia);
             app.mount(container);
         },

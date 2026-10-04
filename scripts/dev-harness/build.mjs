@@ -1,7 +1,7 @@
-// dev-harness 构建器：把 dist/index.js 的 9 条 @sillytavern 相对路径
-// import 重写为对 globalThis.__TT_HARNESS__ 的解构，产出 app.js——经典
-// 脚本形态（无模块 import），浏览器 file:// 直接打开 index.html 即可
-// 加载（ESM 相对路径在 file:// 下会被 CORS 策略拦截）。
+// dev-harness 构建器：把 dist/index.js 的全部 @sillytavern 相对路径
+// import（批D 后为 11 条）重写为对 globalThis.__TT_HARNESS__ 的解构，
+// 产出 app.js——经典脚本形态（无模块 import），浏览器 file:// 直接打开
+// index.html 即可加载（ESM 相对路径在 file:// 下会被 CORS 策略拦截）。
 // 消费契约（stub 面）见同目录 README.md；dist 形态变化时（import 语句
 // 增删）本脚本 fail fast，先更新 STUBS 表再复跑。
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -23,6 +23,8 @@ const STUBS = {
     'RossAscends-mods.js': 'ross_ascends_mods',
     'power-user.js': 'power_user',
     'world-info.js': 'world_info',
+    'personas.js': 'personas',
+    'utils.js': 'utils',
 };
 
 const source = readFileSync(distFile, 'utf8');

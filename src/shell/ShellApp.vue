@@ -10,8 +10,17 @@
     类（宿主 dragElement 契约）；图标用 Unicode 文本渲染——宿主
     FontAwesome 字形在本扩展实测未渲染（空 div 零宽＝不可见不可抓），
     不依赖字体才稳。
+
+    pinnedOpen（两击 bug 根修，m03812 用户批准）：宿主全局自动收抽屉
+    机制（script.js:14408-14447 $('html') touchstart/mousedown——点击
+    .openDrawer:not(.pinnedOpen) 之外任何地方→toggleClass 只翻 DOM 类）
+    会把开着面板的 openDrawer 视觉收走，但 Pinia store.open 仍 true→
+    下次点工具箱＝toggle 翻 false＝看起来没反应→再点才开。挂 pinnedOpen
+    （宿主钉住标记，style.css 无任何 pinnedOpen 规则＝纯行为标记，
+    script.js:13198/:14440、RossAscends-mods.js:734+ 同款用法）即豁免
+    自动收。代价：点面板外不再自动收——收起走 ✕ 或工具箱键（用户已接受）。
   -->
-  <div id="ttToolkitShell" class="drawer-content flexGap5 tt-shell" :class="{ openDrawer: store.open }">
+  <div id="ttToolkitShell" class="drawer-content flexGap5 tt-shell pinnedOpen" :class="{ openDrawer: store.open }">
     <div class="tt-shell-controlbar">
       <div id="ttToolkitShellheader" class="drag-grabber tt-shell-grabber" title="拖动">⠿</div>
       <b class="tt-shell-title">TT 工具箱</b>

@@ -254,3 +254,19 @@ export async function callGenerateEndpoint(
     if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
     return { content: data?.choices?.[0]?.message?.content ?? '', streamed: false };
 }
+
+/**
+ * 主 API 生成通道（批D persona「主 API」模式）：宿主 context.generateRaw
+ * （script.js:5092 `export async function generateRaw({prompt='',...})`，
+ * st-context.js:55/:211 转发）。prompt 传消息数组原样透传（system/WI/
+ * user/assistant-prefill 角色全保留）；流式与思考强度跟随酒馆当前连接
+ * 设置（generateRaw 无对应参数面）。宿主版本过旧无此接口时抛错。
+ */
+export async function generateRaw(messages: GenerateMessage[]): Promise<string> {
+    const generate = getTavernContext()?.generateRaw as ((options: { prompt?: unknown }) => Promise<unknown>) | undefined;
+    if (typeof generate !== 'function') {
+        throw new Error('酒馆版本过旧，无 generateRaw 接口');
+    }
+    const result = await generate({ prompt: messages });
+    return typeof result === 'string' ? result : '';
+}

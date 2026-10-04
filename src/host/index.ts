@@ -50,3 +50,28 @@ export { createTtlog } from './ttlog';
 export type { Ttlog, TtlogEntry } from './ttlog';
 export { formatProbeResults, probeHost } from './probe';
 export type { ProbeResult } from './probe';
+// 批D persona 模块的宿主通道面
+export { generateRaw } from './generate';
+export {
+    getCharacterGreetingsList,
+    getCharacterInfoText,
+    getCharacterName,
+    getCurrentCharacter,
+} from './characters';
+export {
+    getCurrentAvatarId,
+    getUserDisplayName,
+    listUserPersonas,
+    upsertPersona,
+    type PersonaDescriptor,
+} from './personas';
+export { buildPresetOptions, listOpenAIPresetNames, resolvePresetSystemPrompt } from './presets';
+export {
+    getContextWorldBooks,
+    getWorldBookEntries,
+    listWorldInfoNames,
+    loadWorldInfoBook,
+    upsertWorldInfoPersonaEntry,
+    type WorldBookEntrySummary,
+    type WorldInfoBookData,
+} from './worldinfo';

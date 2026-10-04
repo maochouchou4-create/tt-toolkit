@@ -168,53 +168,6 @@
     margin-bottom: 6px;
 }
 
-.tt-probe-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    font-size: 0.85em;
-}
-
-.tt-probe-list li {
-    padding: 2px 0;
-    border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor, #666) 45%, transparent);
-    word-break: break-all;
-}
-
-.tt-probe-tag {
-    display: inline-block;
-    min-width: 3em;
-    font-weight: bold;
-}
-
-.tt-probe-tag--present {
-    color: var(--SmartThemeBodyColor, inherit);
-}
-
-.tt-probe-tag--absent {
-    color: var(--SmartThemeQuoteColor, #c58a36);
-}
-
-.tt-roundtrip-ok {
-    color: var(--SmartThemeBodyColor, inherit);
-    font-weight: bold;
-}
-
-.tt-roundtrip-fail {
-    color: var(--SmartThemeQuoteColor, #c58a36);
-    font-weight: bold;
-}
-
-.tt-dump {
-    white-space: pre-wrap;
-    word-break: break-all;
-    font-family: monospace;
-    font-size: 0.8em;
-    max-height: 260px;
-    overflow-y: auto;
-    margin: 0;
-}
-
 .tt-actions {
     display: flex;
     flex-wrap: wrap;
