@@ -17,6 +17,9 @@
  *     落盘 tauritavern.log.*；
  *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（四按钮，
  *     消息体为 /ttnav-* 斜令），命令亦可直接在输入框敲。
+ * - 初始化为显式导出（initNav / initNavMinimal），由 main.ts 统一做
+ *   环境分支后调用——模块求值期不自启动：storage 必须先初始化（旧
+ *   localStorage 键迁移），否则 store 首读会拿到迁移前的旧值。
  * DOM 契约与 v2 同源已核：#chat / .mes[mesid]（TT index.html:8382 区域）、
  * #mes_stop（:8417）、#send_but（:8422）。
  */
@@ -27,6 +30,7 @@ import {
     event_types,
     executeSlashCommand,
     getChatMessages,
+    getTavernContext,
     hostWindow,
     registerSlashCommand,
     type ChatMessage,
@@ -183,6 +187,15 @@ function getCurrentVisibleMessageId(): number | null {
 // 5. 楼层定位核心 —— 主线 /chat-jump 优先，脚本内滚动仅作兜底
 //    （执行器来源＝host 层 executeSlashCommand：宿主 ABI 为唯一路径）
 // --------------------------------------------------------
+// 跳转通道运行时真值（dump 排障面）：执行器在场探测 + 每次实际跳转
+// 记录的通道。回显 CONFIG 常量只证明「配置想用主线」，证明不了
+// 「执行器在场 / 实际走了主线」——排障时两者要能区分。
+let lastJumpMode: 'mainline' | 'fallback' | null = null;
+
+function jumpExecutorAvailable(): boolean {
+    return typeof getTavernContext()?.executeSlashCommandsWithOptions === 'function';
+}
+
 // 主线跳转：/chat-jump → virtual.force + 同步物化 + scrollToIndex（居中 + 高亮闪烁）
 // 返回 { ok, mode: 'mainline' | 'fallback' } 供日志标注跳转方式
 async function jumpToFloor(messageId: number): Promise<{ ok: boolean; mode: 'mainline' | 'fallback' }> {
@@ -193,12 +206,14 @@ async function jumpToFloor(messageId: number): Promise<{ ok: boolean; mode: 'mai
     if (CONFIG.MAINLINE_JUMP_FIRST) {
         try {
             await executeSlashCommand(`/chat-jump ${messageId}`);
+            lastJumpMode = 'mainline';
             ttlog.action(`jump -> #${messageId} (mainline)`);
             return { ok: true, mode: 'mainline' };
         } catch (e) {
             ttlog.warn(`chat-jump -> #${messageId} failed, fallback scroll`, e instanceof Error ? e.message : String(e));
         }
     }
+    lastJumpMode = 'fallback';
     const ok = await scrollToMessageTop(messageId, { smooth: false });
     return { ok, mode: 'fallback' };
 }
@@ -597,8 +612,9 @@ async function ensureNavQrSet(): Promise<void> {
     }
 }
 
-// QR message＝slash 命令本体，不带尾空格——宿主执行时会自行拼接
-// （QuickReplySet.js:202 execute 内 `${finalMessage} `），自带尾空格成冗余
+// QR message＝slash 命令本体，不带尾空格——宿主执行时会自行拼接：
+// QuickReplySet.js:160 executeWithOptions 的 else 分支
+// `input = `${finalMessage} ` `，自带尾空格成冗余
 function qrMessage(action: { command: string }): string {
     return `/${action.command}`;
 }
@@ -650,7 +666,7 @@ function dump(): string {
     const root = noDom ? null : getScrollRoot();
     const lines = [
         `tt-toolkit nav dump @ ${new Date().toISOString()}`,
-        `version=${NAV_VERSION} autoTop=${autoTopEnabled() ? 'on' : 'off'} ttlog=${ttlogHealth()} mode=${CONFIG.MAINLINE_JUMP_FIRST ? 'mainline' : 'fallback'}`,
+        `version=${NAV_VERSION} autoTop=${autoTopEnabled() ? 'on' : 'off'} ttlog=${ttlogHealth()} mode=${lastJumpMode ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'}`,
         `qrApi=${getQuickReplyApi() ? 'ready' : 'unavailable'} qrSet="${QR_SET_NAME}" qrActivated=${qrActivated()}`,
         `root=${root ? `#${root.id || '(no id)'}` : noDom ? 'n/a (no DOM)' : 'missing'}`
             + ` mounted=${root ? root.querySelectorAll(CONFIG.SEL.MESSAGE).length : 0}`
@@ -662,15 +678,35 @@ function dump(): string {
 }
 
 // --------------------------------------------------------
-// 10. 初始化（加载完成不加 toast：console 的模块 ready 日志即载体）
+// 10. 初始化 —— 显式导出，由 main.ts 统一做环境分支（加载完成不加
+//     toast：console 的模块 ready 日志即载体）。
+//     浏览器流调 initNav()（全量），node 冒烟流调 initNavMinimal()
+//     （无 DOM 最小集）。模块求值期不自启动，时序主权在引导层。
 // --------------------------------------------------------
-function initNav(): void {
-    registerSlashCommands();
-    void ensureNavQrSet(); // 异步等 QR API 就绪，不阻塞命令注册与事件接线
-    bindEvents();
-    startGenerationWatch();
 
-    ttlog.info(`${NAV_VERSION} loaded autoTop=${autoTopEnabled() ? 'on' : 'off'} mode=${CONFIG.MAINLINE_JUMP_FIRST ? 'mainline' : 'fallback'} ttlog=${ttlogHealth()}`);
+/** 浏览器全量初始化：命令注册 + QR 集建立 + 事件接线 + 生成监听。 */
+export function initNav(): void {
+    const start = (): void => {
+        registerSlashCommands();
+        void ensureNavQrSet(); // 异步等 QR API 就绪，不阻塞命令注册与事件接线
+        bindEvents();
+        startGenerationWatch();
+        ttlog.info(`${NAV_VERSION} loaded autoTop=${autoTopEnabled() ? 'on' : 'off'} mode=${lastJumpMode ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'} ttlog=${ttlogHealth()}`);
+    };
+    // 防御性等待：扩展脚本正常晚于 DOM 就绪，但 readyState 仍为 loading
+    // 时（宿主加载流程变更）不应在半初始化的 DOM 上接线
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => start());
+        return;
+    }
+    start();
+}
+
+/** node 冒烟最小初始化：只做不依赖 DOM/QR 的命令注册与事件绑定。 */
+export function initNavMinimal(): void {
+    registerSlashCommands();
+    bindEvents();
+    ttlog.info(`${NAV_VERSION} minimal init (node smoke) autoTop=${autoTopEnabled() ? 'on' : 'off'} ttlog=${ttlogHealth()}`);
 }
 
 const flagWindow = globalThis as Record<string, unknown>;
@@ -679,18 +715,7 @@ if (flagWindow[NAV_FLAG]) {
     console.warn('[tt-toolkit][nav] already loaded, skip re-injection');
 } else {
     flagWindow[NAV_FLAG] = true;
-    // 排障口先挂（不依赖 DOM）：node 冒烟路径也要能用 dump 验证模块在场
+    // 排障口先挂（不依赖 DOM、不触发初始化）：node 冒烟路径也要能用
+    // dump 验证模块在场
     flagWindow.__TT_NAV__ = Object.freeze({ version: NAV_VERSION, dump });
-    if (typeof document !== 'undefined') {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => initNav());
-        } else {
-            initNav();
-        }
-    } else {
-        // node 冒烟路径：slash 注册与事件绑定不依赖 DOM，照跑——
-        // 冒烟可机判 /ttnav-* 注册链路（依赖 DOM 的生成监听跳过）
-        registerSlashCommands();
-        bindEvents();
-    }
 }

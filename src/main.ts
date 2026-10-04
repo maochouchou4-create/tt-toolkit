@@ -1,12 +1,13 @@
 /**
- * 扩展引导：host 适配初始化 → storage 初始化 → 壳挂载 → nav 注册。
+ * 扩展引导：唯一环境分支点（批A 修复：模块不再自行探测环境自启动）。
  *
- * 双路径：
- *   - 浏览器（TT 宿主窗口）：完整初始化；
- *   - node 冒烟（无 DOM，scripts/smoke.mjs 驱动）：跳过 DOM 侧接线，
- *     输出 host 探测清单 + storage roundtrip（批A 判据的机判部分）。
- *     node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
- *     真实宿主在场性归浏览器验收。
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTabs
+ * → initNav()。node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：
+ * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化。
+ * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
+ * 先于 store 首读），故初始化主权集中在此、不在各模块。
+ * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
+ * 真实宿主在场性归浏览器验收。
  */
 
 // 先激活 pinia：后续命令式模块在事件回调里取 store 依赖 active 实例
@@ -15,7 +16,7 @@ import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
 import { createDebugTab, createNavSettingsTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
-import '@/modules/nav';
+import { initNav, initNavMinimal } from '@/modules/nav';
 import { version } from '@/version';
 
 async function runNodeSmoke(): Promise<void> {
@@ -30,6 +31,7 @@ async function runNodeSmoke(): Promise<void> {
     }
     console.info('=== storage 快照 ===');
     console.info(dumpStorage());
+    initNavMinimal();
     const nav = (globalThis as { __TT_NAV__?: { version?: string; dump?: () => string } }).__TT_NAV__;
     if (nav) {
         console.info(`=== nav dump（${nav.version ?? '?'}）===`);
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
     mountShell();
     registerTab(createDebugTab());
     registerTab(createNavSettingsTab());
+    initNav();
     console.info(`[tt-toolkit] v${version} ready (rewrite)`);
 }
 
