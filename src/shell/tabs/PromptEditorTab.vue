@@ -116,7 +116,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import { createPromptConfigFromDefault, listSlotPreviews, usePromptsStore, type PromptModule, type SlotPreview } from '@/prompts';
+import { createPromptConfigFromDefault, listSlotPreviews, usePromptsStore, validatePromptModules, type PromptModule, type SlotPreview } from '@/prompts';
 import { assembleCurrent } from '@/modules/choice/generator';
 import { useChoiceStore } from '@/modules/choice/store';
 
@@ -189,10 +189,19 @@ async function onImportFile(event: Event): Promise<void> {
     if (!file) return;
     try {
         const text = await file.text();
-        const data = JSON.parse(text) as { name?: unknown; modules?: unknown };
+        let data: { name?: unknown; modules?: unknown };
+        try {
+            data = JSON.parse(text) as { name?: unknown; modules?: unknown };
+        } catch (e) {
+            throw new Error(`文件不是合法 JSON：${e instanceof Error ? e.message : String(e)}`);
+        }
         if (!Array.isArray(data.modules)) throw new Error('JSON 缺少 modules 数组');
+        // 导入边界契约校验（Parse, don't validate）：外部文件逐字段过显式
+        // 契约，任一不合约整份拒绝（可读错误定位到模块与字段，不部分落盘）
+        const validation = validatePromptModules(data.modules);
+        if (!validation.ok) throw new Error(`模块契约不符：${validation.error}`);
         const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '导入配置';
-        prompts.createConfig(name, { id: '', name, modules: data.modules as PromptModule[] });
+        prompts.createConfig(name, { id: '', name, modules: validation.modules });
     } catch (e) {
         alert(`导入失败：${e instanceof Error ? e.message : String(e)}`);
     }

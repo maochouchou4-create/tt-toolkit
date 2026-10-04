@@ -166,11 +166,18 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
     return fillPlaceholders(`<${tag}>\n${body}\n</${tag}>`, sources);
 }
 
+/**
+ * 走向标签查定义：未知标签显式报错（Fail Fast）。
+ *
+ * 与导入校验（validate.ts）同族：chat 域数据若被外部写坏（枚举外标签），
+ * 静默回退首项＝悄悄改写用户意图；报错让坏数据在组装口当场暴露。
+ */
 function directionDefOf(tag: string): StoryDirectionTagDef {
-    return (
-        STORY_DIRECTION_TAG_DEFS.find(d => d.id === tag) ??
-        (STORY_DIRECTION_TAG_DEFS[0] as StoryDirectionTagDef)
-    );
+    const def = STORY_DIRECTION_TAG_DEFS.find(d => d.id === tag);
+    if (!def) {
+        throw new Error(`未知的剧情走向标签「${tag}」——storyDirection 数据损坏，请重设剧情走向`);
+    }
+    return def;
 }
 
 /**
