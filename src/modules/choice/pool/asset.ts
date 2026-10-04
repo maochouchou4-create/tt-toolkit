@@ -32,6 +32,9 @@ interface PoolAsset {
 
 const asset = assetJson as unknown as PoolAsset;
 
+/** asset 版本（default-pool.json 顶层 version；smoke 断言引用，避免硬编码漂移）。 */
+export const ASSET_POOL_VERSION: number = asset.version;
+
 /**
  * asset → 运行时池形状的确定性映射：条目 id=asset-<序号>（顺序即 json 顺序，
  * 不掺时间/随机——同一份 json 永远映射出同一池，幂等重写不产生 diff 噪声）。

@@ -4,6 +4,11 @@
  */
 
 .tt-choice-bar {
+    /* 根修（m03158 用户反馈「选项太长不换行」）：宿主 #form_sheld 自带
+       white-space: nowrap（TauriTavern/src/style.css），white-space 可继承，
+       本条挂在 #form_sheld 下会整树继承 nowrap → 根节点显式 normal 杀掉
+       继承链。harness host-sim.css 已同步复刻该宿主规则防回归。 */
+    white-space: normal;
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 8px;
     background: var(--SmartThemeBlurTintColor, var(--SmartThemeChatTintColor, rgba(30, 30, 30, 0.9)));
@@ -111,5 +116,11 @@
 }
 
 .tt-choice-option-content {
+    /* 折行防线：min-width:0 允许 flex 收缩；pre-wrap 保留模型输出中的换行；
+       anywhere 连续无断点字符串（长英文词/破折号串）也强制断行 */
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
 }

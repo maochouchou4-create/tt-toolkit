@@ -16,7 +16,7 @@ import { drawAmount, effectivePool, resolvePool, resolvePoolConfig, safeWeight }
 import type { PoolEntry } from './pool/types';
 import { exportPoolBackup, importLegacyChoice, parsePoolBackup } from './pool/import';
 import { deletePoolConfig, readChatPoolConfigId, readPoolData, setChatPoolConfigId, upsertPoolConfig, upsertPoolEntry } from './pool/storage';
-import { ASSET_POOL_CONFIG_ID, buildAssetPool, syncAssetPool } from './pool/asset';
+import { ASSET_POOL_CONFIG_ID, ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 
 const failures: string[] = [];
 
@@ -158,6 +158,8 @@ function runAssetPoolChecks(): void {
     check('asset：池规则非空（反 OOC 规则随仓发布）', poolConfigs[0].rules.length > 0, `${poolConfigs[0].rules.length} 字`);
     const ids = new Set(masterPool.map(e => e.id));
     check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
+    // v2（m03158 拍板）：条目级 rule 全部移除（「确实用不上」），池级反 OOC 规则保留
+    check('asset：条目规则全部移除（v2，池级规则保留）', masterPool.every(e => e.rule === ''), `带 rule 条目 ${masterPool.filter(e => e.rule !== '').length}`);
 
     // ---- 同步行为（存储态驱动）----
     const resetPool = () => {
@@ -170,7 +172,7 @@ function runAssetPoolChecks(): void {
     choiceStorage.updateGenParams({ categoriesEnabled: false });
     syncAssetPool();
     let domain = choiceStorage.readDomain();
-    check('asset 首次同步：空池覆盖为 110 条并标记 assetVersion', domain.pool.masterPool.length === 110 && domain.pool.assetVersion === 1, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
+    check('asset 首次同步：空池覆盖为 110 条并标记 assetVersion', domain.pool.masterPool.length === 110 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
     check('asset 首次同步：categoriesEnabled 旧 false 翻转为 true', domain.gen.categoriesEnabled === true, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 用户手动关：后续同步不得回翻（gen 纯用户域）
     choiceStorage.updateGenParams({ categoriesEnabled: false });
@@ -186,7 +188,7 @@ function runAssetPoolChecks(): void {
     domain = choiceStorage.readDomain();
     check(
         'asset 版本变更：污染池全量恢复（垃圾清除、配置归一、gen 不动）',
-        domain.pool.masterPool.length === 110 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.poolConfigs.length === 1 && domain.pool.assetVersion === 1 && domain.gen.categoriesEnabled === false,
+        domain.pool.masterPool.length === 110 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.poolConfigs.length === 1 && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
         `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
     );
     // 还原导入测试前置：导入断言假定「导入前池=空」（模拟全新安装）

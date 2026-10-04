@@ -29,13 +29,9 @@
       <div class="tt-card-sub">
         共 {{ pool.masterPool.length }} 条 · {{ categoryCount }} 个分类。内容随插件更新发布，不在页面编辑。
       </div>
-      <label class="tt-pool-field">
-        <span>搜索</span>
-        <input v-model="searchText" type="text" placeholder="标题 / 正文 / 规则 / 分类，全量搜索">
-      </label>
 
-      <div v-if="!groupedEntries.length" class="tt-pool-empty">
-        {{ pool.masterPool.length ? '没有匹配搜索的条目。' : '池内容尚未载入（刷新页面重试）。' }}
+      <div v-if="!pool.masterPool.length" class="tt-pool-empty">
+        池内容尚未载入（刷新页面重试）。
       </div>
 
       <div v-for="group in groupedEntries" :key="group.category" class="tt-pool-group">
@@ -46,17 +42,12 @@
             <span class="tt-pool-entry-content">{{ entry.content }}</span>
             <span class="tt-pool-entry-badges">
               <span v-if="entry.pinned" class="tt-pool-badge">固定</span>
-              <span v-else-if="entry.rule" class="tt-pool-badge">带规则</span>
             </span>
           </div>
 
           <div v-if="expandedId === entry.id" class="tt-pool-entry-editor">
             <div class="tt-pool-editor-title">{{ entry.type || '（无标题）' }}</div>
             <div class="tt-pool-entry-detail">{{ entry.content }}</div>
-            <template v-if="entry.rule">
-              <div class="tt-pool-editor-title">写作规则（只约束这一条）</div>
-              <div class="tt-pool-entry-detail">{{ entry.rule }}</div>
-            </template>
             <div class="tt-pool-note">
               分类：{{ entry.category.trim() || '未分类' }}{{ entry.pinned ? ' · 固定条目（每轮必发，不参与抽签）' : '' }}
             </div>
@@ -91,7 +82,6 @@ function onCategoriesToggle(e: Event) {
 
 // ---- b. 只读列表卡 ----
 
-const searchText = ref('');
 const expandedId = ref('');
 
 const categoryCount = computed(() => new Set(pool.masterPool.map(e => e.category.trim() || '未分类')).size);
@@ -102,16 +92,9 @@ const poolRules = computed(() => {
 });
 
 const groupedEntries = computed(() => {
-    const q = searchText.value.trim().toLowerCase();
-    const list = q
-        ? pool.masterPool.filter(e =>
-            e.type.toLowerCase().includes(q) ||
-            e.content.toLowerCase().includes(q) ||
-            e.rule.toLowerCase().includes(q) ||
-            e.category.toLowerCase().includes(q))
-        : pool.masterPool;
+    // m03158 用户拍板：只读浏览不配搜索框（用不上）——全量分组直出
     const groups = new Map<string, PoolEntry[]>();
-    for (const entry of list) {
+    for (const entry of pool.masterPool) {
         const key = entry.category.trim() || '未分类';
         const bucket = groups.get(key);
         if (bucket) bucket.push(entry);
@@ -132,31 +115,6 @@ function toggleExpand(entry: PoolEntry) {
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.tt-pool-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-}
-
-.tt-pool-field > span {
-    min-width: 9em;
-    opacity: 0.8;
-    flex-shrink: 0;
-}
-
-.tt-pool-field input {
-    flex: 1;
-    min-width: 0;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 3px 6px;
-    font-size: 0.95em;
 }
 
 .tt-pool-switch {
