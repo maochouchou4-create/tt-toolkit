@@ -237,11 +237,19 @@ export function runStorageRoundtrip(): RoundtripReport[] {
     return reports;
 }
 
-/** 存储三域快照序列化（调试 dump 用；角色域批C 接入后并入）。 */
+/**
+ * 存储三域快照序列化（调试 dump 用；角色域批C 接入后并入）。
+ * 密钥掩码（双复核 P3）：调试面板不回显明文——choice.apis[].key 只保留
+ * 前 6 字符＋省略号（判断「填没填、填的是哪把」足够，整把钥匙不进 DOM）。
+ */
 export function dumpStorage(): string {
+    const maskedGlobal = JSON.stringify(readGlobalDomain(), null, 2)
+        ?.replace(/("key"\s*:\s*")([^"]*)(")/g, (_m, p1: string, val: string, p3: string) =>
+            val ? `${p1}${val.slice(0, 6)}…${p3}` : `${p1}${val}${p3}`)
+        ?? '';
     const lines = [
         `storage dump @ ${new Date().toISOString()}`,
-        `global(${GLOBAL_KEY}) = ${JSON.stringify(readGlobalDomain(), null, 2)}`,
+        `global(${GLOBAL_KEY}) = ${maskedGlobal}`,
         `chat(${CHAT_KEY}) = ${JSON.stringify(readChatDomain(), null, 2)}`,
     ];
     return lines.join('\n');

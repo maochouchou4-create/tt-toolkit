@@ -192,9 +192,10 @@ function resolveInjectContent(
                   }
                 : { content: '', note: '柏宝书摘要不可用（插件缺席或未返回）' };
         case 'pool_entries': {
-            // 分区呈现：pinned＝必发（每轮都在场），drawn＝候选菜单（多于
-            // 所需，AI 按场景贴合挑选）——菜单模式语义写在提示词文本里，
-            // 不是条目行自己标注；逐条可见（dump 验收靠它）。
+            // 分区呈现：pinned＝固定条目（固定纳入每轮选项），drawn＝候选
+            // 菜单（多于所需，AI 按场景贴合挑选）——菜单模式语义写在提示
+            // 词文本里，不是条目行自己标注；逐条可见（dump 验收靠它）。
+            // pinned 无注入上限＝fork send_all 同款语义，保留。
             const pool = sources.poolInjection;
             if (!pool) return { content: '', note: '池未启用（无池数据）' };
             if (pool.pinned.length === 0 && pool.drawn.length === 0) {
@@ -202,12 +203,19 @@ function resolveInjectContent(
             }
             const parts: string[] = [];
             if (pool.pinned.length > 0) {
-                parts.push(`【必发条目】以下每条是一个行动方向，每轮选项都必须覆盖它们（共 ${pool.pinned.length} 条）：\n${pool.pinned.map(renderPoolLine).join('\n')}`);
+                // P2-1 修复（双复核）：pinned ≥ count 时与 core_rules/output_format
+                // 的「恰好 {{count}} 条」互斥——此段显式声明覆盖语义（后注入
+                // 的专项指令赢），数量约束以固定条目为准。{{count}} 由
+                // wrapTag 的占位符填充统一替换。
+                const overage = pool.pinned.length >= sources.count
+                    ? `\n注意：固定条目数量已达到常规数量 {{count}} 条——本轮选项数量以固定条目为准，允许超过 {{count}} 条，不受数量规则限制。`
+                    : '';
+                parts.push(`【固定条目】以下每条是一个行动方向，固定纳入每轮选项（共 ${pool.pinned.length} 条）：${overage}\n${pool.pinned.map(renderPoolLine).join('\n')}`);
             }
             if (pool.drawn.length > 0) {
                 parts.push(`【候选条目】以下是本轮抽出的候选行动方向，数量多于实际所需——按与当前剧情的贴合度挑选使用，不要求全用，未选中的不出现在选项里（共 ${pool.drawn.length} 条）：\n${pool.drawn.map(renderPoolLine).join('\n')}`);
             }
-            const note = `必发 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条`;
+            const note = `固定 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条${pool.pinned.length >= sources.count ? '（固定条目已覆盖数量规则）' : ''}`;
             return { content: wrapTag('pool_entries', parts.join('\n\n'), sources), note };
         }
         case 'pool_rules': {

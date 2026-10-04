@@ -52,6 +52,11 @@ function asFiniteNumber(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
+/** count 值域钳制（与 ChoiceSettingsTab 的 UI 钳制同域 1-10）。 */
+function clampCount(n: number): number {
+    return Math.min(Math.max(Math.trunc(n), 1), 10);
+}
+
 /**
  * 读旧版 extension_settings.choice。旧插件数据就挂在这个全局可变单例下
  * （核实记录见 host/settings.ts 头注释），运行时直接读，无需额外 API。
@@ -101,7 +106,7 @@ export function importLegacyChoice(): PoolImportReport | null {
         }
         if (seenEntryIds.has(entry.id)) {
             report.masterPoolSkipped++;
-            report.notes.push(`池条目 id 规范化后重复（${entry.id}），保留首条`);
+            report.notes.push(`池条目 id 规范化后重复（${entry.id}），保留首见条目（内容以首条为准）`);
             continue;
         }
         seenEntryIds.add(entry.id);
@@ -133,7 +138,8 @@ export function importLegacyChoice(): PoolImportReport | null {
             }),
         });
         if (!config) continue;
-        // 抽取参数只从默认配置取（绑定级联的兜底落点；旧档实证只有一套全默认配置）
+        // 抽取参数优先取默认配置；旧档若无 is_default 标记，则退回首个带
+        // generation 块的配置（兜底落点——旧档实证只有一套全默认配置）
         const isDefault = asBool(record.is_default, false);
         const generation = asRecord(record.generation);
         if (generation && (isDefault || !sawGenBlock)) {
@@ -191,18 +197,28 @@ export function importLegacyChoice(): PoolImportReport | null {
     }
 
     // 4) active_api_id / auto_generate / count_mode → gen
+    // active_api_id 先 trim（P2-2：legacy 值可能带 \r，与已 trim 的 api id
+    // 比较会静默失配——trim 后再判命中；失配记 notes 提示用户手动重选）
+    const legacyActiveApiId = typeof legacy.active_api_id === 'string' ? legacy.active_api_id.trim() : '';
     choiceStorage.writeDomain(d => {
-        if (legacyCount !== null) d.gen.count = legacyCount;
+        if (legacyCount !== null) {
+            const clamped = clampCount(legacyCount);
+            if (clamped !== legacyCount) report.notes.push(`count_mode ${legacyCount} 超出 1-10，已钳到 ${clamped}`);
+            d.gen.count = clamped;
+        }
         if (legacyGen.oversamplePct !== undefined) d.gen.oversamplePct = legacyGen.oversamplePct;
         if (legacyGen.categoriesEnabled !== undefined) d.gen.categoriesEnabled = legacyGen.categoriesEnabled;
         if (legacyGen.pinnedOverflow !== undefined) d.gen.pinnedOverflow = legacyGen.pinnedOverflow;
         if (legacyGen.shuffleFinal !== undefined) d.gen.shuffleFinal = legacyGen.shuffleFinal;
         if (typeof legacy.auto_generate === 'boolean') d.gen.autoGenerate = legacy.auto_generate;
         // active_api_id 直映（仅在命中已存在/本次导入的 id 时生效，防悬空指向）
-        if (typeof legacy.active_api_id === 'string' && d.apis.some(a => a.id === legacy.active_api_id)) {
-            d.activeApiId = legacy.active_api_id;
+        if (legacyActiveApiId && d.apis.some(a => a.id === legacyActiveApiId)) {
+            d.activeApiId = legacyActiveApiId;
         }
     });
+    if (legacyActiveApiId && !choiceStorage.readDomain().apis.some(a => a.id === legacyActiveApiId)) {
+        report.notes.push('active_api_id 未命中任何已导入端点——未自动选中 API，请在选项生成 tab 手动选择');
+    }
 
     const summary = `旧数据导入：${report.masterPoolImported} 条池条目（跳过 ${report.masterPoolSkipped}）、${report.configsImported} 套池配置、${report.apisImported} 个 API${report.ignoredFields.length > 0 ? `；忽略字段 ${report.ignoredFields.length} 项` : ''}`;
     console.info(`[tt-toolkit][pool] ${summary}`);
@@ -315,8 +331,10 @@ export function importPoolBackup(data: PoolBackup): PoolImportReport {
             apiurl: typeof record.apiurl === 'string' ? record.apiurl : '',
             key: typeof record.key === 'string' ? record.key : '',
             model: typeof record.model === 'string' ? record.model : '',
+            // 白名单校验（双复核 P3：这是唯一能把非法 reasoningEffort 发到
+            // 外部端点的路径——畸形备份不得直通值域）
             outputContract: record.outputContract === 'json_schema' || record.outputContract === 'prompt_only' ? record.outputContract : 'json_object',
-            reasoningEffort: typeof record.reasoningEffort === 'string' ? (record.reasoningEffort as ApiConfig['reasoningEffort']) : 'off',
+            reasoningEffort: record.reasoningEffort === 'low' || record.reasoningEffort === 'medium' || record.reasoningEffort === 'high' ? record.reasoningEffort : 'off',
             stream: asBool(record.stream, true),
             temperature: asFiniteNumber(record.temperature) ?? 0.7,
             maxTokens: asFiniteNumber(record.maxTokens) ?? 2048,
@@ -326,7 +344,12 @@ export function importPoolBackup(data: PoolBackup): PoolImportReport {
         report.apisImported++;
     }
     choiceStorage.writeDomain(d => {
-        if (Number.isFinite(data.gen?.count)) d.gen.count = data.gen.count as number;
+        if (Number.isFinite(data.gen?.count)) {
+            const rawCount = data.gen.count as number;
+            const clamped = clampCount(rawCount);
+            if (clamped !== rawCount) report.notes.push(`备份 gen.count ${rawCount} 超出 1-10，已钳到 ${clamped}`);
+            d.gen.count = clamped;
+        }
         const gen = data.gen ?? {};
         if (Number.isFinite(gen.oversamplePct)) d.gen.oversamplePct = gen.oversamplePct as number;
         if (typeof gen.categoriesEnabled === 'boolean') d.gen.categoriesEnabled = gen.categoriesEnabled;

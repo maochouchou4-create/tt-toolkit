@@ -12,7 +12,7 @@ import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
 import { useChoiceStore } from './store';
-import { drawAmount, effectivePool, resolvePool, resolvePoolConfig } from './pool/resolver';
+import { drawAmount, effectivePool, resolvePool, resolvePoolConfig, safeWeight } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
 import { exportPoolBackup, importLegacyChoice, parsePoolBackup } from './pool/import';
 import { deletePoolConfig, readChatPoolConfigId, readPoolData, setChatPoolConfigId, upsertPoolConfig } from './pool/storage';
@@ -157,7 +157,7 @@ function runImportRoundTrip(): void {
             { id: 'a1', name: '旧端点一', apiurl: 'https://fake.example.com/v1', key: 'sk-fake-0001', model: 'fake-model-a', stream: false, temperature: 0.5, max_tokens: 1024, exclude_params: '', timeout: 180 },
             { id: 'a2', name: '旧端点二', apiurl: 'https://fake.example.org/v1', key: 'sk-fake-0002', model: 'fake-model-b', stream: false, temperature: 1, max_tokens: 512, exclude_params: '', timeout: 60 },
         ],
-        active_api_id: 'a2',
+        active_api_id: 'a2\r',
         auto_generate: true,
         stats: { foo: 1 },
         ui: { bar: 2 },
@@ -257,12 +257,21 @@ function runInjectionChecks(): void {
     const result = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: supply });
     const allText = result.messages.map(m => m.content).join('\n');
 
-    check('池注入：pool_entries 段在场（必发/候选两区标签）', allText.includes('<pool_entries>') && allText.includes('【必发条目】') && allText.includes('【候选条目】'));
+    check('池注入：pool_entries 段在场（固定/候选两区标签）', allText.includes('<pool_entries>') && allText.includes('【固定条目】') && allText.includes('【候选条目】'));
     check(
         '池注入：条目逐条渲染（type：content [规则: rule]，空段省略）',
         allText.includes('检查酒馆：仔细检查酒馆每个角落 [规则: 保持警惕口吻]') && allText.includes('打听消息：向酒保打听传闻') && !allText.includes('打听消息：向酒保打听传闻 [规则'),
     );
     check('池注入：菜单模式语义写进提示词文本（候选多于所需，AI 挑选）', allText.includes('数量多于实际所需') && allText.includes('贴合'));
+
+    // P2-1 回归：pinned ≥ count 时固定条目声明覆盖语义（不再与「恰好 N 条」互斥）
+    const overResult = assembleMessages(config.modules, { ...syntheticSources(), count: 1, poolInjection: supply });
+    const overText = overResult.messages.map(m => m.content).join('\n');
+    check(
+        '池注入：pinned≥count 时显式声明数量覆盖（固定条目优先于恰好 N 条）',
+        overText.includes('以固定条目为准') && overText.includes('不受数量规则限制'),
+        `含覆盖句=${overText.includes('以固定条目为准')}`,
+    );
 
     const open = allText.indexOf('<pool_rules>');
     const close = allText.indexOf('</pool_rules>');
@@ -273,7 +282,7 @@ function runInjectionChecks(): void {
 
     const entTrace = result.trace.find(t => t.moduleId === 'inject_pool_entries');
     const rulesTrace = result.trace.find(t => t.moduleId === 'inject_pool_rules');
-    check('池注入：trace 留痕（必发 N 条、候选 M 条）', entTrace?.injected === true && entTrace.note.includes('必发 1 条、候选 1 条') && rulesTrace?.injected === true, `note=${entTrace?.note ?? '（无 trace）'}`);
+    check('池注入：trace 留痕（固定 N 条、候选 M 条）', entTrace?.injected === true && entTrace.note.includes('固定 1 条、候选 1 条') && rulesTrace?.injected === true, `note=${entTrace?.note ?? '（无 trace）'}`);
 
     // 空态：null 供给＝池整体未启用；两区空＝池为空；规则空不注入
     const nullResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: null });
@@ -308,6 +317,8 @@ function runBindingCascadeChecks(): void {
     const c1 = configs.find(c => c.id === 'c1');
     const pool1 = c1 ? effectivePool(masterPool, c1) : [];
     check('effectivePool：引用层覆盖（停用剔除＋pinned/weight 覆盖）', pool1.length === 1 && pool1[0]?.id === 'e1' && pool1[0]?.pinned === true && pool1[0]?.weight === 2);
+    // 双复核 P3 回归：0/负权＝近零权（fork「实质禁用」语义），坏数据回等权
+    check('safeWeight：0/负权压到近零、非数值回等权（fork 语义）', safeWeight(0) === safeWeight(-1) && safeWeight(0) < 1e-6 && safeWeight('x') === 1);
 
     // 清场：绑定回默认、删测试配置（后续自动生成断言用干净的 c1 态）
     setChatPoolConfigId('');
@@ -353,6 +364,9 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：空文本跳过', store.phase === 'idle' && store.options.length === 0);
     emitReceived(0, 'normal');
     check('自动生成：首楼（messageId===0）跳过', store.phase === 'idle' && store.options.length === 0);
+    // 双复核 P3 回归：分组消息 (chat_id, type) 形态的纯数字串不当楼层索引
+    emitReceived('2', 'normal');
+    check('自动生成：非数字 messageId 跳过（分组 chat_id 形态不误判）', store.phase === 'idle' && store.options.length === 0);
     choiceStorage.updateGenParams({ autoGenerate: false });
     emitReceived(2, 'normal');
     check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);

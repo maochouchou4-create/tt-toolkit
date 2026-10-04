@@ -17,8 +17,10 @@
         {{ store.phase === 'running' ? '取消' : '生成选项' }}
       </button>
     </div>
+    <!-- 错误条与旧列表并存（双复核 P3 修复）：失败时旧选项数据仍在 store
+         里，顶替渲染会让可用选项不可见不可点——错误条只追加在头部下方 -->
     <div v-if="store.phase === 'error'" class="tt-choice-bar-error" :title="store.error">{{ store.error }}</div>
-    <div v-else-if="store.options.length === 0" class="tt-choice-bar-empty">
+    <div v-if="store.options.length === 0" class="tt-choice-bar-empty">
       {{ store.phase === 'running' ? '正在生成…' : '尚无选项——点击「生成选项」基于当前剧情生成' }}
     </div>
     <ul v-else class="tt-choice-list">

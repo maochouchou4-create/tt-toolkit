@@ -14,13 +14,16 @@ import type { DrawResult, PoolConfig, PoolEntry, PinnedOverflow } from './types'
 /** 可注入随机源（冒烟注种子 PRNG；运行时默认 Math.random）。 */
 export type RandomSource = () => number;
 
-/** 非有限或非正的权重回退值（w<=0 会让 1/w 爆炸或恒零）。 */
+/** 压到近零权的权重回退值（0/负权走此值——fork Math.max 垫底同语义）。 */
 const SAFE_WEIGHT_FLOOR = 1e-9;
 
 export function safeWeight(w: unknown): number {
     const n = typeof w === 'number' ? w : Number(w);
-    // NaN/负数/0 都不可作为权重：负权会翻转排序、0 权恒零——统一按 1 处理
-    if (!Number.isFinite(n) || n <= 0) return 1;
+    // 双复核 P3 修复（fork 语义对齐）：非数值（NaN）＝坏数据回等权 1；
+    // 0/负＝显式压到近零权（fork 的 Math.max(w, 0.0001) 垫底——0 权条目
+    // 几乎抽不中＝「实质禁用」意图，而不是等权参与）
+    if (!Number.isFinite(n)) return 1;
+    if (n <= 0) return SAFE_WEIGHT_FLOOR;
     return n;
 }
 

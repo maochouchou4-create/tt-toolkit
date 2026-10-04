@@ -61,9 +61,11 @@ function backfillPoolModules(list: PromptConfig[]): boolean {
     let changed = false;
     for (const config of list) {
         if (!Array.isArray(config.modules)) continue;
-        if (config.modules.some(m => m.kind === 'inject' && (m.source === 'pool_entries' || m.source === 'pool_rules'))) continue;
-        config.modules.push(
-            {
+        // 双复核 P3 修复：按 source 分别判断——否则任一 source 在场即整条
+        // 跳过，只缺一枚的半补建档永不补齐
+        const has = (source: 'pool_entries' | 'pool_rules') => config.modules.some(m => m.kind === 'inject' && m.source === source);
+        if (!has('pool_entries')) {
+            config.modules.push({
                 kind: 'inject',
                 id: 'inject_pool_entries',
                 name: '池条目',
@@ -71,8 +73,11 @@ function backfillPoolModules(list: PromptConfig[]): boolean {
                 order: 98,
                 enabled: true,
                 source: 'pool_entries',
-            },
-            {
+            });
+            changed = true;
+        }
+        if (!has('pool_rules')) {
+            config.modules.push({
                 kind: 'inject',
                 id: 'inject_pool_rules',
                 name: '池规则',
@@ -80,9 +85,9 @@ function backfillPoolModules(list: PromptConfig[]): boolean {
                 order: 102,
                 enabled: true,
                 source: 'pool_rules',
-            },
-        );
-        changed = true;
+            });
+            changed = true;
+        }
     }
     return changed;
 }

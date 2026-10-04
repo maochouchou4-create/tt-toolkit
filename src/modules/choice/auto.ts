@@ -38,15 +38,16 @@ export function installAutoGenerate(): void {
  */
 export function handleMessageReceived(messageId: unknown, type: unknown): boolean {
     // quiet＝宿主静默/内部生成（核实记录：script.js:3914 Generate('quiet')，
-    // 经 4742 正常 emit）——自动出选项只对真正的 AI 回复生效
+    // 经 4748 正常 emit）——自动出选项只对真正的 AI 回复生效
     if (type === 'quiet') return false;
 
-    // 消息本体：messageId 是楼层绝对索引（核实记录见 host/events.ts 头注释）
-    const idx = typeof messageId === 'number' ? messageId : Number(messageId);
+    // 消息本体：messageId 是楼层绝对索引（核实记录见 host/events.ts 头注释）。
+    // 分组消息 emit 形态是 (chat_id, type)——非数字一律不当楼层索引
+    // （chat_id 恰为纯数字串时 Number() 兜底会误判成楼层，双复核 P3 修复）
+    if (typeof messageId !== 'number' || !Number.isInteger(messageId) || messageId < 0) return false;
+    const idx = messageId;
     const messages = getChatMessages();
-    const message = typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 && idx < messages.length
-        ? messages[idx]
-        : undefined;
+    const message = idx < messages.length ? messages[idx] : undefined;
     const mes = message?.mes;
     if (typeof mes !== 'string' || mes.trim() === '') return false;
     // messageId===0：首楼欢迎消息（角色卡开场白），不是 AI 对玩家的回复

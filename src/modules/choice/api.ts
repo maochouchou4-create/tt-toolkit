@@ -86,6 +86,10 @@ function readDomain(): ChoiceDomain {
 function writeDomain(mutate: (domain: ChoiceDomain) => void): void {
     const domain = readDomain();
     mutate(domain);
+    // 写侧同样过值域钳制（双复核 P3）：导入/备份等 mutate 路径写入的 gen
+    // 不经 readDomain 的合并防线——落盘前统一归一化，坏值（oversample
+    // 越界/overflow 拼错）不会经写通道持久化
+    domain.gen = normalizePoolGenParams(domain.gen);
     setGlobal(GLOBAL_CHOICE_KEY, domain);
 }
 

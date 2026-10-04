@@ -120,7 +120,7 @@
             </label>
             <label class="tt-pool-field">
               <span>池层权重</span>
-              <input v-if="entryDraft" :value="entryDraft.weight" type="number" min="0" max="50" step="0.5" @change="onDraftWeightChange">
+              <input v-if="entryDraft" :value="entryDraft.weight" type="number" min="1" max="50" step="0.5" @change="onDraftWeightChange">
             </label>
             <div class="tt-actions">
               <button type="button" @click="saveDraft">保存池内容</button>
@@ -139,7 +139,7 @@
               </label>
               <label class="tt-pool-field">
                 <span>本配置权重</span>
-                <input :value="refOf(entry.id)!.weight" type="number" min="0" max="50" step="0.5" @change="onRefWeightChange($event, entry)">
+                <input :value="refOf(entry.id)!.weight" type="number" min="1" max="50" step="0.5" @change="onRefWeightChange($event, entry)">
               </label>
               <div class="tt-actions">
                 <button type="button" class="tt-pool-op-danger" @click="removeRef(entry)">移出本配置</button>
@@ -360,7 +360,9 @@ function toggleExpand(entry: PoolEntry) {
 
 function onDraftWeightChange(e: Event) {
     if (!entryDraft.value) return;
-    entryDraft.value.weight = clampNumber(e, 0, 50, 1);
+    // 权重下限 1（双复核 P3：UI 不再产生 0 权——0/负在 resolver 是「实质
+    // 禁用」的近零权，想让条目不参与用「参与抽取」开关，不是权重 0）
+    entryDraft.value.weight = clampNumber(e, 1, 50, 1);
 }
 
 function saveDraft() {
@@ -414,7 +416,7 @@ function onRefPinnedToggle(entry: PoolEntry) {
 }
 
 function onRefWeightChange(e: Event, entry: PoolEntry) {
-    patchRef(entry, { weight: clampNumber(e, 0, 50, 1) });
+    patchRef(entry, { weight: clampNumber(e, 1, 50, 1) });
 }
 
 function removeRef(entry: PoolEntry) {
