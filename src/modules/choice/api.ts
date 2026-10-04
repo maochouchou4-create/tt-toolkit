@@ -10,6 +10,8 @@
  */
 import { getGlobal, setGlobal } from '@/storage';
 import type { OutputContract, ReasoningEffort } from '@/host';
+import type { PoolGenParams } from './pool/types';
+import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
 const GLOBAL_CHOICE_KEY = 'choice';
 
@@ -31,9 +33,9 @@ export interface ApiConfig {
     maxTokens: number;
 }
 
-/** 生成行为参数（全局域；auto_generate 归批C）。 */
-export interface ChoiceGenParams {
-    /** 每次生成选项条数 */
+/** 生成行为参数（全局域；批C 起含池抽取参数）。 */
+export interface ChoiceGenParams extends PoolGenParams {
+    /** 每次生成选项条数（语义＝pinned+drawn 的目标基数） */
     count: number;
     /** 上下文历史轮数（一轮＝一问一答） */
     contextRounds: number;
@@ -50,6 +52,8 @@ export interface ChoiceDomain {
     apis: ApiConfig[];
     activeApiId: string;
     gen: ChoiceGenParams;
+    /** 条目池数据（批C：两层结构，见 pool/types.ts）。 */
+    pool: PoolDomainData;
 }
 
 export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
@@ -59,6 +63,7 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     maxChars: 60,
     clickBehavior: 'fill',
     debugForceRaw: false,
+    ...DEFAULT_POOL_GEN_PARAMS,
 };
 
 function readDomain(): ChoiceDomain {
@@ -71,7 +76,10 @@ function readDomain(): ChoiceDomain {
             ? raw.apis.map(a => ({ ...a, reasoningEffort: a.reasoningEffort ?? 'off' }) as ApiConfig)
             : [],
         activeApiId: typeof raw?.activeApiId === 'string' ? raw.activeApiId : '',
-        gen: { ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) },
+        // 池参数同样缺省合并＋值域钳制（raw 里的历史值不可信：oversample 越界/
+        // overflow 拼错都钳回合法域，旧存档无字段不崩）
+        gen: normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) }),
+        pool: normalizePoolData(raw?.pool),
     };
 }
 
@@ -104,6 +112,8 @@ export function createApiConfig(name: string): ApiConfig {
 
 export const choiceStorage = {
     readDomain,
+    /** 读-改-写单通道（池层/导入层共用；写前必经 readDomain 规范化） */
+    writeDomain,
     /** 增改单条 API 配置（按 id 整体替换；新增即追加） */
     upsertApi(api: ApiConfig): void {
         writeDomain(d => {
