@@ -14,7 +14,9 @@ export default tseslint.config(
     },
     ...tseslint.configs.recommended.map(entry => ({
         ...entry,
-        files: ['src/**/*.ts', 'vite.config.ts', 'scripts/**/*.mjs'],
+        // TS 规则须覆盖 .vue 的 script 块（SFC 由下方 vue-eslint-parser +
+        // tseslint.parser 组合解析）——漏掉 .vue 会让 SFC 成为 TS 门盲区
+        files: ['src/**/*.ts', 'src/**/*.vue', 'vite.config.ts', 'scripts/**/*.mjs'],
     })),
     ...pluginVue.configs['flat/recommended'],
     {
