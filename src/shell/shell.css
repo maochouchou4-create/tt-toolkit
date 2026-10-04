@@ -42,13 +42,19 @@
 }
 
 /* 拖把手：Unicode 字符自持渲染（不依赖宿主 FontAwesome——fa 字形实测
-   未套上，空 div 零宽不可见不可抓）；min 尺寸保证字符缺码位时仍有
-   可抓区域。dragElement 契约只认 .drag-grabber 类与本元素 id。 */
+   未套上，空 div 零宽不可见不可抓）。必须显式声明 display/position：
+   宿主 .drag-grabber（style.css:852）是 display:none+position:absolute
+   （宿主自家把手靠配对 fa-solid 类撑回 display，我们不走 fa），不压掉
+   就在真实酒馆里隐形（harness 无宿主样式表，复现不出——m02276 用户
+   实测）。扩展 CSS 后于宿主 style.css 注入，同特异度我方胜。 */
 .tt-shell-grabber {
+    display: inline-block;
+    position: static;
+    font-size: 1em;
     cursor: move;
     user-select: none;
     padding: 0 6px;
-    margin-right: 2px;
+    margin: 0 2px 0 0;
     opacity: 0.65;
     line-height: 1;
     min-width: 1.2em;

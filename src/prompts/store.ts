@@ -31,7 +31,7 @@ export interface PromptGlobalDomain {
     externalInjections: ExternalInjectionConfig;
 }
 
-const DEFAULT_EXTERNAL: ExternalInjectionConfig = { selectedSlots: [], baibai: false };
+const DEFAULT_EXTERNAL: ExternalInjectionConfig = { allSlots: false, selectedSlots: [], baibai: false };
 
 function readPromptDomain(): PromptGlobalDomain {
     const configs = getGlobal<PromptConfig[]>(GLOBAL_PROMPT_CONFIGS_KEY);
@@ -227,7 +227,7 @@ export const usePromptsStore = defineStore('tt-prompts', {
             setGlobal(GLOBAL_EXTERNAL_KEY, { ...current, ...patch });
             this.revision++;
         },
-        /** 外部注入槽位勾选切换 */
+        /** 外部注入槽位勾选切换（旧白名单路径——UI 已改全搬开关，保留供旧数据/程序路径） */
         toggleSlot(key: string, checked: boolean) {
             const current = readPromptDomain().externalInjections;
             const set = new Set(current.selectedSlots);

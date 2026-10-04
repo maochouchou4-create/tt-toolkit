@@ -112,19 +112,15 @@
         <span>柏宝书剧情摘要</span>
         <span class="tt-prompt-module-desc">STBaiBaiBook（柏宝书）插件生成的剧情摘要；插件不在场时自动忽略。</span>
       </label>
+      <label class="tt-prompt-switch">
+        <input type="checkbox" :checked="prompts.externalInjections.allSlots" @change="prompts.setExternalInjections({ allSlots: ($event.target as HTMLInputElement).checked })">
+        <span>其他插件注入的内容（全部搬入）</span>
+        <span class="tt-prompt-module-desc">记忆/摘要类插件写到酒馆公共注入区的内容，开了就全部带给 AI，不用也不需要逐个挑。</span>
+      </label>
       <div class="tt-prompt-slots">
-        <div class="tt-card-sub">通用槽位（当前在场：{{ slots.length }} 项）</div>
+        <div class="tt-card-sub">当前在场：{{ slots.length ? slots.map(s => s.key).join('、') : '无' }}</div>
         <button type="button" class="tt-prompt-refresh" @click="slots = listSlotPreviews()">重新扫描</button>
-        <ul v-if="slots.length" class="tt-prompt-slot-list">
-          <li v-for="slot in slots" :key="slot.key" class="tt-prompt-slot-row">
-            <label class="tt-prompt-module-toggle" :title="slot.preview">
-              <input type="checkbox" :checked="prompts.externalInjections.selectedSlots.includes(slot.key)" @change="prompts.toggleSlot(slot.key, ($event.target as HTMLInputElement).checked)">
-              <span class="tt-prompt-slot-key">{{ slot.key }}</span>
-            </label>
-            <span class="tt-prompt-slot-preview" :title="slot.preview">{{ slot.preview }}</span>
-          </li>
-        </ul>
-        <div v-else class="tt-prompt-empty">当前没有插件写入槽位——点了「重新扫描」仍为空，说明记忆/摘要类插件未挂载或未写入。</div>
+        <div v-if="!slots.length" class="tt-prompt-empty">没有插件写入槽位——点了「重新扫描」仍为空，说明记忆/摘要类插件未挂载或未写入。</div>
       </div>
       <div v-if="effective" class="tt-prompt-slots">
         <div class="tt-card-sub">对应管线模块（只管位置排序；启停由上面的开关承载，不设第二道门）</div>
@@ -455,34 +451,6 @@ onMounted(() => {
     font-size: 0.78em;
     cursor: pointer;
     margin-bottom: 4px;
-}
-
-.tt-prompt-slot-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 180px;
-    overflow-y: auto;
-}
-
-.tt-prompt-slot-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 2px 0;
-    font-size: 0.8em;
-}
-
-.tt-prompt-slot-key {
-    font-weight: bold;
-    flex-shrink: 0;
-}
-
-.tt-prompt-slot-preview {
-    opacity: 0.55;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .tt-prompt-empty {

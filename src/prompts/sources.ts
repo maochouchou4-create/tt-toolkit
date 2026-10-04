@@ -94,14 +94,17 @@ export async function collectAssemblySources(params: {
     const depthBefore = depthEntries.filter(e => e.depth > WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
     const depthAfter = depthEntries.filter(e => e.depth <= WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
 
-    // 外部注入搬运（可选模块，默认关）：槽位按用户勾选取值——每次组装
-    // 现取（不启动时缓存，插件可能后加载/切卡重建）
+    // 外部注入搬运（可选模块，默认关）：allSlots＝全搬模式（用户拍板
+    // m02276——不做逐槽位勾选）；selectedSlots＝旧白名单兼容路径。
+    // 每次组装现取（不启动时缓存，插件可能后加载/切卡重建）
     const extConfig = externalInjectionConfig();
     const allSlots = listExtensionPromptSlots();
-    const selected = extConfig.selectedSlots
-        .map(key => allSlots.find(s => s.key === key))
-        .filter((s): s is NonNullable<typeof s> => Boolean(s))
-        .map(s => ({ key: s.key, value: substituteMacros(s.value) }));
+    const selected = extConfig.allSlots
+        ? allSlots.map(s => ({ key: s.key, value: substituteMacros(s.value) }))
+        : extConfig.selectedSlots
+            .map(key => allSlots.find(s => s.key === key))
+            .filter((s): s is NonNullable<typeof s> => Boolean(s))
+            .map(s => ({ key: s.key, value: substituteMacros(s.value) }));
     const baibai = extConfig.baibai ? getBaibaiSummary() : null;
 
     return {

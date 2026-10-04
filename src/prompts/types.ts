@@ -42,7 +42,8 @@ export interface TextModule {
 /**
  * 注入模块：内容来自运行时上下文，不可编辑文本（可调启停/顺序/role）。
  * 槽位选择不在本类型（双语义残留已清）：external_slot 源搬哪些槽位由
- * ExternalInjectionConfig.selectedSlots 决定，与模块定义解耦。
+ * ExternalInjectionConfig 决定（allSlots 全搬或 selectedSlots 旧白名单），
+ * 与模块定义解耦。
  */
 export interface InjectModule {
     kind: 'inject';
@@ -97,7 +98,13 @@ export interface StoryDirection {
 
 /** 外部注入搬运配置（可选模块，默认关——方案 §2.3）。 */
 export interface ExternalInjectionConfig {
-    /** 宿主通用注入槽位：勾选搬入的槽位 key 列表 */
+    /**
+     * 全部搬入模式（用户拍板 m02276：不做逐槽位勾选——「勾选柏宝书还要
+     * 自己挑其中的内容，没必要」）：true＝在场槽位全搬；false＝走
+     * selectedSlots 白名单（旧数据兼容路径，UI 已不暴露逐槽位勾选）。
+     */
+    allSlots: boolean;
+    /** 宿主通用注入槽位：搬入的槽位 key 列表（allSlots=false 时生效的旧路径） */
     selectedSlots: string[];
     /** 柏宝书 STBaiBaiBook 摘要搬运开关 */
     baibai: boolean;

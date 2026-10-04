@@ -143,9 +143,9 @@ function resolveInjectContent(
             return { content: wrapTag('direction', [preset, free].filter(Boolean).join('\n'), sources), note };
         }
         case 'external_slot': {
-            if (sources.externalSlots.length === 0) return { content: '', note: '未勾选任何宿主注入槽位' };
+            if (sources.externalSlots.length === 0) return { content: '', note: '无可用槽位（全搬开关未开或没有插件写入）' };
             const filled = sources.externalSlots.filter(s => s.value.trim());
-            if (filled.length === 0) return { content: '', note: '勾选的槽位内容全为空' };
+            if (filled.length === 0) return { content: '', note: '在场槽位内容全为空' };
             // 逐槽位标注：每段带槽位 key 前缀——dump/trace 的「逐项可见」
             // 落到槽位粒度（多槽位搬入时能核对各自内容是否在场）
             const blocks = filled.map(s => `[槽位 ${s.key}]\n${s.value.trim()}`);
