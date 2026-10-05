@@ -23,7 +23,7 @@ export { executeSlashCommand, getChatMessages, getTavernContext } from './contex
 export type { ChatMessage, TavernContextLike } from './context';
 export { appendWandMenuEntry, attachHostDrag, getSavedMovingUIState, hostWindow } from './dom';
 export type { MovingUIStateEntry, WandMenuEntry } from './dom';
-// 生成请求客户端已移至 modules/apis/client.ts（整合轮II 统一 API 层）；
+// 生成请求客户端已移至 src/modules/apis/client.ts（整合轮II 统一 API 层）；
 // host 层保留请求头装配（@sillytavern 导入面不变）
 export { getTavernRequestHeaders } from './headers';
 export {

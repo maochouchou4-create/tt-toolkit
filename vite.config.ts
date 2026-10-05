@@ -24,7 +24,7 @@ export default defineConfig(() => ({
       enforce: 'pre',
       resolveId(id: string) {
         // 源码统一用无后缀形态（@sillytavern/scripts/events），
-        // 酒馆 web 根下的真实文件带 .js——这里补上（choice-src 同款做法）
+        // 酒馆 web 根下的真实文件带 .js——这里补上
         if (id.startsWith('@sillytavern/')) {
           const tail = id.slice('@sillytavern/'.length);
           return {

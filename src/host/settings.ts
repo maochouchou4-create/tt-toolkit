@@ -9,7 +9,7 @@
  * - `script.js:670/675` 导出 `characters`（角色卡数组）与 `this_chid`
  *   （当前角色索引的字符串形态——script.js:8709 setCharacterId 统一
  *   `String(value)`；数组扫描索引口径非事件驱动快照，两来源会失配，
- *   消费方须知晓口径，choice-src「绑定残留」实锤在此）。
+ *   消费方须知晓口径，上游 choice 扩展「绑定残留」实锤在此）。
  * - `scripts/extensions.js:172` 导出 `extension_settings`（全局扩展设置
  *   可变单例）。
  * - `script.js:11175` `saveMetadata()`（async、无参）：把当前

@@ -5,11 +5,15 @@
  * （含 API 页）→ initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋
  * 选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
- * choice/persona 旧 API 字段）→ initPersona()。
+ * choice/persona 旧 API 字段）→ initPersona() → wipeLegacyKeysOnce()
+ * （批E：遗留 localStorage 键一次性清理——顺序硬约束，必须位于全部
+ * 幂等迁移之后）。
  * node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：initStorage() → host
  * 探测清单 + storage roundtrip → nav 最小初始化 → initChoiceMinimal()
  * （默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke() → initApis()
- * → initPersonaMinimal() → runPersonaSmoke()。
+ * → initPersonaMinimal() → wipeLegacyKeysOnce() ＋ runLegacyWipeSmoke()
+ * （机判须先于 runPersonaSmoke——后者会中途回收旧键并重置 persona 域）
+ * → runPersonaSmoke()。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
  * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
@@ -22,6 +26,7 @@ import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
 import { createApiTab, createChoiceSettingsTab, createNavSettingsTab, createPersonaTab, createPoolTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
+import { runLegacyWipeSmoke, wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
 import { initApis } from '@/modules/apis';
@@ -55,6 +60,10 @@ async function runNodeSmoke(): Promise<void> {
     initApis();
     // 批D 机判：persona 迁移幂等＋纯函数＋store 互斥（断言在 smoke.mjs 收口）
     initPersonaMinimal();
+    // 批E 机判：遗留键一次性清理（全部幂等迁移之后；persona smoke 会回收
+    // 旧键并重置 persona 域，boot 态断言必须在其前——断言在 smoke.mjs 收口）
+    wipeLegacyKeysOnce();
+    runLegacyWipeSmoke();
     await runPersonaSmoke();
 }
 
@@ -76,6 +85,9 @@ async function main(): Promise<void> {
     // 再收编 choice/persona 旧 API 字段——顺序敏感，勿调换
     initApis();
     initPersona();
+    // 批E：遗留 localStorage 键一次性清理——位于全部幂等迁移之后
+    // （迁移消费在先、删除在后，绝不碰已迁移数据），见 storage/legacy-wipe
+    wipeLegacyKeysOnce();
     console.info(`[tt-toolkit] v${version} ready (rewrite)`);
 }
 

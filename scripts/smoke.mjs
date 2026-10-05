@@ -7,6 +7,9 @@
  * 存根），globalThis.__TT_SMOKE_STUBS__ 提供可变单例与函数桩；随后
  * import dist/index.js——其入口为唯一环境分支点，无 document 走冒烟
  * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
+ * 批E 起追加：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
+ * 预种 7 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（cache-buster
+ * URL 整图重求值 dist，验标记短路 no-op 不炸）。
  * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
  *
  * 边界：node 冒烟验证「产物可加载、导入链可解析、storage 逻辑正确、
@@ -25,10 +28,22 @@ if (!existsSync(fileURLToPath(DIST_ENTRY))) {
 }
 
 // ---------------------------------------------------------------------------
-// localStorage 存根：node 无 localStorage；P1 回归预置旧 nav 键＝关态
-// （'0'），验证「initStorage 迁移 → store 读到 false」的时序链路
+// localStorage 存根：node 无 localStorage。批E 起预种全部 7 个旧遗留键
+// （迁移源键，带内容）——P1 时序回归（tt_msg_nav_auto_top='0' 关态 →
+// initStorage 迁移 → store 读到 false）＋ legacy-wipe 启动链路供给（boot
+// 迁移先消费、boot 清理后删键）。键名/形状与 src/storage/legacy-wipe.ts
+// 的常量表同源；此处字面量属测试夹具（机判断言在 dist 侧用常量做）。
 // ---------------------------------------------------------------------------
-const localStorageData = new Map([['tt_msg_nav_auto_top', '0']]);
+const LEGACY_SEEDS = new Map([
+    ['tt_msg_nav_auto_top', '0'],
+    ['tt_nav_qr_activated', '1'],
+    ['pw_state_v20', JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } })],
+    ['pw_wi_selection_v1', JSON.stringify({ global: { demo: ['1'] } })],
+    ['pw_ui_state_v4_preset', JSON.stringify({ generationPreset: 'pure' })],
+    ['pw_data_user_v1', JSON.stringify({ request: '批E启动链路种子', result: '批E启动链路种子·结果', hasResult: true })],
+    ['pw_pinned_books_v1', JSON.stringify(['批E钉选种子书'])],
+]);
+const localStorageData = new Map(LEGACY_SEEDS);
 globalThis.localStorage = {
     getItem: key => (localStorageData.has(key) ? localStorageData.get(key) : null),
     setItem: (key, value) => localStorageData.set(key, String(value)),
@@ -407,6 +422,26 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 }
 
 // ---------------------------------------------------------------------------
+// 批E 机判：legacy-wipe 一次性清理（[wipe-smoke] 行收口，先于 persona
+// smoke 跑——见 src/main.ts runNodeSmoke 接线）
+// ---------------------------------------------------------------------------
+// PASS 行数精确断言（同上纪律）。run1＝一次启动签名共 10 条：boot 5（键
+// 全删/标记置位/persona userContext 种子存活/pinnedBooks 种子存活/nav
+// 关态存活——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删
+// 7 键＋置标＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
+const WIPE_PASS_EXPECTED_RUN1 = 10;
+const wipePassLines = outputLines.filter(l => l.startsWith('[wipe-smoke] PASS'));
+const wipeFailLines = outputLines.filter(l => l.startsWith('[wipe-smoke] FAIL'));
+if (wipePassLines.length !== WIPE_PASS_EXPECTED_RUN1 || wipeFailLines.length > 0) {
+    failures.push(`wipe 机判异常：期望恰好 ${WIPE_PASS_EXPECTED_RUN1} 条 PASS，实际 ${wipePassLines.length} 条 / FAIL ${wipeFailLines.length} 条${wipeFailLines.length ? `（首条：${wipeFailLines[0]}）` : ''}`);
+}
+// boot 位清理确实执行（非跳过）：首个 [legacy-wipe] 行＝删除 7/7 键
+const firstWipeLog = outputLines.find(l => l.startsWith('[legacy-wipe]'));
+if (!firstWipeLog || !firstWipeLog.includes('删除 7/7')) {
+    failures.push(`boot 位一次性清理未执行或删键数异常（首行：${firstWipeLog ?? '无'}）`);
+}
+
+// ---------------------------------------------------------------------------
 // 整合轮II 退休符号清零：generateRaw（宿主主 API 通道）整体删除——dist
 // 产物出现任何一处都说明退休不彻底。apiSource/apiProfiles 不做字符串计
 // 数：迁移收编必须按旧键名读旧档（「旧字段只读不写」纪律的读侧合法残
@@ -417,9 +452,58 @@ const distSource = readFileSync(DIST_ENTRY, 'utf8');
 const generateRawCount = (distSource.match(/generateRaw/g) ?? []).length;
 if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateRaw（计数 ${generateRawCount}，期望 0）`);
 
+// ---------------------------------------------------------------------------
+// 批E 二次启动（boot2）：cache-buster URL 对 dist 整图重求值（vite 单
+// chunk 无代码分割）——同浏览器二次启动语义：extension_settings 存根与
+// localStorage 跨 import 持久。标记已置位＋遗留键重种 → boot 清理须短路
+// （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 6 条 PASS。
+// ---------------------------------------------------------------------------
+const segmentStart = outputLines.length;
+eventHandlers.clear(); // run1 监听器不跨图串扰（emit 派发表进程级共享）
+for (const [k, v] of LEGACY_SEEDS) localStorageData.set(k, v);
+try {
+    await import(new URL('../dist/index.js?boot2', import.meta.url));
+} catch (e) {
+    console.error('[smoke] boot2 dist/index.js 加载失败', e);
+    process.exit(1);
+}
+const deadline2 = Date.now() + 15000;
+while (!outputLines.slice(segmentStart).some(SMOKE_DONE_RE) && Date.now() < deadline2) {
+    await new Promise(r => setTimeout(r, 50));
+}
+const seg2 = outputLines.slice(segmentStart);
+if (!seg2.some(SMOKE_DONE_RE)) {
+    failures.push('boot2：node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke 挂起？）');
+}
+if (seg2.some(l => l.includes('项 FAIL：'))) {
+    failures.push(`boot2：出现 FAIL 收尾行（首条：${seg2.find(l => l.includes('项 FAIL：'))}）`);
+}
+const wipe2PassCount = seg2.filter(l => l.startsWith('[wipe-smoke] PASS')).length;
+if (wipe2PassCount !== 6) {
+    failures.push(`boot2 wipe 机判异常：期望 6 条 PASS（二次启动签名 1＋场景A 4＋场景B 1），实际 ${wipe2PassCount} 条`);
+}
+const firstWipe2Log = seg2.find(l => l.startsWith('[legacy-wipe]'));
+if (!firstWipe2Log || !firstWipe2Log.includes('跳过')) {
+    failures.push(`boot2 boot 位清理未短路（首行：${firstWipe2Log ?? '无'}）`);
+}
+const seg2ChoicePass = seg2.filter(l => l.startsWith('[choice-smoke] PASS')).length;
+const seg2PersonaPass = seg2.filter(l => l.startsWith('[persona-smoke] PASS')).length;
+if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED) {
+    failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}`);
+}
+// 末态：一次性标记置位＋遗留键全清（直查存根 Map，不依赖日志）
+const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
+if (ttDomainEnd?.legacyWipeDone !== true) {
+    failures.push(`boot2 末态标记未置位（legacyWipeDone=${String(ttDomainEnd?.legacyWipeDone)}）`);
+}
+const leftoverKeys = [...LEGACY_SEEDS.keys()].filter(k => localStorageData.has(k));
+if (leftoverKeys.length > 0) {
+    failures.push(`boot2 末态遗留键未清（${leftoverKeys.join('、')}）`);
+}
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（整合轮II：迁移收编幂等/prompts 四任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（整合轮II：迁移收编幂等/prompts 四任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点）；wipe 机判 ${wipePassLines.length} 条全 PASS（批E：boot 删 7 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

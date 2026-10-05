@@ -21,7 +21,7 @@
  *   5505/5544 分支），且会经 4748 正常 emit——静默生成不触发自动出选项。
  *   emit 后宿主紧接 finalizeMessageContent→CHARACTER_MESSAGE_RENDERED：
  *   emit 串行 await 每个监听器，监听器里 await 重活会推迟正文渲染
- *   （自动生成监听必须 fire-and-forget，见 modules/choice/auto.ts）。
+ *   （自动生成监听必须 fire-and-forget，见 src/modules/choice/auto.ts）。
  */
 
 import { eventSource as stEventSource, event_types as stEventTypes } from '@sillytavern/scripts/events';

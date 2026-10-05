@@ -21,9 +21,12 @@ export const GLOBAL_KEY = 'ttToolkit';
 /** 聊天域存储键（chat_metadata 下本扩展命名空间）。 */
 export const CHAT_KEY = 'ttToolkit';
 
-/** 旧 nav localStorage 键（迁移源，旧键保留只读，清理归批E）。 */
-const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
-const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
+/**
+ * 旧 nav localStorage 键（迁移源；键名单一真相源在此，legacy-wipe 的
+ * 清理清单从这里导出——禁在别处另写第二份字面量）。
+ */
+export const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
+export const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
 
 // schema version：存储结构演进时 bump；旧档缺字段由默认值补齐
 const SCHEMA_VERSION = 2;
@@ -43,6 +46,11 @@ export interface NavStorageState {
 export interface GlobalDomain {
     schemaVersion: number;
     nav: NavStorageState;
+    /**
+     * 旧 localStorage 遗留键一次性清理标记（批E/v1.0.0，见 legacy-wipe）：
+     * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
+     */
+    legacyWipeDone?: boolean;
     [key: string]: unknown;
 }
 

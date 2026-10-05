@@ -1,7 +1,7 @@
 /**
  * 消息回顶/上下文导航（方案 §2.6：逻辑平移，纯 TS 无 UI）。
  *
- * 平移自 modules/nav/index.js（v2，D:\code\repos\tt-toolkit\modules\nav\index.js）：
+ * 平移自旧仓 nav 模块 v2（rewrite 前旧结构，批E 已删除）：
  * 楼层定位主线/兜底、落点校验循环、自动回顶状态机、CONFIG 常量原样照搬。
  * 平移层的接线差异：
  *   - @sillytavern 导入（events/SlashCommand）改走本仓 host 适配层
@@ -11,8 +11,9 @@
  *     （只判 role==='assistant' 在普通聊天匹配 0 条——批3 回归根因）；
  *   - 斜杠执行器走宿主 executeSlashCommandsWithOptions，缺席时脚本内
  *     滚动作兜底；
- *   - autoTop/qrActivated 持久化改走统一存储（storage.service 迁移旧
- *     localStorage 键，旧键保留只读、清理归批E）；
+ *   - autoTop/qrActivated 持久化改走统一存储（storage.service 启动时
+ *     迁移旧 localStorage 键；遗留键 v1.0.0 起由 storage/legacy-wipe
+ *     首启一次性清理）；
  *   - 日志转发走 host/ttlog（createTtlog 工厂），target 仍为 "msgnav"，
  *     落盘 tauritavern.log.*；
  *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（三导航键
@@ -78,10 +79,6 @@ const CONFIG = Object.freeze({
     SCROLL_VERIFY_FIRST_DELAY_MS: 500,
     SCROLL_VERIFY_DELAY_MS: 150,
     SCROLL_VERIFY_TOLERANCE_PX: 2,
-    // 旧 localStorage 键名：迁移源（storage.service 启动时搬入统一存储，
-    // 旧键保留只读）。此处仅留档防键名漂移，不直接读写。
-    LEGACY_STORAGE_KEY: 'tt_msg_nav_auto_top',
-    LEGACY_QR_ACTIVATED_KEY: 'tt_nav_qr_activated',
     // DOM 契约（TauriTavern 主干）
     SEL: Object.freeze({
         SCROLL_ROOT: '#chat',          // 滚动容器（chatSurface 的 root）

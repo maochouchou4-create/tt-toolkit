@@ -18,3 +18,5 @@ export {
     setNavState,
 } from './service';
 export type { ChatDomain, GlobalDomain, NavStorageState, RoundtripReport } from './service';
+export { LEGACY_WIPE_KEYS, runLegacyWipeSmoke, wipeLegacyKeysOnce } from './legacy-wipe';
+export type { LegacyWipeReport } from './legacy-wipe';

@@ -1,7 +1,6 @@
 // 新应用 lint 门（eslint v9 flat config）。
-// 监听面＝src/（Vue SFC + TS）与 scripts/（node 侧 .mjs）；旧结构
-// （modules/、根 index.js、shared/、i18n/、prompts/）在 rewrite 分支上
-// 已不被 manifest 引用、批E 统一删除，不入监听面。
+// 监听面＝src/（Vue SFC + TS）与 scripts/（node 侧 .mjs）。批E 已删除
+// rewrite 前的旧结构（modules/、i18n/、根 loader 桩、prompts/、shared/）。
 // scripts/check-imports.mjs 与 smoke 相关脚本由本门做基础正确性检查
 // （no-undef / 未用变量），语义断言归脚本自身 exit code。
 import globals from 'globals';
@@ -10,7 +9,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
     {
-        ignores: ['dist/**', 'modules/**', 'i18n/**', 'prompts/**', 'shared/**', 'node_modules/**', 'index.js'],
+        ignores: ['dist/**', 'node_modules/**'],
     },
     ...tseslint.configs.recommended.map(entry => ({
         ...entry,
