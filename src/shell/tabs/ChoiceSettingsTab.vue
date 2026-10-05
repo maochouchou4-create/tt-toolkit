@@ -1,6 +1,7 @@
 <template>
   <!--
-    选项生成设置：生成通道（统一端点表引用＋choice 任务参数）＋生成参数。
+    选项生成设置：生成通道（统一端点表引用＋choice 任务参数）＋生成参数
+    ＋走向指引（整合轮II 验收修整：提示词 tab 删除后唯一存留的提示词入口）。
     端点实体（增删改/测连/拉模型）在「API」页维护，此处只做选择与参数。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
   -->
@@ -81,20 +82,67 @@
       </label>
     </div>
 
-    <!-- 剧情走向卡已挪走（m03359 整合轮）：走向是提示词素材，编辑入口随
-         「提示词」tab；数据域（chat 域 storyDirection）与写入通道零改动 -->
+    <!-- 剧情走向卡（整合轮II 验收修整：提示词 tab 整页删除后，这里是唯一
+         存留的提示词入口——用户拍板「走向指引」卡保留；数据域（chat 域
+         storyDirection）与写入通道零改动，老用户的走向文本/预设不丢） -->
+    <div class="tt-card">
+      <div class="tt-card-title">走向指引</div>
+      <div class="tt-card-sub">
+        走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）；
+        留空＝不注入走向。
+      </div>
+      <label class="tt-prompt-field--block">
+        <span>自由文本（主位）</span>
+        <textarea
+          :value="prompts.storyDirection.freeText"
+          rows="3"
+          placeholder="如：让林霜主动坦白昨夜去向的真相，并暴露她与斗篷人的旧关联"
+          @input="onDirectionTextInput"
+        />
+      </label>
+      <div class="tt-prompt-presets">
+        <div class="tt-prompt-presets-head">
+          <span>我的预设</span>
+          <button type="button" :disabled="!prompts.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
+        </div>
+        <div v-if="prompts.directionPresets.length === 0" class="tt-choice-empty">
+          还没有预设——写好走向指引后点「存为预设」，以后一条点击应用
+        </div>
+        <div v-else class="tt-prompt-tags">
+          <button
+            v-for="preset in prompts.directionPresets"
+            :key="preset.id"
+            type="button"
+            class="tt-prompt-tag"
+            :class="{ 'tt-prompt-tag--active': prompts.storyDirection.presetText === preset.text }"
+            :title="preset.text"
+            @click="togglePreset(preset)"
+          >
+            {{ presetLabel(preset) }}
+            <span class="tt-prompt-tag-del" title="删除该预设（不影响已应用的聊天）" @click.stop="removePreset(preset)">×</span>
+          </button>
+        </div>
+        <div v-if="prompts.storyDirection.presetText" class="tt-prompt-note">
+          已应用预设：{{ prompts.storyDirection.presetText }}（再点同一预设可取消应用）
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import { useApisStore } from '@/modules/apis/store';
 import { useShellStore } from '@/shell/store';
+import { usePromptsStore } from '@/prompts';
+import type { DirectionPreset } from '@/prompts';
 import type { ChoiceGenParams, ChoiceTaskParams } from '@/modules/choice/api';
 
 const settings = useChoiceSettingsStore();
 const apis = useApisStore();
 const shell = useShellStore();
+const prompts = usePromptsStore();
 
 function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
@@ -137,6 +185,57 @@ function clampInt(event: Event, min: number, max: number, fallback: number): num
 function goApi(): void {
     shell.activate('api');
 }
+
+// ---- 剧情走向卡（整合轮II 验收修整：随提示词 tab 删除从 PromptEditorTab
+//      搬回本页；数据域与写入通道零改动） ----
+
+// 自由文本防抖：每击键立即 setStoryDirection＝每击键一次 chat 域立即保存
+// （saveMetadata 通道）——保存风暴。停输入 300ms 才落盘；预设应用/取消
+// 是单次点击、保持立即保存，不进防抖。
+const DIRECTION_TEXT_DEBOUNCE_MS = 300;
+let directionTextTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onDirectionTextInput(event: Event): void {
+    const value = (event.target as HTMLTextAreaElement).value;
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+    directionTextTimer = setTimeout(() => {
+        directionTextTimer = undefined;
+        prompts.setStoryDirection({ freeText: value });
+    }, DIRECTION_TEXT_DEBOUNCE_MS);
+}
+
+function presetLabel(preset: DirectionPreset): string {
+    // 预设无独立名字段（G4 最小形态：预设＝文本本体）——标签条显示
+    // 截断文本，完整内容在 title 悬浮
+    const text = preset.text.trim();
+    return text.length > 12 ? `${text.slice(0, 12)}…` : text;
+}
+
+/** 点击预设＝应用（写入 presetText 快照）；再点同一预设＝取消应用。 */
+function togglePreset(preset: DirectionPreset): void {
+    if (prompts.storyDirection.presetText === preset.text) {
+        prompts.setStoryDirection({ presetText: '' });
+    } else {
+        prompts.setStoryDirection({ presetText: preset.text });
+    }
+}
+
+function saveCurrentTextAsPreset(): void {
+    const text = prompts.storyDirection.freeText.trim();
+    if (!text) return;
+    prompts.addDirectionPreset(text);
+}
+
+function removePreset(preset: DirectionPreset): void {
+    if (!confirm(`删除预设「${presetLabel(preset)}」？（已应用该预设的聊天不受影响）`)) return;
+    prompts.deleteDirectionPreset(preset.id);
+}
+
+// 防抖挂起期间离开设置页（含切聊天后卸载）：不落盘半截文本——
+// 落盘目标 chat 域可能已随卸载切换，迟到的写会进错聊天
+onBeforeUnmount(() => {
+    if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
+});
 </script>
 
 <style>
@@ -199,6 +298,87 @@ function goApi(): void {
     text-decoration: underline;
 }
 
-/* 剧情走向卡的样式（field--block/tags/tag/presets 系列）已随卡片挪进
-   PromptEditorTab（tt-prompt- 前缀自持，m03359） */
+/* 剧情走向卡（从 PromptEditorTab 搬回）：类名沿用 tt-prompt- 前缀自持
+   （原宿主文件已删，无冲突——别与上面 .tt-choice- 系列互串语义） */
+.tt-prompt-field--block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}
+
+.tt-prompt-field--block textarea {
+    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 18%, transparent);
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-family: inherit;
+    font-size: 0.9em;
+    resize: vertical;
+}
+
+.tt-prompt-presets-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85em;
+    opacity: 0.8;
+    margin-bottom: 4px;
+}
+
+.tt-prompt-presets-head button {
+    background: transparent;
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: 2px 10px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.tt-prompt-presets-head button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.tt-prompt-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.tt-prompt-tag {
+    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 25%, transparent);
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.tt-prompt-tag--active {
+    border-color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
+.tt-prompt-tag-del {
+    /* 删除叉与标签文本同为按钮内容——独立悬浮态只归删除叉 */
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 2px;
+    opacity: 0.55;
+}
+
+.tt-prompt-tag-del:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #c58a36);
+}
+
+.tt-prompt-note {
+    font-size: 0.75em;
+    opacity: 0.6;
+    padding: 4px 0 0;
+}
 </style>

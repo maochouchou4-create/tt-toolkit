@@ -116,9 +116,9 @@ export function createDefaultPromptConfig(): PromptConfig {
                 source: 'world_info_after',
             },
             {
-                // 模块本体默认参与管线；「默认关」由配置侧承载（无勾选槽位/
-                // 柏宝书开关关＝不注入，见 external.ts／store.ts）——单步生效，
-                // 不做「模块开关＋内容勾选」双重门
+                // 模块本体默认参与管线；槽位内容收集全自动（非空即带，
+                // 见 external.ts／sources.ts）——单步生效，不做「模块开关
+                // ＋内容勾选」双重门。默认开＝在场即注入
                 kind: 'inject',
                 id: 'inject_external_slot',
                 name: '外部注入搬运',
@@ -128,7 +128,8 @@ export function createDefaultPromptConfig(): PromptConfig {
                 source: 'external_slot',
             },
             {
-                // 同上：默认关由 store 的 externalInjections.baibai 开关承载
+                // 同上：在场即注入（STBaiBaiBook 缺席/接口异常＝null → 段
+                // 缺席不报错，trace 留痕）
                 kind: 'inject',
                 id: 'inject_baibai',
                 name: '柏宝书摘要',

@@ -4,7 +4,8 @@
  * 统一单条模块管线：文本模块（规则/任务/格式）与注入模块（人设/角色卡/
  * 世界书/历史/外部搬运）同一条 order 排序——单一排序契约，不分两套列表。
  * 提示词单一真相源＝configs[] 每套自带 modules[]，无工作副本无快照
- * 双份（编辑器直接编辑当前生效配置）。
+ * 双份。整合轮II 验收修整：编辑面已删——模板内置在代码（defaults），
+ * 引擎照常读 modules；enabled 字段保留（引擎行为面）。
  */
 
 /** 消息角色三态（不拼单段塞单条消息——role 结构是架构约束）。 */
@@ -80,10 +81,10 @@ export interface TextModule {
 }
 
 /**
- * 注入模块：内容来自运行时上下文，不可编辑文本（可调启停/顺序/role）。
- * 槽位选择不在本类型（双语义残留已清）：external_slot 源搬哪些槽位由
- * ExternalInjectionConfig 决定（allSlots 全搬或 selectedSlots 旧白名单），
- * 与模块定义解耦。
+ * 注入模块：内容来自运行时上下文，不可编辑文本。模块的启停与排序仅
+ * 引擎行为面消费（默认模板内置；整合轮II 验收修整起无编辑 UI）。
+ * external_slot 源带哪些槽位由全自动收集决定（sources 层枚举宿主
+ * extension_prompts 非空槽位），与模块定义解耦。
  */
 export interface InjectModule {
     kind: 'inject';
@@ -100,7 +101,8 @@ export type PromptModule = TextModule | InjectModule;
 /**
  * 编辑器信息架构分组（G5 拍板）：核心模板（文本模块）/上下文注入
  * （人设、角色卡、世界书、历史等现场数据）/高级（外部插件内容搬运）。
- * 分组只决定呈现位置——模块仍共用同一条 order 管线，排序语义不变。
+ * 整合轮II 验收修整：编辑面已删（分组无渲染消费方），保留纯函数与
+ * ModuleGroupId 导出——数据层最小改动（smoke/导入面不破坏）。
  */
 export type ModuleGroupId = 'text' | 'context_inject' | 'external_inject';
 
@@ -134,20 +136,6 @@ export interface StoryDirection {
     presetText: string;
     /** 自由补充文本（空串＝没有） */
     freeText: string;
-}
-
-/** 外部注入搬运配置（可选模块，默认关——方案 §2.3）。 */
-export interface ExternalInjectionConfig {
-    /**
-     * 全部搬入模式（用户拍板 m02276：不做逐槽位勾选——「勾选柏宝书还要
-     * 自己挑其中的内容，没必要」）：true＝在场槽位全搬；false＝走
-     * selectedSlots 白名单（旧数据兼容路径，UI 已不暴露逐槽位勾选）。
-     */
-    allSlots: boolean;
-    /** 宿主通用注入槽位：搬入的槽位 key 列表（allSlots=false 时生效的旧路径） */
-    selectedSlots: string[];
-    /** 柏宝书 STBaiBaiBook 摘要搬运开关 */
-    baibai: boolean;
 }
 
 /** 组装产物消息（与 host/generate 的 GenerateMessage 同构，层次内自持）。 */

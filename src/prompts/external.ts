@@ -1,19 +1,21 @@
 /**
- * 外部注入搬运（方案 §2.3 可选模块，默认关）。
+ * 外部注入搬运（方案 §2.3；整合轮II 验收修整改全自动——配置面已删）。
  *
  * 两条通道（独立 API 旁路请求的真实代价——酒馆的注入不会自动进旁路
- * 请求，外部内容逐条自接）：
+ * 请求，外部内容逐条自接；「自动」＝生成时枚举在场内容全带，不再有
+ * 用户开关/勾选）：
  *   ①宿主通用注入槽位：extension_prompts 表经 context 暴露
- *     （st-context.js:158）——对标准记忆/摘要类插件通用。扫槽位列出
- *     占用项＋内容预览，用户勾选搬入（不偷塞别家内容）。
+ *     （st-context.js:158）——对标准记忆/摘要类插件通用。收集在
+ *     sources 层（collectAssemblySources）：非空槽位全带、顺序对齐
+ *     宿主注入循环（见该处锚点注释）。
  *   ②柏宝书 STBaiBaiBook 私有 API：globalThis.STBaiBaiBook 版本化契约
  *     （apiVersion/capabilities）。取数纪律：每次组装前现取（不启动时
  *     缓存，插件可能后加载/切卡重建 API）、优先注入口径
  *     （getInjectedHistory）、降级全量历史（getHistory）、缺席返回
  *     null 静默（第三方桥接必须可选，不可用时主体功能不受影响）。
+ *     在场即带（自动口径——无开关）。
  */
-import type { ExtensionPromptSlot } from '@/host';
-import { getChatMessages, listExtensionPromptSlots } from '@/host';
+import { getChatMessages } from '@/host';
 
 /** 柏宝书对外 API 形态（取数纪律见文件头；字段面按消费最小集声明）。 */
 interface BaiBaiBookApi {
@@ -54,21 +56,3 @@ export function getBaibaiSummary(): string | null {
     return null;
 }
 
-/** 槽位占用项的可视化清单（设置界面：列出 key＋内容预览供用户勾选）。 */
-export interface SlotPreview {
-    key: string;
-    preview: string;
-    depth: number;
-    position: number;
-}
-
-/** 扫描宿主通用注入槽位并生成预览（当前在场的占用项全量列出）。 */
-export function listSlotPreviews(): SlotPreview[] {
-    const slots: ExtensionPromptSlot[] = listExtensionPromptSlots();
-    return slots.map(s => ({
-        key: s.key,
-        preview: s.value.length > 120 ? `${s.value.slice(0, 120)}…` : s.value,
-        depth: s.depth,
-        position: s.position,
-    }));
-}

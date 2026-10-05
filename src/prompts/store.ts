@@ -10,23 +10,29 @@
  *     （Record<taskKey, PromptConfig>，四任务各一套——choice 选项生成＋
  *     persona 策展/填充/润色；旧数组档读侧迁移为 {choice: 旧生效套}，
  *     一次性写回，二次启动零改写）、
- *     externalInjections（外部注入搬运配置）、
  *     directionPresets（用户自建走向预设列表——G4）；
+ *     整合轮II 验收修整：externalInjections 键随编辑面删除而退休
+ *     （外部注入改全自动，无人读旧值——normalize 丢弃面自然淡出，
+ *     不做迁移）。
  *   - 聊天域 chat_metadata.ttToolkit：storyDirection（已应用预设正文
  *     ＋自由文本）——写走 writeChatMetadata 立即保存通道。
  *   - 批C 起读侧对旧档补插池注入模块（inject_pool_entries，缺席才补
  *     ——见 backfillPoolModules；整合轮II 起只作用于 choice 任务——
  *     persona 管线无池注入面）。
+ *   - 模板编辑面已随提示词 tab 删除（整合轮II 验收修整）：模板内置
+ *     于代码（defaults），engine 照常读；编辑 actions（replaceModules/
+ *     toggleModule/moveModule/updateModuleContent）随之退役。resetToDefault
+ *     保留（smoke「按任务恢复默认」红线在用）。modules[].enabled 仍由
+ *     引擎消费（行为面，非 UI 面）。
  */
 import { defineStore } from 'pinia';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
 import { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
-import { TASK_KEYS, moduleGroupOf } from './types';
-import type { DirectionPreset, ExternalInjectionConfig, PromptConfig, StoryDirection, TaskKey } from './types';
+import { TASK_KEYS } from './types';
+import type { DirectionPreset, PromptConfig, StoryDirection, TaskKey } from './types';
 
 const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
 const GLOBAL_PROMPT_ACTIVE_KEY = 'promptActiveId';
-const GLOBAL_EXTERNAL_KEY = 'externalInjections';
 const GLOBAL_DIRECTION_PRESETS_KEY = 'directionPresets';
 const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 
@@ -34,10 +40,7 @@ const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 export interface PromptGlobalDomain {
     /** 四任务配置（Record——整合轮II；promptActiveId 旧键随之退休，不再写入） */
     promptConfigs: Record<TaskKey, PromptConfig>;
-    externalInjections: ExternalInjectionConfig;
 }
-
-const DEFAULT_EXTERNAL: ExternalInjectionConfig = { allSlots: false, selectedSlots: [], baibai: false };
 
 /** 配置形状守门（Record 形态下逐键校验——外部写坏的键回退默认，不抛错）。 */
 function isConfigShape(value: unknown): value is PromptConfig {
@@ -45,7 +48,6 @@ function isConfigShape(value: unknown): value is PromptConfig {
 }
 
 function readPromptDomain(): PromptGlobalDomain {
-    const external = getGlobal<ExternalInjectionConfig>(GLOBAL_EXTERNAL_KEY);
     const raw = getGlobal<unknown>(GLOBAL_PROMPT_CONFIGS_KEY);
     const configs: Partial<Record<TaskKey, PromptConfig>> = {};
     let changed = false;
@@ -77,7 +79,6 @@ function readPromptDomain(): PromptGlobalDomain {
     if (changed) setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, configs);
     return {
         promptConfigs: configs as Record<TaskKey, PromptConfig>,
-        externalInjections: { ...DEFAULT_EXTERNAL, ...(external ?? {}) },
     };
 }
 
@@ -110,12 +111,6 @@ function stripRetiredPoolRules(choice: PromptConfig | undefined): boolean {
     return true;
 }
 
-/** 外部注入搬运配置读取（非 store 上下文消费——sources 组装路径）。 */
-export function externalInjectionConfig(): ExternalInjectionConfig {
-    const external = getGlobal<ExternalInjectionConfig>(GLOBAL_EXTERNAL_KEY);
-    return { ...DEFAULT_EXTERNAL, ...(external ?? {}) };
-}
-
 /**
  * 启动期初始化：默认模板集落盘（幂等——已有配置不覆盖）＋旧数组档迁移。
  * 由 choice 模块初始化（浏览器与 node 冒烟两路）调用——不依赖任何 UI
@@ -133,7 +128,7 @@ export const usePromptsStore = defineStore('tt-prompts', {
         lastTraceText: '',
     }),
     getters: {
-        /** 四任务配置全景（编辑器任务切换条/列表渲染） */
+        /** 四任务配置全景（编辑面已删；读侧 getter 保留——任务域枚举口） */
         taskConfigs(): Record<TaskKey, PromptConfig> {
             void this.revision;
             return readPromptDomain().promptConfigs;
@@ -148,10 +143,6 @@ export const usePromptsStore = defineStore('tt-prompts', {
         effectiveConfig(): PromptConfig | null {
             void this.revision;
             return readPromptDomain().promptConfigs.choice ?? null;
-        },
-        externalInjections(): ExternalInjectionConfig {
-            void this.revision;
-            return readPromptDomain().externalInjections;
         },
         storyDirection(): StoryDirection {
             void this.revision;
@@ -179,58 +170,14 @@ export const usePromptsStore = defineStore('tt-prompts', {
     actions: {
         /**
          * 按任务恢复默认模板（m03359 拍板新增，整合轮II 起按任务分立）：
-         * 用户改坏了自己也不会修时一键回厂。整体替换该任务的 modules，
-         * 不可撤销（UI 侧先 confirm）。
+         * 整体替换该任务的 modules，不可撤销。提示词编辑面已删除（整合轮
+         * II 验收修整），本 action 无 UI 入口，保留供冒烟红线（persona
+         * smoke「按任务恢复默认」断言——旧档迁移后的还原通道）。
          */
         resetToDefault(task: TaskKey) {
             const d = readPromptDomain();
             setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...d.promptConfigs, [task]: createTaskDefaultConfig(task) });
             this.revision++;
-        },
-        /** 整体替换指定任务模板的模块集（编辑器写回） */
-        replaceModules(task: TaskKey, modules: PromptConfig['modules']) {
-            const d = readPromptDomain();
-            const current = d.promptConfigs[task];
-            if (!current) return;
-            setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...d.promptConfigs, [task]: { ...current, modules } });
-            this.revision++;
-        },
-        /** 单模块启停（编辑器高频操作：读-改-写整集） */
-        toggleModule(task: TaskKey, moduleId: string, enabled: boolean) {
-            const cfg = readPromptDomain().promptConfigs[task];
-            if (!cfg) return;
-            this.replaceModules(task, cfg.modules.map(m => (m.id === moduleId ? { ...m, enabled } : m)));
-        },
-        /**
-         * 模块排序交换（order 值互换）。编辑器按 G5 三分组渲染，移动的
-         * 交换对象限定同组相邻模块——跨组位置由各组分段天然隔开，跨组
-         * 交换会让另一组里凭空多/少一行，视觉上＝乱跳。
-         */
-        moveModule(task: TaskKey, moduleId: string, direction: -1 | 1) {
-            const cfg = readPromptDomain().promptConfigs[task];
-            if (!cfg) return;
-            const sorted = [...cfg.modules].sort((a, b) => a.order - b.order);
-            const idx = sorted.findIndex(m => m.id === moduleId);
-            if (idx < 0) return;
-            const group = moduleGroupOf(sorted[idx]);
-            let target = idx + direction;
-            while (target >= 0 && target < sorted.length && moduleGroupOf(sorted[target]) !== group) {
-                target += direction;
-            }
-            if (target < 0 || target >= sorted.length) return;
-            const orderA = sorted[idx].order;
-            sorted[idx] = { ...sorted[idx], order: sorted[target].order };
-            sorted[target] = { ...sorted[target], order: orderA };
-            this.replaceModules(task, sorted);
-        },
-        /** 编辑文本模块内容（编辑器 textarea 写回） */
-        updateModuleContent(task: TaskKey, moduleId: string, content: string) {
-            const cfg = readPromptDomain().promptConfigs[task];
-            if (!cfg) return;
-            this.replaceModules(
-                task,
-                cfg.modules.map(m => (m.id === moduleId && m.kind === 'text' ? { ...m, content } : m)),
-            );
         },
         setStoryDirection(patch: Partial<StoryDirection>) {
             const current = this.storyDirection;
@@ -250,19 +197,6 @@ export const usePromptsStore = defineStore('tt-prompts', {
             // 注释——快照自包含，删除预设不清空已应用的走向）
             setGlobal(GLOBAL_DIRECTION_PRESETS_KEY, this.directionPresets.filter(p => p.id !== id));
             this.revision++;
-        },
-        setExternalInjections(patch: Partial<ExternalInjectionConfig>) {
-            const current = readPromptDomain().externalInjections;
-            setGlobal(GLOBAL_EXTERNAL_KEY, { ...current, ...patch });
-            this.revision++;
-        },
-        /** 外部注入槽位勾选切换（旧白名单路径——UI 已改全搬开关，保留供旧数据/程序路径） */
-        toggleSlot(key: string, checked: boolean) {
-            const current = readPromptDomain().externalInjections;
-            const set = new Set(current.selectedSlots);
-            if (checked) set.add(key);
-            else set.delete(key);
-            this.setExternalInjections({ selectedSlots: [...set] });
         },
     },
 });

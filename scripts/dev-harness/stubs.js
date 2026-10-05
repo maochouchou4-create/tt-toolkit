@@ -180,7 +180,8 @@
         }),
         chatCompletionSettings: { preset_settings_openai: '存根预设' },
         extensionPrompts: {
-            // 假装是一个记忆摘要类插件占用通用注入槽位（PromptEditorTab 高级区可见）
+            // 假装是一个记忆摘要类插件占用通用注入槽位（外部注入全自动
+            // 搬入——整合轮II 验收修整：非空即带，无需用户配置）
             'stub-memory': {
                 value: '【记忆摘要·stub】王玉已连续三天在子时到访旧货铺；林霜提到过一封没有署名的信。',
                 position: 0,

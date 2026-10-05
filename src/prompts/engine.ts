@@ -44,9 +44,9 @@ export interface AssemblySources {
     history: HistoryEntry[];
     /** 剧情走向（null＝未设置——story_direction 模块按未启用处理） */
     storyDirection: StoryDirection | null;
-    /** 用户勾选搬入的宿主通用注入槽位（顺序＝勾选列表顺序） */
+    /** 自动搬入的宿主通用注入槽位（非空即带；顺序＝宿主 depth 升序＋key 字典序，见 sources 收集处） */
     externalSlots: Array<{ key: string; value: string }>;
-    /** 柏宝书摘要文本（缺席/未开传 null） */
+    /** 柏宝书摘要文本（插件缺席/接口异常传 null） */
     baibaiSummary: string | null;
     /**
      * 池注入供给（批C）。null＝池整体未启用（pool_entries 模块按未启用
@@ -277,7 +277,9 @@ function resolveInjectContent(
             return { content: wrapTag('direction', [preset, free].filter(Boolean).join('\n'), sources), note };
         }
         case 'external_slot': {
-            if (sources.externalSlots.length === 0) return { content: '', note: '无可用槽位（全搬开关未开或没有插件写入）' };
+            // 自动口径（整合轮II 验收修整）：sources 枚举宿主非空槽位全带，
+            // 无配置门——空列表＝没有插件写入，段缺席不报错
+            if (sources.externalSlots.length === 0) return { content: '', note: '无可用槽位（没有插件写入公共注入区）' };
             const filled = sources.externalSlots.filter(s => s.value.trim());
             if (filled.length === 0) return { content: '', note: '在场槽位内容全为空' };
             // 逐槽位标注：每段带槽位 key 前缀——dump/trace 的「逐项可见」

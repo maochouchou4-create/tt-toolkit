@@ -17,7 +17,6 @@ import {
 } from '@/host';
 import { getBaibaiSummary } from './external';
 import type { AssemblySources, PoolInjectionSupply } from './engine';
-import { externalInjectionConfig } from './store';
 import type { StoryDirection } from './types';
 
 /** 世界书深度条目分界：depth≤2 归「浅」（历史后、贴近生成点），≥3 归「深」。 */
@@ -96,18 +95,25 @@ export async function collectAssemblySources(params: {
     const depthBefore = depthEntries.filter(e => e.depth > WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
     const depthAfter = depthEntries.filter(e => e.depth <= WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
 
-    // 外部注入搬运（可选模块，默认关）：allSlots＝全搬模式（用户拍板
-    // m02276——不做逐槽位勾选）；selectedSlots＝旧白名单兼容路径。
-    // 每次组装现取（不启动时缓存，插件可能后加载/切卡重建）
-    const extConfig = externalInjectionConfig();
-    const allSlots = listExtensionPromptSlots();
-    const selected = extConfig.allSlots
-        ? allSlots.map(s => ({ key: s.key, value: substituteMacros(s.value) }))
-        : extConfig.selectedSlots
-            .map(key => allSlots.find(s => s.key === key))
-            .filter((s): s is NonNullable<typeof s> => Boolean(s))
-            .map(s => ({ key: s.key, value: substituteMacros(s.value) }));
-    const baibai = extConfig.baibai ? getBaibaiSummary() : null;
+    // 外部注入搬运（整合轮II 验收修整：全自动——无开关无勾选）。槽位
+    // 枚举口径（宿主源码核实锚点，D:\code\repos\TauriTavern\src）：
+    //   - openai.js:1484 populationInjectionPrompts：depth 升序循环
+    //     （i=0..maxDepth，depth 0 最贴近生成点）——自动搬入的排序对齐
+    //     该顺序：depth 升序在前＝浅位先出。
+    //   - openai.js:1547-1549 getPromptAssemblyExtensionPrompt 与
+    //     script.js:4115 getExtensionPrompt：同 depth 内槽位 key 字典序
+    //     （Object.keys(...).sort()）。
+    //   - script.js:4040-4045 getAllExtensionPrompts：空白 value 跳过
+    //     ——非空即带的「非空」＝trim 后有内容。
+    // 兼容不了（context 缺席/表空）→ 空列表，引擎段缺席不报错。每次
+    // 组装现取（不启动时缓存，插件可能后加载/切卡重建）。
+    // 柏宝书：在场即带（auto 口径）——getBaibaiSummary 插件缺席/接口
+    // 异常返回 null（external.ts 取数纪律），引擎按不注入处理。
+    const extSlots = listExtensionPromptSlots()
+        .filter(s => s.value.trim() !== '')
+        .sort((a, b) => a.depth - b.depth || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        .map(s => ({ key: s.key, value: substituteMacros(s.value) }));
+    const baibai = getBaibaiSummary();
 
     return {
         persona: substituteMacros(persona),
@@ -126,7 +132,7 @@ export async function collectAssemblySources(params: {
         worldInfoDepthAfter: substituteMacros(depthAfter),
         history,
         storyDirection: params.storyDirection,
-        externalSlots: selected,
+        externalSlots: extSlots,
         baibaiSummary: baibai,
         // 池供给：调用方（generator）现场抽取后直传——null＝池未启用
         poolInjection: params.poolInjection ?? null,

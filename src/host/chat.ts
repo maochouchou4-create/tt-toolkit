@@ -51,7 +51,8 @@ export interface WorldInfoScanInput {
  *
  * anBefore/anAfter（作者注释桶）刻意不采集：本旁路请求不消费它们，
  * 采集后弃用＝契约含糊。作者注释的搬运走外部注入槽位扫描通道
- * （listExtensionPromptSlots，见下），用户勾选后随 external_slot 注入。
+ * （listExtensionPromptSlots，见下），随 external_slot 自动注入（整合
+ * 轮II 验收修整：无勾选面——非空槽位全带）。
  */
 export interface WorldInfoBuckets {
     worldInfoBefore: string;
@@ -110,7 +111,9 @@ export async function runWorldInfoScan(input: WorldInfoScanInput): Promise<World
     };
 }
 
-/** 扫宿主通用注入槽位表（extension_prompts，读取侧走 context 转发）。 */
+/** 扫宿主通用注入槽位表（extension_prompts，读取侧走 context 转发）。
+ *  返回插入序（Object.entries 遍历序）——消费方（prompts/sources 自动
+ *  搬运）自行按宿主 depth 升序＋key 字典序排序（锚点见该处注释）。 */
 export function listExtensionPromptSlots(): ExtensionPromptSlot[] {
     const raw = getTavernContext()?.extensionPrompts as Record<string, unknown> | undefined;
     if (!raw || typeof raw !== 'object') return [];

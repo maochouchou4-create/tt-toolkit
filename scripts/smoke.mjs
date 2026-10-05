@@ -47,6 +47,9 @@ const eventHandlers = new Map();
 
 // getContext 存根（批C 起稳定单例）：守卫链读楼层正文（chat 数组）需要
 // 跨调用持久——每次新对象会让「往 chat 里放消息」这一动作失效
+// 整合轮II 验收修整：externalPrompts 给自动注入面三个槽位——stub_anchor
+// （depth 0 非空）、stub_blank（空白 value＝应被跳过）、stub_memory
+// （depth 4 非空）——断言 depth 升序排序与「非空即带、空槽位跳过」
 const stubContext = {
     chat: [],
     chatId: null,
@@ -58,6 +61,21 @@ const stubContext = {
     saveMetadata: async () => {
         globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls++;
     },
+    extensionPrompts: {
+        // 插入序故意与 depth 序不同（memory 先插入但 depth 更深）——
+        // 排序断言只有真的实现了 depth 排序才绿
+        'stub_memory': { value: '【记忆摘要·stub】王玉已连续三天在子时到访旧货铺。', position: 0, depth: 4, scan: true, role: 0 },
+        'stub_blank': { value: '   ', position: 0, depth: 2, scan: true, role: 0 },
+        'stub_anchor': { value: '【锚点提示·stub】当前场景在旧货铺后院。', position: 0, depth: 0, scan: true, role: 0 },
+    },
+};
+
+// 柏宝书 stub（整合轮II 验收修整）：在场即带口径的机判供给——
+// getInjectedHistory 优先口径返回 relativeText（getHistory 降级路径
+// 不触发；缺席路径由 choice-smoke 合成源传 null 覆盖）
+globalThis.STBaiBaiBook = {
+    apiVersion: 1,
+    getInjectedHistory: () => ({ relativeText: '【柏宝书·stub】王玉与林霜曾在旧货铺发生过一场争执，此后两人各自回避提起。' }),
 };
 
 // 生成端点 fetch 桩（批C happy path）：固定回 4 条选项 JSON（非流式
@@ -92,7 +110,8 @@ globalThis.__TT_SMOKE_STUBS__ = {
     substituteParams: text => text,
     // 请求头（node 下无 CSRF）
     getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
-    // 宿主通用注入槽位表（空表——真实占用归浏览器验收）
+    // 宿主通用注入槽位表（script.js 直导入面——空表；自动注入读取走
+    // context 转发的 stubContext.extensionPrompts，见上）
     extension_prompts: {},
     // power_user（人设空——persona 注入模块按「未设置」路径走；
     // 批D 起 personas/persona_descriptions 桶在场：host/personas.ts 写回通道
@@ -308,8 +327,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝89；m03359 整合轮 +1（few-shot 7 条计数）＝90（注入区 9 条不变：删
 // pool_rules 分层/空规则两断言，加池规则并入/模块移除两断言）；整合轮II
 // +1（PoolBackup v2 备份升格断言：v1 apis→统一端点表＋choiceTask 派生）
-// ＝91。
-const CHOICE_PASS_EXPECTED = 91;
+// ＝91；整合轮II 验收修整 +4（外部注入自动形态：无槽位段缺席留痕 1＋
+// 生成管线自动搬入可见/空槽位跳过 1＋depth 升序 1＋柏宝书在场即带 1）
+// ＝95。
+const CHOICE_PASS_EXPECTED = 95;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

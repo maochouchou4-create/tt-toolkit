@@ -1,7 +1,7 @@
 /**
  * 扩展引导：唯一环境分支点（批A 修复：模块不再自行探测环境自启动）。
  *
- * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×6
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
  * （含 API 页）→ initChoice()（提示词配置落盘＋__TTK_PROMPTS__ 全局口＋
  * 选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
@@ -20,7 +20,7 @@
 import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { mountShell, registerTab } from '@/shell';
-import { createApiTab, createChoiceSettingsTab, createNavSettingsTab, createPersonaTab, createPoolTab, createPromptEditorTab } from '@/shell/tabs';
+import { createApiTab, createChoiceSettingsTab, createNavSettingsTab, createPersonaTab, createPoolTab } from '@/shell/tabs';
 import { dumpStorage, initStorage, runStorageRoundtrip } from '@/storage';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
@@ -67,7 +67,6 @@ async function main(): Promise<void> {
     mountShell();
     registerTab(createChoiceSettingsTab());
     registerTab(createPoolTab());
-    registerTab(createPromptEditorTab());
     registerTab(createApiTab());
     registerTab(createNavSettingsTab());
     registerTab(createPersonaTab());

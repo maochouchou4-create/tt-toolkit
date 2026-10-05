@@ -11,7 +11,6 @@ import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import NavSettingsTab from './NavSettingsTab.vue';
 import PersonaTab from './PersonaTab.vue';
 import PoolTab from './PoolTab.vue';
-import PromptEditorTab from './PromptEditorTab.vue';
 
 export function createApiTab(): ShellTab {
     return {
@@ -43,18 +42,6 @@ export function createChoiceSettingsTab(): ShellTab {
         tabTitle: '选项生成',
         mount(container) {
             const app = createApp(ChoiceSettingsTab);
-            app.use(pinia);
-            app.mount(container);
-        },
-    };
-}
-
-export function createPromptEditorTab(): ShellTab {
-    return {
-        id: 'prompt-editor',
-        tabTitle: '提示词',
-        mount(container) {
-            const app = createApp(PromptEditorTab);
             app.use(pinia);
             app.mount(container);
         },

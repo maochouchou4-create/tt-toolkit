@@ -488,6 +488,16 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：stub 端点回固定 JSON → 解析 4 条（json 主路径）', store.phase === 'idle' && store.options.length === 4 && store.lastParsePath === 'json', `phase=${store.phase} count=${store.options.length} path=${store.lastParsePath} error=${store.error}`);
     // 生成管线现场抽取池：drawPoolInjection 读导入后的池（e1 必发；条目渲染无规则后缀）
     check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('检查酒馆：仔细检查酒馆的每个角落') && !store.lastDump.includes('[规则:'));
+    // 整合轮II 验收修整：外部注入全自动链路（stub context 槽位 → sources
+    // 自动收集 → engine → dump）。stub_memory 先插入但 depth 4、
+    // stub_anchor 后插入但 depth 0——排序断言只有真的按 depth 升序排
+    // 才绿；stub_blank 空白 value＝「非空即带」的空槽位跳过面
+    const slotIdx = (key: string): number => store.lastDump.indexOf(`[槽位 ${key}]`);
+    check('自动生成：外部注入全自动（非空槽位搬入可见、空白槽位跳过）', slotIdx('stub_anchor') >= 0 && slotIdx('stub_memory') >= 0 && slotIdx('stub_blank') < 0, `anchor=${slotIdx('stub_anchor')} memory=${slotIdx('stub_memory')} blank=${slotIdx('stub_blank')}`);
+    check('自动生成：外部注入槽位顺序对齐宿主 depth 升序（浅位在前）', slotIdx('stub_anchor') < slotIdx('stub_memory'), `anchor=${slotIdx('stub_anchor')} memory=${slotIdx('stub_memory')}`);
+    // 柏宝书在场即带（自动口径）：STBaiBaiBook stub（smoke.mjs 注入
+    // globalThis）→ getBaibaiSummary 优先注入口径 → <past_events> 段可见
+    check('自动生成：柏宝书在场即带（摘要注入 <past_events> 段）', store.lastDump.includes('<past_events>') && store.lastDump.includes('【柏宝书·stub】'), 'stub getInjectedHistory 链路');
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
@@ -514,15 +524,21 @@ function runAssemblyChecks(): string {
     const freeOnlyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '重点描写她的回避态度' } });
     const freeOnlyText = freeOnlyDirection.messages.map(m => m.content).join('\n');
     check('story_direction 仅自由文本也注入（无预设可用）', freeOnlyText.includes('<direction>') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
-    // 默认关的模块（外部搬运模块本体参与管线，但默认无勾选/开关关闭）：
-    // baibai 合成源传 null → trace 记录未注入原因（默认关的可观测性）
+    // 自动口径（整合轮II 验收修整——无开关无勾选）：baibai 合成源传 null
+    // （插件缺席/接口异常形态）→ trace 记录未注入原因（缺席的可观测性）
     const baibaiTrace = result.trace.find(t => t.moduleId === 'inject_baibai');
-    check('柏宝书默认关＝不注入且 trace 留痕', baibaiTrace?.injected === false && baibaiTrace.note.includes('不可用'), `note=${baibaiTrace?.note ?? '（无 trace）'}`);
-    // 外部槽位：合成源给了已勾选槽位内容 → 注入可见（勾选即生效单步链路）。
+    check('柏宝书摘要缺席＝不注入且 trace 留痕', baibaiTrace?.injected === false && baibaiTrace.note.includes('不可用'), `note=${baibaiTrace?.note ?? '（无 trace）'}`);
+    // 外部槽位：合成源给了非空槽位内容 → 注入可见（非空即带单步链路）。
     // 逐槽位标注：内容段带槽位 key 前缀、trace note 同粒度（逐项可见到槽位）
     check('外部注入槽位搬入可见（<external_memory> 段逐槽位标注）', allText.includes('<external_memory>') && allText.includes('[槽位 1_memory]') && allText.includes('两人在酒馆发生过争执'));
     const injectedExtTrace = result.trace.find(t => t.moduleId === 'inject_external_slot');
     check('外部槽位 trace 注记到槽位粒度', injectedExtTrace?.injected === true && injectedExtTrace.note.includes('1_memory'), `note=${injectedExtTrace?.note ?? '（无 trace）'}`);
+    // 自动口径的另一侧：无槽位供给（没有插件写入公共注入区）→ 段缺席
+    // 不报错、trace 留痕（兼容不了就什么都不带——最近几轮聊天记录兜底）
+    const noSlot = assembleMessages(config.modules, { ...sources, externalSlots: [] });
+    const noSlotTrace = noSlot.trace.find(t => t.moduleId === 'inject_external_slot');
+    const noSlotText = noSlot.messages.map(m => m.content).join('\n');
+    check('外部槽位无供给＝段缺席不报错（trace 留痕）', !noSlotText.includes('<external_memory>') && noSlotTrace?.injected === false && noSlotTrace.note.includes('无可用槽位'), `note=${noSlotTrace?.note ?? '（无 trace）'}`);
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
     // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
     check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件发展') && allText.includes('主动行为或反应'));
@@ -537,8 +553,9 @@ function runAssemblyChecks(): string {
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
 
-    // 外部槽位注入单步链路已由上方「勾选即生效」覆盖；再验证模块级
-    // 启停开关的优先权：关掉 external 模块后即便 sources 供给也不注入
+    // 外部槽位注入单步链路已由上方「非空即带」覆盖；再验证模块级启停
+    // 开关的优先权：关掉 external 模块后即便 sources 供给也不注入
+    // （modules[].enabled 保留的实证——引擎行为面，非 UI 面）
     const modulesOff = config.modules.map(m => (m.id === 'inject_external_slot' ? { ...m, enabled: false } : m));
     const offResult = assembleMessages(modulesOff, sources);
     const extTrace = offResult.trace.find(t => t.moduleId === 'inject_external_slot');

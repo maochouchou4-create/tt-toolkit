@@ -340,13 +340,16 @@ function runPersonaAssemblyChecks(): void {
         && refineUser.includes('[SYSTEM_OP: DATA_REVISION_PATCH]') && !refineUser.includes('姓名: 旧人设')
         && (refineConfig?.modules.every(m => m.kind === 'text' || m.source !== 'current_persona') ?? false));
 
-    // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复
-    prompts.toggleModule('persona_gen', 'persona_gen_prompt', false);
-    const off = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复。
+    // 整合轮II 验收修整：toggleModule action 已随提示词编辑面删除——
+    // 改本地数组改造（choice smoke modulesOff 同款；modules[].enabled
+    // 字段保留、引擎照读的实证）
+    const genModules = prompts.configFor('persona_gen')?.modules ?? [];
+    const offModules = genModules.map(m => (m.id === 'persona_gen_prompt' ? { ...m, enabled: false } : m));
+    const off = assembleMessages(offModules, assemblySources);
     const offTrace = off.trace.find(t => t.moduleId === 'persona_gen_prompt');
     const offOk = off.messages.length === 1 && off.messages[0].role === 'system' && offTrace?.note === '模块已停用';
-    prompts.toggleModule('persona_gen', 'persona_gen_prompt', true);
-    const on = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    const on = assembleMessages(genModules, assemblySources);
     check('persona 组装：模块开关闭环（停用留痕不注入、启用恢复注入）',
         offOk && on.messages.length === 2 && on.messages[1].role === 'user');
 }
