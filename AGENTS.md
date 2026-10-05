@@ -49,5 +49,5 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 ## 深度背景（本机路径，仅限本机开发者）
 
 - 重写方案 SSOT：`D:\code\实施方案\tt-toolkit从零重写方案.md`（用户会用并行会话修改它，引用前必须重读原文，不能信转述）。
-- 跨会话进度与踩坑记忆：`C:\Users\34139\.dsh\memory\workspaces\code\tauritavern-toolkit.md`。
+- 跨会话进度与踩坑记忆：`C:\Users\34139\.dsh\memory\workspaces\code\tauritavern-toolkit.md`。写它前先读其文件头「维护规则」：两职（速览/当前状态/本机环境坑）；历史进 git log、规则进本文，里程碑只更新其「当前状态」节。
 - 用户协作习惯：中文交流；咨询只答不动手，等明确「开工」才改码；施工者（子智能体）自述不作裁决证据，验收由 Lead 亲跑门禁＋亲读关键代码；用户无法打开 devtools（打包版 Tauri），验收指引只给 UI 级步骤。
