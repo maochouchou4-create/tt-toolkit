@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tt-toolkit dev-harness（宿主 stub 调试台）</title>
+    <!-- 顺序：先宿主 stub（stubs.js），再重写后的产物（app.js，由 build.mjs 生成）；
+         样式＝宿主危险规则模拟（host-sim.css，先于产物＝复刻真实宿主加载序）
+         + tt-toolkit 产物样式 + 宿主骨架模拟样式 -->
+    <link rel="stylesheet" href="host-sim.css">
+    <link rel="stylesheet" href="../../dist/index.css">
+    <link rel="stylesheet" href="harness.css">
+</head>
+<body>
+    <!-- 仿宿主顶栏（占 --topBarBlockSize 高度；壳 top 锚点引用该变量） -->
+    <header id="topBar">
+        <span class="harness-title">tt-toolkit dev-harness</span>
+        <span class="harness-note">宿主 stub 调试台——全部内存态，刷新即重置</span>
+        <div class="harness-actions">
+            <button type="button" class="harness-btn" onclick="__TT_HARNESS_UI__.toggleTheme()">切换主题</button>
+            <button type="button" class="harness-btn" onclick="__TT_HARNESS_UI__.resetData()">重置数据</button>
+        </div>
+    </header>
+
+    <main id="sheld">
+        <!-- 聊天区（nav 模块 DOM 契约：SCROLL_ROOT=#chat，楼层=.mes[mesid]） -->
+        <div id="chat"></div>
+        <div id="form_sheld">
+            <!-- 仿宿主魔棒菜单（appendWandMenuEntry 注入目标；宿主内默认收起，
+                 harness 常开便于点开壳） -->
+            <div id="extensionsMenu"></div>
+            <form id="send_form">
+                <textarea id="send_textarea" placeholder="假装这里是宿主输入框"></textarea>
+                <div id="send_but" title="发送">➤</div>
+                <div id="mes_stop" title="暂停">■</div>
+            </form>
+        </div>
+    </main>
+
+    <!-- 宿主浮层挂载点（mountShell 在 #movingDivs 下建 #tt-shell-mount） -->
+    <div id="movingDivs"></div>
+
+    <script src="stubs.js"></script>
+    <script src="app.js"></script>
+    <script>
+        // app.js 执行完（mountShell 已注册 APP_READY once）后放行就绪信号，
+        // 魔棒条目/选项条挂载链路走完整三段等待的真实第二段
+        __TT_HARNESS_UI__.emitAppReady();
+    </script>
+</body>
+</html>

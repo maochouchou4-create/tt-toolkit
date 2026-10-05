@@ -1,43 +1,68 @@
-// 根 lint 门 flat config（eslint v9）。定位＝抓 no-undef 类 typo 的正确性门
-// （批3 nav 裸 CONFIG 常量引用回归的防复发门），非完整工程规范，KISS：
-//   - 不引 import 插件——nav 对宿主模块（events.js / slash-commands 等）的
-//     逃逸 import 只在 TT 运行时存在，仓内 lint 无从解析，开了只会放行或误报；
-//   - 监听面＝loader + nav + shared；dist（上游构建产物）/ i18n（数据）/
-//     modules/persona（自带独立 lint 门与 dev kit）不入面；
-//     modules/choice-src＝上游 AFPL 硬分叉源码（TS/Vue，自带 lint 门），
-//     不进本门监听面——改动正确性由构建等价＋typecheck 把关。
-// globals 按实测 no-undef 报错补全：浏览器 + TT 宿主注入全局。
-export default [
+// 新应用 lint 门（eslint v9 flat config）。
+// 监听面＝src/（Vue SFC + TS）与 scripts/（node 侧 .mjs）。批E 已删除
+// rewrite 前的旧结构（modules/、i18n/、根 loader 桩、prompts/、shared/）。
+// scripts/check-imports.mjs 与 smoke 相关脚本由本门做基础正确性检查
+// （no-undef / 未用变量），语义断言归脚本自身 exit code。
+import globals from 'globals';
+import pluginVue from 'eslint-plugin-vue';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
     {
-        ignores: ["dist/**", "i18n/**", "modules/persona/**", "modules/choice-src/**", "node_modules/**", "prompts/**"],
+        ignores: ['dist/**', 'node_modules/**'],
+    },
+    ...tseslint.configs.recommended.map(entry => ({
+        ...entry,
+        // TS 规则须覆盖 .vue 的 script 块（SFC 由下方 vue-eslint-parser +
+        // tseslint.parser 组合解析）——漏掉 .vue 会让 SFC 成为 TS 门盲区
+        files: ['src/**/*.ts', 'src/**/*.vue', 'vite.config.ts', 'scripts/**/*.mjs'],
+    })),
+    ...pluginVue.configs['flat/recommended'],
+    {
+        files: ['src/**/*.vue'],
+        languageOptions: {
+            parserOptions: {
+                parser: tseslint.parser,
+            },
+        },
     },
     {
-        files: ["index.js", "modules/nav/**/*.js", "shared/**/*.js"],
+        files: ['src/**/*.ts', 'src/**/*.vue', 'scripts/**/*.mjs'],
+        plugins: {
+            '@typescript-eslint': tseslint.plugin,
+        },
         languageOptions: {
-            ecmaVersion: "latest",
-            sourceType: "module",
             globals: {
-                // 浏览器全局
-                window: "readonly",
-                document: "readonly",
-                localStorage: "readonly",
-                navigator: "readonly",
-                fetch: "readonly",
-                // 平台内置（flat config 不随 ecmaVersion 自动补 host 全局，实测报错补全）
-                console: "readonly",
-                setTimeout: "readonly",
-                clearTimeout: "readonly",
-                setInterval: "readonly",
-                clearInterval: "readonly",
-                MutationObserver: "readonly",
-                // TT 宿主注入全局
-                SillyTavern: "readonly",
-                toastr: "readonly",
+                ...globals.browser,
+                // TT 宿主注入的运行时全局（不 import，只在宿主窗口存在）
+                SillyTavern: 'readonly',
+                quickReplyApi: 'readonly',
+                toastr: 'readonly',
             },
         },
         rules: {
-            "no-undef": "error",
-            "no-unused-vars": "warn",
+            // 平移代码与宿主边界打交道多，any 边界集中在 host 层收敛；
+            // no-explicit-any 保持 error，边界处用显式 unknown + 收窄
+            '@typescript-eslint/no-explicit-any': 'error',
         },
     },
-];
+    {
+        files: ['scripts/**/*.mjs', 'vite.config.ts'],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+            },
+        },
+    },
+    {
+        // vue/flat/recommended 的模板规则对 SFC 模板生效，脚本块走 TS 规则；
+        // 关掉与本仓风格冲突的属性顺序硬规则
+        files: ['src/**/*.vue'],
+        rules: {
+            'vue/attributes-order': 'off',
+            'vue/max-attributes-per-line': 'off',
+            'vue/singleline-html-element-content-newline': 'off',
+            'vue/multiline-html-element-content-newline': 'off',
+        },
+    },
+);

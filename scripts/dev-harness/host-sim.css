@@ -1,0 +1,41 @@
+/* 宿主样式模拟（host style.css 危险规则复刻——只收「我方元素会沾上的类」）。
+ * 目的：宿主 CSS 干扰类 bug（m02276 ⠿ 隐形、panelControlBar 乱飞）在
+ * harness 里当场复现，而不是等用户浏览器验收才炸。
+ * 规则原文出处：TauriTavern/src/style.css:852-873（.drag-grabber）、
+ * :879-888（body .panelControlBar）。新增依赖宿主类时必须同步此处。 */
+
+/* 宿主把手默认隐形（宿主自家把手靠 fa-solid 类撑回 display） */
+.drag-grabber {
+    position: absolute;
+    margin: 0px 5px;
+    z-index: 2000;
+    text-align: center;
+    vertical-align: middle;
+    right: 0px;
+    top: 0px;
+    opacity: 0.5;
+    cursor: grab;
+    display: none;
+    transition: all 0.2s;
+    font-size: 1.3em;
+}
+
+/* 宿主控制条＝右上角图标簇（复用它装标题＝钉死右上角，乱飞根因） */
+body .panelControlBar {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    z-index: 2000;
+    min-width: 55px;
+    justify-content: flex-end;
+    gap: 0px;
+    transition: all 0.2s;
+}
+
+/* 宿主 #form_sheld 自带 nowrap（TauriTavern/src/style.css，white-space 可继承）：
+   选项条挂在它下面会整树继承 → 曾致「选项太长不换行」真机 bug（m03158，
+   harness 缺此规则所以本地复现不出）。依赖 #form_sheld 环境的组件必须在
+   自身根节点显式声明 white-space。 */
+#form_sheld {
+    white-space: nowrap;
+}

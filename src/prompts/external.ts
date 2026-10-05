@@ -1,0 +1,58 @@
+/**
+ * 外部注入搬运（方案 §2.3；整合轮II 验收修整改全自动——配置面已删）。
+ *
+ * 两条通道（独立 API 旁路请求的真实代价——酒馆的注入不会自动进旁路
+ * 请求，外部内容逐条自接；「自动」＝生成时枚举在场内容全带，不再有
+ * 用户开关/勾选）：
+ *   ①宿主通用注入槽位：extension_prompts 表经 context 暴露
+ *     （st-context.js:158）——对标准记忆/摘要类插件通用。收集在
+ *     sources 层（collectAssemblySources）：非空槽位全带、顺序对齐
+ *     宿主注入循环（见该处锚点注释）。
+ *   ②柏宝书 STBaiBaiBook 私有 API：globalThis.STBaiBaiBook 版本化契约
+ *     （apiVersion/capabilities）。取数纪律：每次组装前现取（不启动时
+ *     缓存，插件可能后加载/切卡重建 API）、优先注入口径
+ *     （getInjectedHistory）、降级全量历史（getHistory）、缺席返回
+ *     null 静默（第三方桥接必须可选，不可用时主体功能不受影响）。
+ *     在场即带（自动口径——无开关）。
+ */
+import { getChatMessages } from '@/host';
+
+/** 柏宝书对外 API 形态（取数纪律见文件头；字段面按消费最小集声明）。 */
+interface BaiBaiBookApi {
+    apiVersion?: number;
+    getInjectedHistory?: () => { relativeText?: string } | null;
+    getHistory?: (options: { before: number }) => { relativeText?: string } | null;
+}
+
+interface BaiBaiBookWindow {
+    STBaiBaiBook?: BaiBaiBookApi;
+}
+
+function getBaiBaiApi(): BaiBaiBookApi | null {
+    const w = globalThis as unknown as BaiBaiBookWindow;
+    return w.STBaiBaiBook ?? null;
+}
+
+/**
+ * 柏宝书摘要文本：优先注入口径（getInjectedHistory——与正常记忆注入
+ * 同规则），降级全量历史（getHistory 截止最新楼）。任一命中返回文本，
+ * 插件缺席/接口异常静默返回 null（可选桥接纪律）。
+ */
+export function getBaibaiSummary(): string | null {
+    const api = getBaiBaiApi();
+    if (!api) return null;
+    try {
+        const injected = api.getInjectedHistory?.();
+        if (injected?.relativeText) return injected.relativeText;
+        const chatLength = getChatMessages().length;
+        if (api.getHistory && chatLength > 0) {
+            const hist = api.getHistory({ before: chatLength });
+            if (hist?.relativeText) return hist.relativeText;
+        }
+    } catch {
+        // 第三方插件接口异常＝桥接不可用，静默降级（不留错误刷屏）
+        return null;
+    }
+    return null;
+}
+

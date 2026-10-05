@@ -1,14 +1,11 @@
 {
     "display_name": "TT Toolkit",
     "name": "tt-toolkit",
-    "version": "1.3.0",
+    "version": "1.0.0",
     "author": "maochouchou4-create",
-    "js": "index.js",
-    "css": "index.css",
+    "js": "dist/index.js",
+    "css": "dist/index.css",
     "loading_order": 120,
     "auto_update": true,
-    "homePage": "https://github.com/maochouchou4-create/tt-toolkit",
-    "i18n": {
-        "en": "i18n/en.json"
-    }
+    "homePage": "https://github.com/maochouchou4-create/tt-toolkit"
 }
