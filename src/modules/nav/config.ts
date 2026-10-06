@@ -9,7 +9,7 @@ import { createTtlog, type Ttlog } from '@/host';
 
 // 版本戳：加载日志 / dump / 错误 toast 全带版本，现场排障可区分运行的
 // 是哪一版（两版同名 nav-v1 时日志无法归因的教训）
-export const NAV_VERSION = 'nav-v3-rewrite';
+export const NAV_VERSION = 'nav-v4';
 
 // --------------------------------------------------------
 // CONFIG —— 所有可调参数集中在这里（与 v2 同值）

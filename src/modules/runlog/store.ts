@@ -28,11 +28,6 @@ function clip(text: string, max: number): string {
     return text.length > max ? text.slice(0, max) + TRUNCATED_SUFFIX : text;
 }
 
-/** messages 序列化：每条「[role]\ncontent」，空行分段（人类可读排障形态）。 */
-export function serializeMessages(messages: Array<{ role: string; content: string }>): string {
-    return messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n');
-}
-
 interface RunRecordSummary {
     id: number;
     task: RunTask;

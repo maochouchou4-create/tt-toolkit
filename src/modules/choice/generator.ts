@@ -6,7 +6,7 @@
  * 各注入模块逐项可见。
  */
 import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
-import { callGenerateEndpoint, serializeOutbound, type GenerateRequestConfig } from '@/modules/apis/client';
+import { callGenerateEndpoint, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import {
     assembleMessages,
@@ -80,7 +80,7 @@ export async function generateOptions(): Promise<void> {
     const runlogStore = useRunlogStore();
     let runId: number | null = null;
     let handedToClient = false;
-    let requestDump = '';
+    let pendingMessages: GenerateMessage[] | null = null; // 组装成功即存：哨兵预览惰性取用（正常路径零额外序列化）
     try {
         const gen = choiceStorage.readDomain().gen;
         // 输出契约日志口径随常量（任务参数固化，两分支同值）
@@ -88,8 +88,7 @@ export async function generateOptions(): Promise<void> {
         let rawText: string;
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
-        // 哨兵预览与实发同源（client 传输层自动前置破限前缀）
-        requestDump = serializeOutbound(assembly.messages);
+        pendingMessages = assembly.messages;
 
         if (gen.debugForceRaw) {
             rawText = DEBUG_MALFORMED_RAW;
@@ -102,7 +101,7 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: true,
-                requestText: requestDump,
+                requestText: serializeOutbound(pendingMessages),
                 responseText: DEBUG_MALFORMED_RAW,
             });
         } else {
@@ -154,7 +153,7 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: false,
-                requestText: requestDump,
+                requestText: pendingMessages ? serializeOutbound(pendingMessages) : '',
                 responseText: '',
                 error: message,
             });

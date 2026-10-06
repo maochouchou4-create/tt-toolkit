@@ -40,7 +40,7 @@
  */
 import { getTavernRequestHeaders } from '@/host';
 import { createTtlog } from '@/host/ttlog';
-import { serializeMessages, useRunlogStore } from '@/modules/runlog/store';
+import { useRunlogStore } from '@/modules/runlog/store';
 import type { RunTask } from '@/modules/runlog/types';
 import { resolveJailbreakMessages } from './preset-inject';
 
@@ -299,6 +299,11 @@ async function readStream(response: Response): Promise<{ content: string; finish
     return { content: full, finishReason };
 }
 
+/** messages 序列化：每条「[role]\ncontent」，空行分段（人类可读排障形态）。 */
+function serializeMessages(messages: GenerateMessage[]): string {
+    return messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n');
+}
+
 /**
  * 前缀拼装唯一实现：实发数组与哨兵预览同源——「每个出站请求必须带
  * 破限前缀」在这里结构成立，不靠调用点纪律。空序列原样透传（不复制
@@ -310,8 +315,9 @@ function composeOutbound(messages: GenerateMessage[]): GenerateMessage[] {
 }
 
 /**
- * 哨兵补记用：与实发同源的出站序列化（传输层在外的任务层记录
- * requestText 时用它，禁止退化成 serializeMessages——那会丢前缀）。
+ * 哨兵补记用：与实发同源的出站序列化（传输层外的任务层记录
+ * requestText 时用它）。序列化原语 serializeMessages 模块私有——
+ * 丢前缀的裸序列化在模块外结构上不可达。
  */
 export function serializeOutbound(messages: GenerateMessage[]): string {
     return serializeMessages(composeOutbound(messages));

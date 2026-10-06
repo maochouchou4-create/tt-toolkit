@@ -348,12 +348,13 @@ if (!navDomainAfterBoot || typeof navDomainAfterBoot !== 'object' || 'autoTop' i
     failures.push('P1 回归失败：存量 nav 域退役字段 autoTop 未在 boot 时丢弃');
 }
 
-// node 最小初始化确实注册了全部 /ttnav-* 命令（ttnav-auto 已随自动回顶
-// 开关退役，不在期望清单）
-const registeredCommands = ['ttnav-top', 'ttnav-prev', 'ttnav-next']
-    .filter(c => c in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands);
-if (registeredCommands.length !== 3) {
-    failures.push(`nav 最小初始化未注册全部 /ttnav-* 命令（仅注册：${registeredCommands.join(' ') || '无'}）`);
+// node 最小初始化注册的 /ttnav-* 命令全集恰三条（ttnav-auto 已随自动
+// 回顶开关退役——全集判别同时锁「漏注册」与「退役项复活」）
+const ttnavRegistered = Object.keys(globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands)
+    .filter(c => c.startsWith('ttnav-'));
+const ttnavExpected = ['ttnav-top', 'ttnav-prev', 'ttnav-next'];
+if (ttnavRegistered.length !== 3 || !ttnavExpected.every(c => ttnavRegistered.includes(c))) {
+    failures.push(`nav 命令注册异常（期望恰三条 ${ttnavExpected.join('/')}，实得：${ttnavRegistered.join(' ') || '无'}）`);
 }
 
 // 工具箱斜令在模块求值期注册（不依赖浏览器挂载路径）——QR 按钮入口的
