@@ -2,9 +2,10 @@
  * PersonaWeaver fork 状态层（Pinia）。
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
- * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）、
- * 预设选择（uiState）。平时表单编辑只动内存，不写全局域（消旧版
- * 每次键击写 localStorage 的 IO 放大）。
+ * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）。
+ * 平时表单编辑只动内存，不写全局域（消旧版每次键击写 localStorage
+ * 的 IO 放大）。任务级预设选择已退役——预设影响统一走传输层破限
+ * 注入（apis/preset-inject，API 页「生成注入」卡全局一份）。
  *
  * 互斥纪律：isProcessing 对生成/重 roll 全局互斥（旧模块私有
  * isProcessing 同语义）；lastRun 记忆最近一次请求（重 roll 语义）。
@@ -18,7 +19,6 @@
 
 import { defineStore } from 'pinia';
 import {
-    buildPresetOptions,
     getContextWorldBooks,
     getCharacterGreetingsList,
     getPersonaDescription,
@@ -30,7 +30,7 @@ import {
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
-import { collectWorldInfoContext, getPresetHintText, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
+import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
 import { readPersonaDomain, writePersonaDomain } from './storage';
@@ -76,7 +76,6 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
             request: run.request,
             wiText: run.wiText,
             greetingsText: run.greetingsText,
-            generationPreset: store.generationPreset,
             onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
             onProgress: label => { store.processingLabel = label; },
             signal,
@@ -98,24 +97,25 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
 }
 
 export const usePersonaStore = defineStore('tt-persona', {
-    state: () => ({
-        /** 预设选择（'current'/'pure'/预设名）。 */
-        generationPreset: readPersonaDomain().uiState.generationPreset,
-        /** 人设分区：需求框/结果框。 */
-        requestText: readPersonaDomain().userContext.request,
-        resultText: readPersonaDomain().userContext.result,
-        /** 生成互斥与进度文案。 */
-        isProcessing: false,
-        processingLabel: '',
-        /** 最近一次请求（重 roll 记忆）。 */
-        lastRun: null as LastRunDescriptor | null,
-        /** 参考分区：当前会话绑定书单（只读展示，全量注入）与问候语。 */
-        boundBooks: [] as string[],
-        greetings: [] as Array<{ label: string; content: string }>,
-        selectedGreetingIndex: null as number | null,
-        /** 载入世界书条目的候选清单（onActivate 时刷新）。 */
-        loadCandidates: [] as Array<{ book: string; entry: WorldBookEntrySummary }>,
-    }),
+    state: () => {
+        const domain = readPersonaDomain();
+        return {
+            /** 人设分区：需求框/结果框。 */
+            requestText: domain.userContext.request,
+            resultText: domain.userContext.result,
+            /** 生成互斥与进度文案。 */
+            isProcessing: false,
+            processingLabel: '',
+            /** 最近一次请求（重 roll 记忆）。 */
+            lastRun: null as LastRunDescriptor | null,
+            /** 参考分区：当前会话绑定书单（只读展示，全量注入）与问候语。 */
+            boundBooks: [] as string[],
+            greetings: [] as Array<{ label: string; content: string }>,
+            selectedGreetingIndex: null as number | null,
+            /** 载入世界书条目的候选清单（onActivate 时刷新）。 */
+            loadCandidates: [] as Array<{ book: string; entry: WorldBookEntrySummary }>,
+        };
+    },
 
     getters: {
         /** 当前角色键（字符串口径，'||' 兜底——勿用 === 比较 this_chid）。 */
@@ -128,16 +128,6 @@ export const usePersonaStore = defineStore('tt-persona', {
         },
         hasResult(): boolean {
             return this.resultText.trim().length > 0;
-        },
-        presetHint(): string {
-            return getPresetHintText(this.generationPreset);
-        },
-        /** preset 下拉选项（current/pure 两默认项+具名预设；:value 绑定消旧 option 注入风险）。 */
-        presetOptions(): Array<{ value: string; label: string }> {
-            return buildPresetOptions().map(name => ({
-                value: name,
-                label: name === 'current' ? '当前预设' : name === 'pure' ? '纯净模式（无系统段）' : name,
-            }));
         },
     },
 
@@ -154,7 +144,6 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 从全局域读快照进内存态（显式保存点之外的唯一读时机）。 */
         loadFromDomain() {
             const domain = readPersonaDomain();
-            this.generationPreset = domain.uiState.generationPreset;
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
         },
@@ -191,13 +180,6 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 显式保存点 ----------------
 
-        /** 保存预设选择（uiState 写域）。 */
-        persistUiState() {
-            writePersonaDomain(domain => {
-                domain.uiState.generationPreset = this.generationPreset;
-            });
-        },
-
         /** 保存编辑现场（需求/结果）。 */
         persistUserContext() {
             writePersonaDomain(domain => {
@@ -212,11 +194,6 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         selectGreeting(index: number | null) {
             this.selectedGreetingIndex = index;
-        },
-
-        selectPreset(name: string) {
-            this.generationPreset = name;
-            this.persistUiState();
         },
 
         // ---------------- 人设分区：生成/重 roll ----------------

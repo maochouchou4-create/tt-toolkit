@@ -22,7 +22,7 @@ import type { PromptConfig, TaskKey } from './types';
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（三任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
-export const DEFAULTS_VERSION = 4;
+export const DEFAULTS_VERSION = 5;
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -243,9 +243,10 @@ export function createDefaultPromptConfig(): PromptConfig {
 // {{charInfo}}/{{greetings}}/{{template}}/{{input}}/{{userRequirements}} 是
 // engine fillPersonaPlaceholders 的组装契约，禁止改名）。fork 原三段
 // 消息序列（system 预设 / system 世界书参考 / user 指令）映成模块管线：
-// 两个 inject 模块（persona_preset/persona_wi，role system）＋一个文本
-// 模块（指令正文，role user）；assistant prefill 仍由 generation.ts 在
-// 组装完成后追加（去 prefill 重试需要独立消息数组，不进模板）。
+// 预设段源已退役（预设影响走传输层破限注入），现＝一个 inject 模块
+// （persona_wi，role system）＋一个文本模块（指令正文，role user）；
+// assistant prefill 仍由 generation.ts 在组装完成后追加（去 prefill
+// 重试需要独立消息数组，不进模板）。
 // ---------------------------------------------------------------------------
 
 /** 策展指令（persona_curator 任务）：只产出 schema 键名，不填值。 */
@@ -340,18 +341,10 @@ const PERSONA_GEN_PROMPT = `[任务：生成用户人设]
 [行动]：
 只输出符合 schema 的 YAML 数据，每个字段都已填好。`;
 
-/** persona 三段共用前缀模块：预设 system 段＋世界书参考（均 role system）。 */
+/** persona 前缀模块：世界书参考（role system）。预设 system 段源已随任务级
+ *  预设选择退役——预设影响统一走传输层破限注入（apis/preset-inject）。 */
 function personaPreambleModules() {
     return [
-        {
-            kind: 'inject' as const,
-            id: 'inject_persona_preset',
-            name: '预设',
-            role: 'system' as const,
-            order: 10,
-            enabled: true,
-            source: 'persona_preset' as const,
-        },
         {
             kind: 'inject' as const,
             id: 'inject_persona_wi',

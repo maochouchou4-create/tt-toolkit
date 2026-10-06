@@ -41,9 +41,8 @@ export type InjectionSource =
     | 'baibai'
     | 'pool_entries'
     // ---- persona 任务注入源——内容在 PersonaAssemblySources ----
-    /** 生成用预设的 system 段（「纯净模式」＝空，模块跳过） */
-    | 'persona_preset'
-    /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装） */
+    /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装）。预设 system 段
+     *  源已随任务级预设选择退役（破限预设统一走传输层注入，见 apis/preset-inject）。 */
     | 'persona_wi';
     // 角色卡信息/开场白/用户请求/策展 schema 四件不再走注入源：数据面字段
     // 在 PersonaAssemblySources、占位符填充链（fillPersonaPlaceholders）
@@ -54,7 +53,6 @@ export type InjectionSource =
  * engine 的判别集合由此派生，union 由数组派生，无双份维护面。
  */
 export const PERSONA_INJECTION_SOURCES = [
-    'persona_preset',
     'persona_wi',
 ] as const;
 

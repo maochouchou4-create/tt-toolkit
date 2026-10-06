@@ -7,13 +7,13 @@
  *
  * 端点身份（url/key/model）移入统一端点表（modules/apis），端点选择
  * 收归全局活动键（v1.4.0 起）；任务参数（流式/思考强度/超时）已固化为
- * TASK_DEFAULTS（用户面零旋钮）——本域只剩 uiState（预设选择）与
- * userContext（编辑现场）。旧档的 localConfig 键（含 v1.3 endpointId、
- * v1.4 过渡端点字段）由 normalize 的未知字段丢弃面退休；端点旧字段的
- * 收编原料由 apis/migration 直接读 legacy 快照键（pw_state_v20，只读
- * 不写），不再经域透传。
+ * TASK_DEFAULTS（用户面零旋钮）——本域只剩 userContext（编辑现场）。
+ * 旧档的 localConfig 键（含 v1.3 endpointId、v1.4 过渡端点字段）与
+ * uiState 键（任务级预设选择）由 normalize 的未知字段丢弃面退休；端点
+ * 旧字段的收编原料由 apis/migration 直接读 legacy 快照键（pw_state_v20，
+ * 只读不写），不再经域透传。
  *
- * 迁移纪律（nav 同款幂等）：域不存在→读 3 个旧键搬入新域→保留旧键
+ * 迁移纪律（nav 同款幂等）：域不存在→读 2 个旧键搬入新域→保留旧键
  * 作 legacy 快照（回滚旧版本不丢存量；新版本不再写旧键）→退休键
  * removeItem；域已存在→跳过迁移（二次启动零重写）。
  * 世界书勾选/钉选域已退役（全量注入拍板），wiSelection/pinnedBooks
@@ -56,7 +56,6 @@ export interface UserContext {
 
 /** persona 全局域形状。 */
 export interface PersonaDomain {
-    uiState: { generationPreset: string };
     userContext: UserContext;
 }
 
@@ -66,7 +65,6 @@ export function defaultUserContext(): UserContext {
 
 export function defaultPersonaDomain(): PersonaDomain {
     return {
-        uiState: { generationPreset: 'current' },
         userContext: defaultUserContext(),
     };
 }
@@ -92,13 +90,12 @@ function normalizeUserContext(value: unknown): UserContext {
 /** 域 normalize（未知字段丢弃：本域无任何透传字段，新增字段须显式声明）。 */
 export function normalizePersonaDomain(value: unknown): PersonaDomain {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
-    const uiStateRaw = (raw.uiState && typeof raw.uiState === 'object' ? raw.uiState : {}) as Record<string, unknown>;
     return {
-        // 旧档 localConfig（v2 任务参数/v1.3 endpointId/v1.4 过渡端点字段）与
-        // 旧 uiStateCache 淘汰字段（templateExpanded/avatarRef/generationMode/
+        // 旧档 localConfig（v2 任务参数/v1.3 endpointId/v1.4 过渡端点字段）、
+        // uiState（任务级预设选择——已随全局破限预设统一而退役）与旧
+        // uiStateCache 淘汰字段（templateExpanded/avatarRef/generationMode/
         // chatHistory/theme）及 v1.1.0 域的世界书勾选/钉选字段（wiSelection/
         // pinnedBooks/extraBooks）都在 normalize 的未知字段丢弃面自然出局
-        uiState: { generationPreset: normalizeString(uiStateRaw.generationPreset, 'current') },
         userContext: normalizeUserContext(raw.userContext),
     };
 }
@@ -145,8 +142,9 @@ export interface PersonaMigrationReport {
 }
 
 /**
- * 幂等迁移：域缺席时搬 3 旧键＋清退休键；域在场时只清退休键。
- * 旧键保留作 legacy 快照（防回滚旧版本丢存量），此后只读不写。
+ * 幂等迁移：域缺席时搬 2 旧键（state 端点字段供收编＋dataUser 编辑现场）
+ * ＋清退休键；域在场时只清退休键。旧键保留作 legacy 快照（防回滚旧版本
+ * 丢存量），此后只读不写。
  *
  * 旧 localConfig 不再进域：任务参数已固化（TASK_DEFAULTS），端点身份旧
  * 字段（apiProfiles/indepApi* 等）由 migrateApiDomain（modules/apis/
@@ -173,18 +171,17 @@ export function migratePersonaDomain(): PersonaMigrationReport {
         return report;
     }
 
-    // ---- 读 3 旧键（只搬实际读到数据的键，报告来源） ----
+    // ---- 读 2 旧键（只搬实际读到数据的键，报告来源）----
+    // uiState 旧键（pw_ui_state_v4_preset，只装任务级预设选择）不再读取
+    // 搬运：预设影响已统一走全局破限预设（传输层注入），该键只作 legacy
+    // 快照留存（防回滚丢增量，纪律同其余旧键）
     const savedState = readLegacyJson(LEGACY_KEYS.state);
     if (Object.keys(savedState).length > 0) report.migratedKeys.push(LEGACY_KEYS.state);
-
-    const uiStateRaw = readLegacyJson(LEGACY_KEYS.uiState);
-    const uiState = { generationPreset: normalizeString(uiStateRaw.generationPreset, 'current') };
-    if (Object.keys(uiStateRaw).length > 0) report.migratedKeys.push(LEGACY_KEYS.uiState);
 
     const dataUserRaw = readLegacyJson(LEGACY_KEYS.dataUser);
     const userContext = normalizeUserContext(dataUserRaw);
     if (Object.keys(dataUserRaw).length > 0) report.migratedKeys.push(LEGACY_KEYS.dataUser);
 
-    setGlobal(PERSONA_DOMAIN_KEY, normalizePersonaDomain({ uiState, userContext }));
+    setGlobal(PERSONA_DOMAIN_KEY, normalizePersonaDomain({ userContext }));
     return report;
 }

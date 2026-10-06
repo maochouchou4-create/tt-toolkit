@@ -65,15 +65,6 @@
     <details class="tt-persona-fold">
       <summary>生成参考</summary>
       <div class="tt-card">
-        <div class="tt-card-title">生成预设</div>
-        <div class="tt-card-sub">{{ store.presetHint }}</div>
-        <!-- :value 绑定（消旧 option[value=模板串] 注入/失配风险） -->
-        <select :value="store.generationPreset" class="tt-persona-select" @change="onPresetChange">
-          <option v-for="opt in store.presetOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
-      </div>
-
-      <div class="tt-card">
         <div class="tt-card-title">开场白</div>
         <div class="tt-card-sub">注入哪一条开场白作为生成参考（默认第一条；「不注入」仅本聊天内保留）</div>
         <select v-if="store.greetings.length > 0" :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-persona-select" @change="onGreetingChange">
@@ -123,10 +114,6 @@ function confirmLoadEntry(): void {
     if (!confirm(`载入「${candidate.book} / ${candidate.entry.displayName}」进结果框（覆盖现有内容）？`)) return;
     store.loadWorldBookEntry(candidate.book, candidate.entry.uid);
     loadCandidateKey.value = '';
-}
-
-function onPresetChange(event: Event): void {
-    store.selectPreset((event.target as HTMLSelectElement).value);
 }
 
 function onGreetingChange(event: Event): void {

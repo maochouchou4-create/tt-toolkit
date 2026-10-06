@@ -1,5 +1,5 @@
 /**
- * TT 宿主 openai 预设读取通道（persona 的预设选择/提示词对照供给＋破限注入条目读取）。
+ * TT 宿主 openai 预设读取通道（预设清单＋破限注入条目读取）。
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - st-context.js:293 `getPresetManager`（转发 preset-manager.js:97
@@ -50,19 +50,6 @@ export function listOpenAIPresetNames(): string[] {
         log.warn('预设清单读取失败', err);
         return [];
     }
-}
-
-/** 系统段抽取（prompt_order character_id=100001 段的启用 Map → prompts 过滤拼接）。 */
-function extractSystemParts(preset: PresetLike | null | undefined): string {
-    if (!preset || !preset.prompts) return '';
-    const enabledById = enabledOrderMap(preset);
-    return preset.prompts
-        .filter(p => (enabledById.get(p.identifier ?? '') ?? p.enabled ?? true) && (
-            p.role === 'system' ||
-            ['main', 'jailbreak', 'nsfw', 'jailbreak_prompt', 'main_prompt'].includes(p.identifier ?? '')
-        ))
-        .map(p => p.content ?? '')
-        .join('\n\n');
 }
 
 function presetAsRecord(value: unknown): PresetLike | null {
@@ -117,48 +104,7 @@ export function readPresetInjectMessages(name: string): PresetInjectMessage[] | 
 }
 
 /**
- * 生成用 system prompt 解析（旧 getRealSystemPrompt 平移）：
- * 'pure' → 空串（No Main / No JB）；具名 → 该预设的 system 段（预设存在
- * 即以其为准，无 system 部件也返回空串，不落到当前模式）；'current'/其它 →
- * 酒馆当前激活 openai 预设。取不到即空串（requestOnce 对空串不入 messages）。
+ * 生成用 system prompt 解析与预设下拉（任务级预设选择）已随全局破限
+ * 预设统一而退役——预设对生成的影响只走传输层注入（readPresetInject
+ * Messages，见 apis/preset-inject）；本文件保留清单读取与注入条目读取。
  */
-export function resolvePresetSystemPrompt(selectedPreset: string): string {
-    if (selectedPreset === 'pure') {
-        return '';
-    }
-
-    const manager = openaiPresetManager();
-    const byName = manager?.getCompletionPresetByName;
-
-    if (selectedPreset && selectedPreset !== 'current') {
-        if (typeof byName === 'function') {
-            try {
-                const preset = presetAsRecord(byName(selectedPreset));
-                if (preset) return extractSystemParts(preset);
-            } catch (err) {
-                log.warn('指定预设装载失败', { selectedPreset, err });
-            }
-        }
-    }
-
-    try {
-        const chatSettings = getTavernContext()?.chatCompletionSettings as Record<string, unknown> | undefined;
-        const currentName = chatSettings?.preset_settings_openai;
-        if (typeof byName === 'function' && typeof currentName === 'string') {
-            const preset = presetAsRecord(byName(currentName));
-            const systemParts = preset ? extractSystemParts(preset) : '';
-            if (systemParts.trim().length > 0) {
-                return systemParts;
-            }
-        }
-    } catch (err) {
-        log.warn('当前预设 system 段抽取失败', err);
-    }
-
-    return '';
-}
-
-/** 预设下拉选项（current/pure 两默认项 + 宿主预设清单，module 层直接消费）。 */
-export function buildPresetOptions(): string[] {
-    return ['current', 'pure', ...listOpenAIPresetNames()];
-}
