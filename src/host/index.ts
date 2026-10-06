@@ -60,7 +60,7 @@ export {
     upsertPersona,
     type PersonaDescriptor,
 } from './personas';
-export { buildPresetOptions, listOpenAIPresetNames, resolvePresetSystemPrompt } from './presets';
+export { buildPresetOptions, listOpenAIPresetNames, readPresetInjectMessages, resolvePresetSystemPrompt, type PresetInjectMessage } from './presets';
 export {
     getContextWorldBooks,
     getWorldBookEntries,

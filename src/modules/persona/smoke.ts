@@ -7,7 +7,7 @@
  * 断言确定性；与浏览器真实数据共用同一条 storage/generation 代码路径
  * （dist 加载即覆盖）。
  */
-import { event_types, extension_settings, getCurrentCharacter } from '@/host';
+import { event_types, extension_settings, getCurrentCharacter, readPresetInjectMessages } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
@@ -16,7 +16,7 @@ import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain } from '@/modules/apis/migration';
-import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
+import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
@@ -472,6 +472,16 @@ async function runApiChecks(): Promise<void> {
         (bodyJsonObject.response_format as Record<string, unknown> | undefined)?.type === 'json_object'
         && !('json_schema' in bodyJsonObject));
 
+    // 破限预设解析（宿主桩「冒烟破限」）：启用文本条目按原角色原顺序，
+    // marker 占位与停用条目剔除
+    const jbEntries = readPresetInjectMessages('冒烟破限');
+    check('api：破限预设解析（启用文本条目角色保真，marker/停用剔除）',
+        jbEntries !== null && jbEntries.length === 2
+        && jbEntries[0].role === 'assistant' && jbEntries[0].content === '破限开场白'
+        && jbEntries[1].role === 'user' && jbEntries[1].content === '破限接话',
+        `jb=${JSON.stringify(jbEntries)}`);
+    check('api：破限预设悬空名返回 null（fail-soft 判据）', readPresetInjectMessages('不存在预设') === null);
+
     // reasoning_effort 纪律（off 不发已在基础形状断言——这里断言 high 发）
     const bodyEffort = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
@@ -639,6 +649,32 @@ async function runPersonaE2EChecks(): Promise<void> {
             store.resultText === '姓名: 阿德\n年龄: 20'
             && store.isProcessing === false && store.processingLabel === '',
             `result=${store.resultText}`);
+
+        // 破限注入 e2e：选中「冒烟破限」→ 两段请求的首条消息＝assistant 开场
+        // 原文（SSE 桩按调用序回内容，生成正常完成）
+        writeJailbreakPreset('冒烟破限');
+        store.requestText = '破限注入试验';
+        await store.generate();
+        const jbFirst = (calls[2].body.messages as Array<{ role: string; content: string }>)[0];
+        const jbSecond = (calls[3].body.messages as Array<{ role: string; content: string }>)[0];
+        check('端到端：破限注入前缀按原角色插两段请求最前',
+            calls.length === 4
+            && jbFirst.role === 'assistant' && jbFirst.content === '破限开场白'
+            && jbSecond.role === 'assistant' && jbSecond.content === '破限开场白'
+            && (calls[2].body.messages as unknown[]).length > 1,
+            `first=${JSON.stringify(jbFirst)} calls=${calls.length}`);
+
+        // 悬空选中：fail-soft——生成照常、首条回到任务消息（无注入）
+        writeJailbreakPreset('不存在预设');
+        store.requestText = '悬空破限试验';
+        await store.generate();
+        const noJbFirst = (calls[4].body.messages as Array<{ role: string; content: string }>)[0];
+        check('端到端：破限预设悬空时生成照常且不注入',
+            calls.length === 6
+            && noJbFirst.role !== 'assistant' && noJbFirst.content !== '破限开场白'
+            && store.isProcessing === false,
+            `first=${JSON.stringify(noJbFirst)} calls=${calls.length}`);
+        writeJailbreakPreset('');
 
         // 取消通道：挂起不响应的端点（只认 signal）＋「停止」→ 中断传播、
         // 互斥复位、结果不误写、取消不作错误弹报（lastRun.request 换种子
