@@ -1,20 +1,18 @@
 /**
- * choice 模块任务参数（全局域 extension_settings.ttToolkit.choice）。
+ * choice 模块全局域（extension_settings.ttToolkit.choice）。
  *
  * 端点身份（url/key/model）住在统一端点表（modules/apis），选中的端点
- * 收归全局活动键（v1.4.0 起，见 apis/storage readActiveEndpointId）——
- * 本域只保存 choice 任务自身的生成参数。
+ * 收归全局活动键（v1.4.0 起，见 apis/storage readActiveEndpointId）。
+ * 任务参数（输出契约/思考强度/流式/温度）已固化为代码常量
+ * （apis/task-defaults TASK_DEFAULTS，用户面零旋钮），本域只承载
+ * 生成参数（gen）与条目池数据（pool）。
  *
- * response_format 支持度实测结论（三家端点）：
+ * response_format 支持度实测结论（三家端点，json_object 恒定的依据存档）：
  *   - json_schema：ds 官方端点不支持（400），GG（流式）与 CC 支持；
  *   - json_object：三家全部支持；
  *   - GG（gcli 假流式端点）非流式请求挂死——stream=true 是硬需求。
- * 据此默认：任务参数 outputContract 默认 json_object（三家通吃的稳妥
- * 档），GG 类端点用户按 UI 提示改 json_schema＋开流式。
  */
 import { getGlobal, setGlobal } from '@/storage';
-import type { OutputContract, ReasoningEffort } from '@/modules/apis/client';
-import { normalizeReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import { readActiveEndpointId, readApiDomain } from '@/modules/apis/storage';
 import type { PoolGenParams } from './pool/types';
@@ -25,17 +23,6 @@ import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, typ
  * 字面量单一事实源）。
  */
 export const GLOBAL_CHOICE_KEY = 'choice';
-
-/** choice 任务参数（挂在统一端点上的生成档位；端点身份不在其列）。 */
-export interface ChoiceTaskParams {
-    /** 输出契约档位（见文件头实测结论） */
-    outputContract: OutputContract;
-    /** 思考强度（off＝不发送字段；转发语义见 apis/client.ts buildGenerateBody 注释） */
-    reasoningEffort: ReasoningEffort;
-    /** 流式（GG 假流式端点硬需求；流式同时是长请求的防挂死姿势） */
-    stream: boolean;
-    temperature: number;
-}
 
 /** 生成行为参数（全局域；含池抽取参数）。 */
 export interface ChoiceGenParams extends PoolGenParams {
@@ -53,8 +40,6 @@ export interface ChoiceGenParams extends PoolGenParams {
 }
 
 export interface ChoiceDomain {
-    /** choice 任务参数（输出契约/思考强度/流式/温度；max_tokens 不发——服务端默认上限） */
-    task: ChoiceTaskParams;
     gen: ChoiceGenParams;
     /** 条目池数据（两层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
@@ -70,33 +55,12 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     ...DEFAULT_POOL_GEN_PARAMS,
 };
 
-/** 任务参数缺省值（三家端点实测后的稳妥档；不发 max_tokens——推理模型思维链与正文共享上限，显式小上限会掐断正文）。 */
-export const DEFAULT_TASK_PARAMS: ChoiceTaskParams = {
-    outputContract: 'json_object',
-    reasoningEffort: 'off',
-    stream: true,
-    temperature: 0.7,
-};
-
-function normalizeTaskParams(raw: unknown): ChoiceTaskParams {
-    // 存档里的历史值不可信：档位枚举/数值范围逐字段守门；旧档的 maxTokens
-    // 字段随未知字段纪律丢弃（不发 max_tokens 拍板，见 DEFAULT_TASK_PARAMS 注释）
-    const r = (raw ?? {}) as Partial<Record<keyof ChoiceTaskParams, unknown>>;
-    const contract = r.outputContract === 'json_schema' || r.outputContract === 'prompt_only' ? r.outputContract : 'json_object';
-    return {
-        outputContract: contract,
-        reasoningEffort: normalizeReasoningEffort(r.reasoningEffort),
-        stream: typeof r.stream === 'boolean' ? r.stream : true,
-        temperature: typeof r.temperature === 'number' && Number.isFinite(r.temperature) ? r.temperature : 0.7,
-    };
-}
-
 function readDomain(): ChoiceDomain {
     const raw = getGlobal<Partial<ChoiceDomain>>(GLOBAL_CHOICE_KEY);
     return {
-        task: normalizeTaskParams(raw?.task),
-        // 池参数同样缺省合并＋值域钳制（raw 里的历史值不可信：oversample 越界/
-        // overflow 拼错都钳回合法域，旧存档无字段不崩）
+        // 池参数缺省合并＋值域钳制（raw 里的历史值不可信：oversample 越界/
+        // overflow 拼错都钳回合法域，旧存档无字段不崩）；旧档 task 键随
+        // 未知字段纪律丢弃（任务参数固化拍板）
         gen: normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) }),
         pool: normalizePoolData(raw?.pool),
     };
@@ -109,7 +73,6 @@ function writeDomain(mutate: (domain: ChoiceDomain) => void): void {
     // 不经 readDomain 的合并防线——落盘前统一归一化，坏值（oversample
     // 越界/overflow 拼错）不会经写通道持久化
     domain.gen = normalizePoolGenParams(domain.gen);
-    domain.task = normalizeTaskParams(domain.task);
     setGlobal(GLOBAL_CHOICE_KEY, domain);
 }
 
@@ -122,12 +85,6 @@ export const choiceStorage = {
     readDomain,
     /** 读-改-写单通道（池层/导入层共用；写前必经 readDomain 规范化） */
     writeDomain,
-    /** 更新 choice 任务参数（部分字段补丁） */
-    updateTask(patch: Partial<ChoiceTaskParams>): void {
-        writeDomain(d => {
-            d.task = normalizeTaskParams({ ...d.task, ...patch });
-        });
-    },
     updateGenParams(patch: Partial<ChoiceGenParams>): void {
         writeDomain(d => {
             d.gen = { ...d.gen, ...patch };

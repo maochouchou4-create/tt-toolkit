@@ -81,9 +81,9 @@ export function wipeLegacyKeysOnce(): LegacyWipeReport {
 // 重置 persona 域，本机判必须在 runPersonaSmoke 之前跑）。
 // 判别式：迁移数据「未受损」用与缺省值相反的种子态证明——
 //   userContext.request 缺省 ''（种子非空只能来自 smoke.mjs 预种＋boot
-//   迁移搬运）；localConfig 缺省 stream=true/timeoutSec=300（种子
-//   stream=false/timeoutSec=600）；nav.autoTop 缺省 true（种子关态
-//   false）。跨文件不共享标记字面量。
+//   迁移搬运）；localConfig 已随任务参数固化退役（种子 stream=false/
+//   timeoutSec=600 经域 normalize 丢弃——断言域内无该键）；nav.autoTop
+//   缺省 true（种子关态 false）。跨文件不共享标记字面量。
 // ---------------------------------------------------------------------------
 
 const wipeFailures: string[] = [];
@@ -145,8 +145,8 @@ export function runLegacyWipeSmoke(): void {
             persona.userContext.request !== '',
         );
         check(
-            'boot：persona 域迁移数据未受损（种子 localConfig 存活，异于缺省 stream/timeout）',
-            persona.localConfig.stream === false && persona.localConfig.timeoutSec === 600,
+            'boot：persona 域 localConfig 键退役丢弃（任务参数固化，normalize 新形状清洗）',
+            !('localConfig' in (persona as unknown as Record<string, unknown>)),
         );
         check('boot：nav 域迁移数据未受损（种子关态存活）', getNavState().autoTop === false);
     } else {

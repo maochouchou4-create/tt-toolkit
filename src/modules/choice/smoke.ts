@@ -8,6 +8,7 @@
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
+import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
@@ -262,13 +263,10 @@ async function runAutoGenerateChecks(): Promise<void> {
     const savedEndpoints = readApiDomain();
     const savedActiveEndpointId = readActiveEndpointId();
     const smokeEndpoint = savedEndpoints[0] ?? createEndpoint('冒烟端点');
-    // stub fetch 回非流式 JSON（流式帧状态机不认）——任务档临时切非流式，收尾还原
-    const savedTaskStream = choiceStorage.readDomain().task.stream;
     if (savedEndpoints.length === 0) {
         writeApiDomain([smokeEndpoint]);
         setActiveEndpointId(smokeEndpoint.id);
     }
-    choiceStorage.updateTask({ stream: false });
     // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
     // phase 停在 idle」（跳过守卫不得触发任何生成）
     store.clearOptions();
@@ -337,7 +335,6 @@ async function runAutoGenerateChecks(): Promise<void> {
 
     // 还原端点原态（全局活动键还原前置前记录的原值——含「未选」空串；
     // 本区自落的冒烟端点与选中态不留残）
-    choiceStorage.updateTask({ stream: savedTaskStream });
     setActiveEndpointId(savedActiveEndpointId);
     if (savedEndpoints.length === 0) {
         writeApiDomain([]);
@@ -446,23 +443,30 @@ function runParseChecks(): void {
 }
 
 /**
- * G3 思考强度机判：buildGenerateBody 的 reasoning_effort 字段纪律
- * （非 off 才发送；off/缺省不出现该键——默认行为与加字段前逐字节一致）。
+ * 请求形状终态机判：choice 请求由 TASK_DEFAULTS 常量注入（任务参数固化，
+ * 用户面零旋钮）——reasoning_effort high＋temperature 1＋stream true＋
+ * json_object response_format 四件套锁定。
  */
-function runReasoningEffortChecks(): void {
+function runConstantRequestChecks(): void {
     const messages = [{ role: 'user' as const, content: 'x' }];
-    const base = {
-        task: 'choice' as const,
+    const body = buildGenerateBody(messages, {
+        task: 'choice',
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk-test',
         model: 'test-model',
-        stream: true,
-        outputContract: 'prompt_only' as const,
-    };
-    const withHigh = buildGenerateBody(messages, { ...base, reasoningEffort: 'high' });
-    check('reasoningEffort 非 off 时发送 reasoning_effort', (withHigh as Record<string, unknown>).reasoning_effort === 'high', `body=${JSON.stringify(withHigh)}`);
-    const withOff = buildGenerateBody(messages, { ...base, reasoningEffort: 'off' });
-    check('reasoningEffort off 时不发送该字段', !('reasoning_effort' in withOff), `body=${JSON.stringify(withOff)}`);
+        temperature: TASK_DEFAULTS.temperature,
+        stream: TASK_DEFAULTS.stream,
+        outputContract: TASK_DEFAULTS.choiceOutputContract,
+        reasoningEffort: TASK_DEFAULTS.reasoningEffort,
+    });
+    const responseFormat = body.response_format as { type?: string } | undefined;
+    check(
+        'choice 请求形状终态＝常量注入（temperature 1/stream true/reasoning_effort high/response_format json_object）',
+        body.temperature === 1 && body.stream === true && body.reasoning_effort === 'high'
+        && responseFormat?.type === 'json_object'
+        && !('max_tokens' in body) && !('json_schema' in body),
+        `body=${JSON.stringify(body)}`,
+    );
 }
 
 /**
@@ -586,7 +590,7 @@ export async function runChoiceSmoke(): Promise<void> {
     console.info(dumpText);
     runParseChecks();
     runParseGuardChecks();
-    runReasoningEffortChecks();
+    runConstantRequestChecks();
     await runDebugForceRawChecks();
     await runRunlogChecks();
     console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');

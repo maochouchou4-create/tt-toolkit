@@ -48,8 +48,8 @@ export interface GenerateMessage {
     content: string;
 }
 
-/** 输出契约档位（服务商结构化输出优先＋客户端解析兜底）。 */
-export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
+/** 输出契约档位（choice json_object／persona prompt_only；json_schema 档随生成通道收敛退役——ds 官方 400 且永不被赋值）。 */
+export type OutputContract = 'json_object' | 'prompt_only';
 
 /**
  * 思考强度档位（G3）。'off'＝不发送该字段（默认——见 UI 端点配置的
@@ -83,8 +83,6 @@ export interface GenerateRequestConfig {
     outputContract: OutputContract;
     /** 思考强度（off＝不发送，见 ReasoningEffort 注释） */
     reasoningEffort?: ReasoningEffort;
-    /** json_schema 模式的 schema 本体（name/strict 由调用方语义固定） */
-    jsonSchema?: unknown;
 }
 
 export interface GenerateResult {
@@ -201,12 +199,7 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     };
     if (config.temperature !== undefined) body.temperature = config.temperature;
     body.stream = config.stream;
-    if (config.outputContract === 'json_schema' && config.jsonSchema) {
-        // 走宿主原生 json_schema 字段：服务端补 name/strict 默认并转
-        // response_format（openai.rs:296-325），与宿主 quiet prompt 的
-        // 结构化输出同一条通路
-        body.json_schema = { name: 'options', strict: true, value: config.jsonSchema };
-    } else if (config.outputContract === 'json_object') {
+    if (config.outputContract === 'json_object') {
         // json_object 形态宿主原样透传（openai.rs:288-293）
         body.response_format = { type: 'json_object' };
     }

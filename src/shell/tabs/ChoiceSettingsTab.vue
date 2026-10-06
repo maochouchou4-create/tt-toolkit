@@ -1,53 +1,11 @@
 <template>
   <!--
-    选项生成设置：生成通道（全局活动端点只读展示＋choice 任务参数）＋生成参数
-    ＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
-    端点实体与端点选择（「使用」按钮）都在「API」页维护，此处只读展示与调参。
+    选项生成设置：生成参数＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
+    任务参数（输出契约/思考强度/流式/温度）已固化为 TASK_DEFAULTS，端点选择
+    唯一入口＝「API」页「使用」按钮——本页不再有生成通道卡。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
   -->
   <div class="tt-choice-settings-tab">
-    <div class="tt-card">
-      <div class="tt-card-title">生成通道</div>
-      <div class="tt-card-sub">
-        独立旁路请求（不走宿主生成通道）；密钥经宿主后端转发直达上游。
-        实测档位：DeepSeek 官方端点请选「JSON 对象」（不支持结构化 schema）；GG 类假流式端点必须开「流式」。
-      </div>
-      <div v-if="apis.activeEndpoint" class="tt-choice-field">
-        <span>当前端点</span>
-        <span class="tt-choice-endpoint-value">{{ apis.activeEndpoint.name || '（未命名）' }} · {{ apis.activeEndpoint.model || '未填模型' }}</span>
-        <button type="button" class="tt-choice-link" @click="goApi">到「API」页切换</button>
-      </div>
-      <div v-else class="tt-choice-empty">
-        未选择端点——<button type="button" class="tt-choice-link" @click="goApi">到「API」页选择</button>
-      </div>
-      <label class="tt-choice-field">
-        <span>输出契约</span>
-        <select :value="settings.task.outputContract" @change="onContractChange">
-          <option value="json_object">JSON 对象（json_object，通用）</option>
-          <option value="json_schema">结构化 schema（json_schema，GG/CC 支持）</option>
-          <option value="prompt_only">纯提示词（不传 response_format）</option>
-        </select>
-      </label>
-      <label class="tt-choice-field">
-        <span>思考强度</span>
-        <select :value="settings.task.reasoningEffort" @change="onEffortChange">
-          <option value="off">不发送（默认）</option>
-          <option value="low">低</option>
-          <option value="medium">中</option>
-          <option value="high">高</option>
-        </select>
-      </label>
-      <div class="tt-choice-note">思考强度：仅部分端点支持，发错档会被端点忽略或报错，默认不发</div>
-      <label class="tt-choice-switch">
-        <input :checked="settings.task.stream" type="checkbox" @change="onStreamToggle">
-        <span>流式请求（假流式端点必开；长请求防挂死）</span>
-      </label>
-      <label class="tt-choice-field">
-        <span>temperature</span>
-        <input :value="settings.task.temperature" type="number" step="0.1" min="0" max="2" @change="onTemperatureChange">
-      </label>
-    </div>
-
     <div class="tt-card">
       <div class="tt-card-title">生成参数</div>
       <label class="tt-choice-field">
@@ -128,33 +86,13 @@
 import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
-import { useApisStore } from '@/modules/apis/store';
-import { useShellStore } from '@/shell/store';
-import type { ChoiceGenParams, ChoiceTaskParams } from '@/modules/choice/api';
+import type { ChoiceGenParams } from '@/modules/choice/api';
 
 const settings = useChoiceSettingsStore();
-const apis = useApisStore();
-const shell = useShellStore();
 const direction = useStoryDirectionStore();
 
 function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
-}
-
-function onContractChange(event: Event): void {
-    settings.updateTask({ outputContract: targetValue(event) as ChoiceTaskParams['outputContract'] });
-}
-
-function onEffortChange(event: Event): void {
-    settings.updateTask({ reasoningEffort: targetValue(event) as ChoiceTaskParams['reasoningEffort'] });
-}
-
-function onStreamToggle(event: Event): void {
-    settings.updateTask({ stream: (event.target as HTMLInputElement).checked });
-}
-
-function onTemperatureChange(event: Event): void {
-    settings.updateTask({ temperature: Number(targetValue(event)) || 0.7 });
 }
 
 function onBehaviorChange(event: Event): void {
@@ -165,10 +103,6 @@ function clampInt(event: Event, min: number, max: number, fallback: number): num
     const value = Number(targetValue(event));
     if (!Number.isFinite(value)) return fallback;
     return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function goApi(): void {
-    shell.activate('api');
 }
 
 // ---- 剧情走向卡（随提示词 tab 删除从 PromptEditorTab
@@ -239,22 +173,6 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
 }
 
-/* 全局活动端点只读行：取值文本占满中段，切换动作收在右侧链接
-   （选择器带父类限定压过 .tt-choice-field > span 的 min-width 基线） */
-.tt-choice-field > .tt-choice-endpoint-value {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.tt-choice-note {
-    font-size: 0.75em;
-    opacity: 0.6;
-    padding: 0 0 4px calc(9em + 8px);
-}
-
 .tt-choice-field input,
 .tt-choice-field select,
 .tt-choice-field textarea {
@@ -268,29 +186,10 @@ onBeforeUnmount(() => {
     font-size: 0.95em;
 }
 
-.tt-choice-switch {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-    cursor: pointer;
-}
-
 .tt-choice-empty {
     font-size: 0.8em;
     opacity: 0.7;
     padding: 6px 0;
-}
-
-.tt-choice-link {
-    background: transparent;
-    color: var(--SmartThemeQuoteColor, #c58a36);
-    border: none;
-    padding: 0;
-    font-size: 1em;
-    cursor: pointer;
-    text-decoration: underline;
 }
 
 /* 剧情走向卡（从 PromptEditorTab 搬回）：类名沿用 tt-prompt- 前缀自持
