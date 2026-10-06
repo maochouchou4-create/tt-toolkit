@@ -1,8 +1,10 @@
 /**
  * 统一请求客户端：choice 直连请求与 persona OpenAI 兼容请求
  * 合一。两个任务只差传参——任务参数（输出契约/思考强度/流式/超时/
- * max_tokens/信号）留在各自任务域，端点身份（url/key/model）从统一
- * 端点表取。
+ * 信号）留在各自任务域，端点身份（url/key/model）从统一
+ * 端点表取。两任务均不发 max_tokens：服务端用模型默认输出上限
+ * （推理模型思维链与正文共享上限，显式小上限会把正文掐断——实测
+ * deepseek-flash 2048 预算被思维链耗尽、正文截断在半条 JSON）。
  *
  * 单一传输通道＝宿主生成路由 `/api/backends/chat-completions/generate`
  * （type:'quiet' 旁路：不占宿主生成状态桥/通知；密钥经 reverse_proxy
@@ -23,9 +25,9 @@
  *     resolve_response_format——`response_format` 字段存在则原样透传
  *     （:288-293），否则 `json_schema:{name,strict,value}` 转换为
  *     OpenAI json_schema 形态（:296-325）；
- *   - temperature/max_tokens：build_chat_completion_payload
+ *   - temperature：build_chat_completion_payload
  *     insert_if_present（payload/openai.rs:149-184）——请求体不带的
- *     字段不会被宿主强加默认值（persona 不发 max_tokens 依赖此语义）；
+ *     字段不会被宿主强加默认值（两任务不发 max_tokens 依赖此语义）；
  *   - `type:'quiet'`（ai-routes.js:179-181 isQuietRequest）：走
  *     lifecycle quiet 路径——失败时返回 502+错误体而非 200 错误
  *     completion（:745-747），程序化消费语义更干净。
@@ -77,8 +79,6 @@ export interface GenerateRequestConfig {
     model: string;
     /** 采样温度（undefined＝不发——任务域负责缺省值） */
     temperature?: number;
-    /** max_tokens 上限（undefined＝不发，服务端用模型默认——persona 长文本依赖） */
-    maxTokens?: number;
     stream: boolean;
     outputContract: OutputContract;
     /** 思考强度（off＝不发送，见 ReasoningEffort 注释） */
@@ -200,7 +200,6 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
         tool_choice: 'none',
     };
     if (config.temperature !== undefined) body.temperature = config.temperature;
-    if (config.maxTokens !== undefined) body.max_tokens = config.maxTokens;
     body.stream = config.stream;
     if (config.outputContract === 'json_schema' && config.jsonSchema) {
         // 走宿主原生 json_schema 字段：服务端补 name/strict 默认并转
@@ -243,12 +242,15 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
  */
 const SSE_FRAME_TERMINATOR = '\n\n';
 
-async function readStream(response: Response): Promise<string> {
+async function readStream(response: Response): Promise<{ content: string; finishReason: string | null }> {
     if (!response.body) throw new Error('流式响应无 body');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
     let pending = '';
+    // 截断取证：末帧 finish_reason=length＝内容被服务端 token 上限掐断
+    // （推理模型思维链与正文共享上限）——不捕它，截断会伪装成解析失败
+    let finishReason: string | null = null;
 
     const consumeFrame = (frame: string): void => {
         for (const field of frame.split('\n')) {
@@ -256,8 +258,10 @@ async function readStream(response: Response): Promise<string> {
             const data = field.slice('data:'.length).trim();
             if (data === '[DONE]') continue;
             try {
-                const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
+                const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }> };
                 full += json?.choices?.[0]?.delta?.content ?? '';
+                const reason = json?.choices?.[0]?.finish_reason;
+                if (typeof reason === 'string' && reason) finishReason = reason;
             } catch {
                 // 单帧畸形不推翻整次读取（重帧/心跳帧等）
             }
@@ -278,7 +282,7 @@ async function readStream(response: Response): Promise<string> {
     }
     // 尾帧可能没有终止符就断流：一并消费（丢它会少最后一段 delta）
     consumeFrame(pending);
-    return full;
+    return { content: full, finishReason };
 }
 
 /**
@@ -312,6 +316,8 @@ export async function callGenerateEndpoint(
             responseText,
             error,
         });
+    // 截断判定结果（try 外抛出防 catch 双记：截断记录须带半截正文供诊断）
+    let truncated: { content: string } | null = null;
     try {
         const response = await fetch(GENERATE_URL, {
             method: 'POST',
@@ -328,18 +334,32 @@ export async function callGenerateEndpoint(
             throw new Error(`生成端点拒绝请求，HTTP ${response.status}。响应体开头：${text.slice(0, 300)}`);
         }
         if (config.stream) {
-            const content = await readStream(response);
-            return { content, streamed: true, runId: commitRun(true, content) };
+            const { content, finishReason } = await readStream(response);
+            if (finishReason === 'length') {
+                truncated = { content };
+            } else {
+                return { content, streamed: true, runId: commitRun(true, content) };
+            }
+        } else {
+            const data = (await response.json()) as {
+                choices?: Array<{ message?: { content?: string }; finish_reason?: string | null }>;
+                error?: { message?: string };
+            };
+            if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
+            const content = data?.choices?.[0]?.message?.content ?? '';
+            if (data?.choices?.[0]?.finish_reason === 'length') {
+                truncated = { content };
+            } else {
+                return { content, streamed: false, runId: commitRun(true, content) };
+            }
         }
-        const data = (await response.json()) as {
-            choices?: Array<{ message?: { content?: string } }>;
-            error?: { message?: string };
-        };
-        if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
-        const content = data?.choices?.[0]?.message?.content ?? '';
-        return { content, streamed: false, runId: commitRun(true, content) };
     } catch (e) {
         commitRun(false, '', e instanceof Error ? e.message : String(e));
         throw e;
     }
+    // 截断：内容收到但被服务端 token 上限掐断——不捕它会伪装成下游解析失败。
+    // 记录保留半截正文（排障可见掐在哪里），报错指名真因
+    const message = '输出被截断（finish_reason=length，达到服务端 token 上限）——推理模型的思维链与正文共享上限；请调小上下文轮数或更换输出上限更高的端点';
+    commitRun(false, truncated.content, message);
+    throw new Error(message);
 }

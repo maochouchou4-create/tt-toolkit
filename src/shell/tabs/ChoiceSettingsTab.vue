@@ -46,10 +46,6 @@
         <span>temperature</span>
         <input :value="settings.task.temperature" type="number" step="0.1" min="0" max="2" @change="onTemperatureChange">
       </label>
-      <label class="tt-choice-field">
-        <span>max_tokens</span>
-        <input :value="settings.task.maxTokens" type="number" step="1" min="1" @change="onMaxTokensChange">
-      </label>
     </div>
 
     <div class="tt-card">
@@ -159,10 +155,6 @@ function onStreamToggle(event: Event): void {
 
 function onTemperatureChange(event: Event): void {
     settings.updateTask({ temperature: Number(targetValue(event)) || 0.7 });
-}
-
-function onMaxTokensChange(event: Event): void {
-    settings.updateTask({ maxTokens: Number(targetValue(event)) || 2048 });
 }
 
 function onBehaviorChange(event: Event): void {

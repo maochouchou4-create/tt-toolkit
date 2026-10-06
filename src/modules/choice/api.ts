@@ -35,7 +35,6 @@ export interface ChoiceTaskParams {
     /** 流式（GG 假流式端点硬需求；流式同时是长请求的防挂死姿势） */
     stream: boolean;
     temperature: number;
-    maxTokens: number;
 }
 
 /** 生成行为参数（全局域；含池抽取参数）。 */
@@ -54,7 +53,7 @@ export interface ChoiceGenParams extends PoolGenParams {
 }
 
 export interface ChoiceDomain {
-    /** choice 任务参数（输出契约/思考强度/流式/温度/max_tokens） */
+    /** choice 任务参数（输出契约/思考强度/流式/温度；max_tokens 不发——服务端默认上限） */
     task: ChoiceTaskParams;
     gen: ChoiceGenParams;
     /** 条目池数据（两层结构，见 pool/types.ts）。 */
@@ -71,17 +70,17 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     ...DEFAULT_POOL_GEN_PARAMS,
 };
 
-/** 任务参数缺省值（三家端点实测后的稳妥档）。 */
+/** 任务参数缺省值（三家端点实测后的稳妥档；不发 max_tokens——推理模型思维链与正文共享上限，显式小上限会掐断正文）。 */
 export const DEFAULT_TASK_PARAMS: ChoiceTaskParams = {
     outputContract: 'json_object',
     reasoningEffort: 'off',
     stream: true,
     temperature: 0.7,
-    maxTokens: 2048,
 };
 
 function normalizeTaskParams(raw: unknown): ChoiceTaskParams {
-    // 存档里的历史值不可信：档位枚举/数值范围逐字段守门
+    // 存档里的历史值不可信：档位枚举/数值范围逐字段守门；旧档的 maxTokens
+    // 字段随未知字段纪律丢弃（不发 max_tokens 拍板，见 DEFAULT_TASK_PARAMS 注释）
     const r = (raw ?? {}) as Partial<Record<keyof ChoiceTaskParams, unknown>>;
     const contract = r.outputContract === 'json_schema' || r.outputContract === 'prompt_only' ? r.outputContract : 'json_object';
     return {
@@ -89,7 +88,6 @@ function normalizeTaskParams(raw: unknown): ChoiceTaskParams {
         reasoningEffort: normalizeReasoningEffort(r.reasoningEffort),
         stream: typeof r.stream === 'boolean' ? r.stream : true,
         temperature: typeof r.temperature === 'number' && Number.isFinite(r.temperature) ? r.temperature : 0.7,
-        maxTokens: typeof r.maxTokens === 'number' && Number.isInteger(r.maxTokens) && r.maxTokens > 0 ? r.maxTokens : 2048,
     };
 }
 

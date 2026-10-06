@@ -14,6 +14,7 @@ import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEY
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
+import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain } from '@/modules/apis/migration';
 import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
@@ -211,7 +212,8 @@ function runMigrationChecks(): void {
     check('收编：choice 域 v2 重写（全局活动键提升＝activeApiId 重映射＋任务参数从选中端点拷贝＋gen/pool 透传）',
         readActiveEndpointId() === 'c2'
         && choiceTask.outputContract === 'json_object' && choiceTask.reasoningEffort === 'off'
-        && choiceTask.stream === true && choiceTask.temperature === 0.9 && choiceTask.maxTokens === 1024
+        && choiceTask.stream === true && choiceTask.temperature === 0.9
+        && !('maxTokens' in choiceTask)
         && ((rawChoice.gen ?? {}) as Record<string, unknown>).count === 5
         && Array.isArray(((rawChoice.pool ?? {}) as Record<string, unknown>).masterPool)
         && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
@@ -470,10 +472,10 @@ async function runApiChecks(): Promise<void> {
         && !('response_format' in body) && !('json_schema' in body));
     const bodyExplicit = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5, maxTokens: 128 },
+        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5 },
     );
-    check('api：buildGenerateBody 显式参数（temperature/max_tokens 进请求体、stream 恒发）',
-        bodyExplicit.temperature === 0.5 && bodyExplicit.max_tokens === 128 && bodyExplicit.stream === true);
+    check('api：buildGenerateBody 显式参数（temperature 进请求体、stream 恒发）',
+        bodyExplicit.temperature === 0.5 && bodyExplicit.stream === true && !('max_tokens' in bodyExplicit));
 
     // 输出契约三档
     const bodyJsonObject = buildGenerateBody(
@@ -537,6 +539,30 @@ async function runApiChecks(): Promise<void> {
             { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
         );
         check('api：流式 \\r\\n 归一＋尾帧无终止符补消费', r2.content === '甲乙', `text=${r2.content}`);
+
+        // 截断显式报错回归：finish_reason=length 的流不得静默成功——报错指名
+        // 真因（推理模型思维链吃预算把正文掐断的实测形态），且记录保留半截正文
+        globalThis.fetch = (async () => fakeSSEStream([
+            'data: {"choices":[{"delta":{"content":"{\\"options\\": ["}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"{\\"title\\":\\"甲\\""}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":""},"finish_reason":"length"}]}\n\n',
+            'data: [DONE]\n\n',
+        ])) as typeof fetch;
+        let truncationThrown = '';
+        try {
+            await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            );
+        } catch (e) {
+            truncationThrown = (e as Error).message;
+        }
+        const truncationRecord = useRunlogStore().records[useRunlogStore().records.length - 1];
+        check('api：finish_reason=length 截断显式报错（指名 token 上限真因＋记录保留半截正文，不伪装成解析失败）',
+            truncationThrown.includes('输出被截断') && truncationThrown.includes('token 上限')
+            && !!truncationRecord && truncationRecord.ok === false
+            && truncationRecord.responseText.includes('"title":"甲"') && (truncationRecord.error ?? '').includes('输出被截断'),
+            `thrown=${truncationThrown.slice(0, 60)}`);
     } finally {
         globalThis.fetch = originalFetch;
     }

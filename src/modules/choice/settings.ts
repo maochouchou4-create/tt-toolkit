@@ -14,7 +14,7 @@ export const useChoiceSettingsStore = defineStore('tt-choice-settings', {
         revision: 0,
     }),
     getters: {
-        /** choice 任务参数（response_format 档位/思考强度/流式/温度/max_tokens）。 */
+        /** choice 任务参数（response_format 档位/思考强度/流式/温度；不发 max_tokens）。 */
         task(): ChoiceTaskParams {
             void this.revision;
             return choiceStorage.readDomain().task;
