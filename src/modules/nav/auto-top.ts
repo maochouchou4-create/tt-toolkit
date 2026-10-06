@@ -1,14 +1,12 @@
 /**
  * nav 自动回顶：主触发 #mes_stop 可见→隐藏（整条生成管线空闲）；
  * 加固：静默窗口内 MESSAGE_UPDATED / 楼层重渲染会顺延计时。
- * 开关状态经 nav store（Pinia）读写，持久化在统一存储全局域。
+ * 自动回顶恒开：用户开关已退役（v1.5.10），无需配置、不可关闭。
  */
 
-import { showToast as toast } from '@/host';
 import { CONFIG, ttlog } from './config';
 import { getLastMessageIdSafe } from './dom';
 import { jumpToFloor } from './scroll';
-import { useNavStore } from './store';
 
 const autoTop = {
     settleTimer: null as ReturnType<typeof setTimeout> | null,
@@ -16,14 +14,6 @@ const autoTop = {
     lastGenerationActive: null as boolean | null,
     observer: null as MutationObserver | null,
 };
-
-function autoTopEnabled(): boolean {
-    return useNavStore().autoTop;
-}
-
-function setAutoTopEnabled(enabled: boolean): void {
-    useNavStore().setAutoTop(enabled);
-}
 
 // 生成是否进行中：主干用 $('#mes_stop').css('display') 切换（TT script.js:4448-4454）
 export function isGenerationActive(): boolean {
@@ -66,9 +56,6 @@ export function bumpSettle(): void {
 
 async function runAutoTop(): Promise<void> {
     try {
-        if (!autoTopEnabled()) {
-            return;
-        }
         const targetId = getLastMessageIdSafe();
         if (targetId === null) {
             ttlog.warn('auto-top: no floor to jump');
@@ -90,7 +77,7 @@ function checkGenerationIdle(): void {
     const wasActive = autoTop.lastGenerationActive;
     autoTop.lastGenerationActive = active;
     if (wasActive && !active) {
-        if (autoTopEnabled()) scheduleAutoTop();
+        scheduleAutoTop();
     }
 }
 
@@ -114,17 +101,6 @@ export function startGenerationWatch(): void {
     if (stop) autoTop.observer.observe(stop, options);
     if (send) autoTop.observer.observe(send, options);
     ttlog.info('generation watch started', { stop: !!stop, send: !!send });
-}
-
-export async function toggleAutoTop(): Promise<void> {
-    const next = !autoTopEnabled();
-    setAutoTopEnabled(next);
-    toast(`自动回顶已${next ? '开启' : '关闭'}`, next ? 'success' : 'info');
-    ttlog.info(`auto-top toggled ${next ? 'on' : 'off'}`);
-}
-
-export function isAutoTopEnabled(): boolean {
-    return autoTopEnabled();
 }
 
 /** 切换聊天时丢弃未完成的自动回顶（新聊天楼层状态未知）。 */

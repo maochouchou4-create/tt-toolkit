@@ -10,7 +10,6 @@ import { useApisStore } from '@/modules/apis/store';
 import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';
-import NavSettingsTab from './NavSettingsTab.vue';
 import PersonaTab from './PersonaTab.vue';
 
 export function createApiTab(): ShellTab {
@@ -26,18 +25,6 @@ export function createApiTab(): ShellTab {
         // 破限注入卡的清单与悬空提醒靠这里每次激活刷新
         onActivate() {
             useApisStore(pinia).refreshPresetNames();
-        },
-    };
-}
-
-export function createNavSettingsTab(): ShellTab {
-    return {
-        id: 'nav-settings',
-        tabTitle: '导航',
-        mount(container) {
-            const app = createApp(NavSettingsTab);
-            app.use(pinia);
-            app.mount(container);
         },
     };
 }

@@ -29,10 +29,10 @@ if (!existsSync(fileURLToPath(DIST_ENTRY))) {
 
 // ---------------------------------------------------------------------------
 // localStorage 存根：node 无 localStorage。预种全部旧遗留键
-// （迁移源键，带内容）——P1 时序回归（tt_msg_nav_auto_top='0' 关态 →
-// initStorage 迁移 → store 读到 false）＋ legacy-wipe 启动链路供给（boot
-// 迁移先消费、boot 清理后删键）。persona 侧迁移键为 3 个
-// （世界书勾选/钉选域已退役）。键名与 src/storage/legacy-wipe.ts
+// （迁移源键，带内容）——legacy-wipe 启动链路供给（boot 迁移先消费、
+// boot 清理后删键）。persona 侧迁移键为 3 个（世界书勾选/钉选域已
+// 退役）；nav 侧 tt_msg_nav_auto_top 键已随自动回顶开关退役、不再迁移，
+// 仅作 wipe 删键计数供给。键名与 src/storage/legacy-wipe.ts
 // 的常量表同源；此处字面量属测试夹具（机判断言在 dist 侧用常量做）。
 // 种子形状含历史字段（如 pw_data_user_v1 的 hasResult）＝v1.0.0 时代的
 // 真实输入形状，normalize 丢弃面验证所需，勿按现域形状「修正」。
@@ -145,8 +145,11 @@ globalThis.fetch = async () => ({
 const noop = () => {};
 
 globalThis.__TT_SMOKE_STUBS__ = {
-    // settings 可变单例（roundtrip 载体；choice 导入断言往 .choice 里放 fixture）
-    extension_settings: {},
+    // settings 可变单例（roundtrip 载体；choice 导入断言往 .choice 里放 fixture）。
+    // 预置存量 nav 域含退役字段 autoTop——P1 回归断言 boot prune 的判据材料
+    extension_settings: {
+        ttToolkit: { nav: { autoTop: false } },
+    },
     chat_metadata: {},
     characters: [],
     this_chid: '0',
@@ -338,16 +341,18 @@ if (!nav || typeof nav.dump !== 'function') {
     failures.push('nav dump 输出异常');
 }
 
-// P1 回归：预置旧键 'tt_msg_nav_auto_top'='0' → initStorage 迁移 →
-// nav 初始化 → store 读透传应得 false（dump 面回显 autoTop=off）
-if (nav && typeof nav.dump === 'function' && !String(nav.dump()).includes('autoTop=off')) {
-    failures.push('P1 回归失败：旧键 tt_msg_nav_auto_top=0 未迁移为关态（nav dump 应显示 autoTop=off）');
+// P1 回归：存量 nav 域预置退役字段 autoTop → initStorage prune →
+// boot 后 nav 域不含 autoTop（迁移收口：退役字段丢弃，与 persona 域收缩同纪律）
+const navDomainAfterBoot = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit?.nav;
+if (!navDomainAfterBoot || typeof navDomainAfterBoot !== 'object' || 'autoTop' in navDomainAfterBoot) {
+    failures.push('P1 回归失败：存量 nav 域退役字段 autoTop 未在 boot 时丢弃');
 }
 
-// node 最小初始化确实注册了全部 /ttnav-* 命令
-const registeredCommands = ['ttnav-top', 'ttnav-prev', 'ttnav-next', 'ttnav-auto']
+// node 最小初始化确实注册了全部 /ttnav-* 命令（ttnav-auto 已随自动回顶
+// 开关退役，不在期望清单）
+const registeredCommands = ['ttnav-top', 'ttnav-prev', 'ttnav-next']
     .filter(c => c in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands);
-if (registeredCommands.length < 4) {
+if (registeredCommands.length !== 3) {
     failures.push(`nav 最小初始化未注册全部 /ttnav-* 命令（仅注册：${registeredCommands.join(' ') || '无'}）`);
 }
 
@@ -454,9 +459,9 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同上纪律）。run1＝一次启动签名共 10 条：boot 5（键
 // 全删/标记置位/persona userContext 种子存活/localConfig 种子存活（异于
-// 缺省 stream/timeout——世界书钉选断言随域退役改判别式）/nav 关态存活
-// ——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删 5 键＋置标
-// ＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
+// 缺省 stream/timeout——世界书钉选断言随域退役改判别式）/nav qrActivated
+// 激活态存活——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删 5
+// 键＋置标＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
 const WIPE_PASS_EXPECTED_RUN1 = 10;
 const wipePassLines = outputLines.filter(l => l.startsWith('[wipe-smoke] PASS'));
 const wipeFailLines = outputLines.filter(l => l.startsWith('[wipe-smoke] FAIL'));
@@ -534,4 +539,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

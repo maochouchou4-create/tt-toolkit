@@ -30,17 +30,10 @@ export const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
 export const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
 
 export interface NavStorageState {
-    /** 自动回顶开关（旧 localStorage 键迁移而来） */
-    autoTop: boolean;
     /** QR 集「首次激活」标记（激活一次制，见 nav 模块） */
     qrActivated: boolean;
     /** 历史版本「自动回顶」QR 键的一次性清理标记（见 nav 模块 qr 接线） */
     legacyQrCleaned?: boolean;
-    /**
-     * 迁移时旧键 autoTop 值的快照（幂等增量基线）；null＝旧键缺席。
-     * 后续启动旧键值偏离快照＝用户回滚旧版期间改过，采纳为新意图。
-     */
-    legacyAutoTopSnapshot?: boolean | null;
 }
 
 export interface GlobalDomain {
@@ -95,41 +88,27 @@ function deepSnapshot<T>(value: T): T {
 }
 
 /**
- * 初始化全局域：确保命名空间与结构在场、迁移旧 nav localStorage 键。
- * 幂等——每次启动跑一遍，storage 值已在场时不覆盖；旧键幂等增量：
- * 记录迁移时的旧键值快照，后续启动旧键值偏离快照（＝用户回滚旧版
- * 期间改过）即采纳为新意图并前移快照——防「回滚旧版用一段再升回、
- * 增量静默丢失」（persona 迁移同款纪律，单布尔低配版）。
+ * 初始化全局域：确保命名空间与结构在场、迁移旧 nav localStorage 键、
+ * 丢弃 nav 域存量退役字段（autoTop 开关已固化恒开——delete 缺席键幂等，
+ * 与 persona 域收缩同款「退役字段丢弃」纪律）。幂等——每次启动跑一遍。
  */
 export function initStorage(): void {
     writeExtensionSettings(settings => {
         const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as GlobalDomain;
 
         // nav 域迁移：storage 值缺省时从旧 localStorage 键搬（旧键保留）
-        const nav = (isRecord(domain.nav) ? domain.nav : {}) as Partial<NavStorageState>;
-        if (typeof nav.autoTop !== 'boolean') {
-            nav.autoTop = readLegacyBoolean(LEGACY_NAV_AUTO_TOP_KEY, true);
-        }
+        const nav = (isRecord(domain.nav) ? domain.nav : {}) as Partial<NavStorageState> & Record<string, unknown>;
         if (typeof nav.qrActivated !== 'boolean') {
             nav.qrActivated = readLegacyBoolean(LEGACY_NAV_QR_ACTIVATED_KEY, false);
         }
-        if (nav.legacyAutoTopSnapshot === undefined) {
-            // 首次迁移或旧 schema 升级：以当前旧键值为基线快照（不采纳
-            // ——此时无法区分「用户改过」与「本来就如此」）
-            nav.legacyAutoTopSnapshot = readLegacyBooleanOrNull(LEGACY_NAV_AUTO_TOP_KEY);
-        }
-        const legacyAutoTopNow = readLegacyBooleanOrNull(LEGACY_NAV_AUTO_TOP_KEY);
-        if (legacyAutoTopNow !== null && legacyAutoTopNow !== nav.legacyAutoTopSnapshot) {
-            // 旧键偏离基线＝回滚旧版期间用户改过，采纳为新意图
-            nav.autoTop = legacyAutoTopNow;
-            nav.legacyAutoTopSnapshot = legacyAutoTopNow;
-        }
+        delete nav.autoTop;
+        delete nav.legacyAutoTopSnapshot;
         domain.nav = nav as NavStorageState;
         settings[GLOBAL_KEY] = domain;
     });
 }
 
-function readLegacyBooleanOrNull(key: string): boolean | null {
+function readLegacyBoolean(key: string, fallback: boolean): boolean {
     try {
         const v = localStorage.getItem(key);
         if (v === '1') return true;
@@ -137,11 +116,7 @@ function readLegacyBooleanOrNull(key: string): boolean | null {
     } catch {
         // localStorage 不可用（隐私模式等）：视为旧键缺席
     }
-    return null;
-}
-
-function readLegacyBoolean(key: string, fallback: boolean): boolean {
-    return readLegacyBooleanOrNull(key) ?? fallback;
+    return fallback;
 }
 
 /** 读全局域子域（真深快照：返回值与存储单例解耦，写入走 setGlobal）。 */

@@ -11,15 +11,14 @@
  *     （只判 role==='assistant' 在普通聊天匹配 0 条——批3 回归根因）；
  *   - 斜杠执行器走宿主 executeSlashCommandsWithOptions，缺席时脚本内
  *     滚动作兜底；
- *   - autoTop/qrActivated 持久化改走统一存储（storage.service 启动时
- *     迁移旧 localStorage 键；遗留键 v1.0.0 起由 storage/legacy-wipe
- *     首启一次性清理）；
+ *   - qrActivated 持久化改走统一存储（storage.service 启动时迁移旧
+ *     localStorage 键；遗留键 v1.0.0 起由 storage/legacy-wipe 首启一次性
+ *     清理）；
  *   - 日志转发走 host/ttlog（createTtlog 工厂），target 仍为 "msgnav"，
  *     落盘 tauritavern.log.*；
  *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（三导航键
  *     ＋末位「工具箱」键，消息体为 /ttnav-* 与 /tt-toolbox 斜令），
- *     命令亦可直接在输入框敲。/ttnav-auto 只注册斜令不进 QR 面
- *     （B.1 用户拍板：设置页已有开关、QR 键平时不点，不要重复入口）。
+ *     命令亦可直接在输入框敲。自动回顶恒开，无开关命令与设置项。
  * - 初始化为显式导出（initNav / initNavMinimal），由 main.ts 统一做
  *   环境分支后调用——模块求值期不自启动：storage 必须先初始化（旧
  *   localStorage 键迁移），否则 store 首读会拿到迁移前的旧值。
@@ -36,7 +35,7 @@ import { toolkitGlobalPort } from '@/global-port';
 import { CONFIG, NAV_VERSION, ttlog, ttlogHealth } from './config';
 import { getLastMessageIdSafe, getScrollRoot } from './dom';
 import { jumpExecutorAvailable, lastJumpModeUsed } from './scroll';
-import { bumpSettle, clearPendingAutoTop, isAutoTopEnabled, isGenerationActive, startGenerationWatch } from './auto-top';
+import { bumpSettle, clearPendingAutoTop, isGenerationActive, startGenerationWatch } from './auto-top';
 import { ensureNavQrSet, getQuickReplyApi, qrActivated, QR_SET_NAME, registerSlashCommands } from './qr';
 import { clearNavReference } from './navigate';
 
@@ -71,7 +70,7 @@ function dump(): string {
     const root = noDom ? null : getScrollRoot();
     const lines = [
         `tt-toolkit nav dump @ ${new Date().toISOString()}`,
-        `version=${NAV_VERSION} autoTop=${isAutoTopEnabled() ? 'on' : 'off'} ttlog=${ttlogHealth()} mode=${lastJumpModeUsed() ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'}`,
+        `version=${NAV_VERSION} ttlog=${ttlogHealth()} mode=${lastJumpModeUsed() ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'}`,
         `qrApi=${getQuickReplyApi() ? 'ready' : 'unavailable'} qrSet="${QR_SET_NAME}" qrActivated=${qrActivated()}`,
         `root=${root ? `#${root.id || '(no id)'}` : noDom ? 'n/a (no DOM)' : 'missing'}`
             + ` mounted=${root ? root.querySelectorAll(CONFIG.SEL.MESSAGE).length : 0}`
@@ -96,7 +95,7 @@ export function initNav(): void {
         void ensureNavQrSet(); // 异步等 QR API 就绪，不阻塞命令注册与事件接线
         bindEvents();
         startGenerationWatch();
-        ttlog.info(`${NAV_VERSION} loaded autoTop=${isAutoTopEnabled() ? 'on' : 'off'} mode=${lastJumpModeUsed() ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'} ttlog=${ttlogHealth()}`);
+        ttlog.info(`${NAV_VERSION} loaded mode=${lastJumpModeUsed() ?? 'none'} jumpExecutor=${jumpExecutorAvailable() ? 'present' : 'absent'} ttlog=${ttlogHealth()}`);
     };
     // 防御性等待：扩展脚本正常晚于 DOM 就绪，但 readyState 仍为 loading
     // 时（宿主加载流程变更）不应在半初始化的 DOM 上接线
@@ -111,7 +110,7 @@ export function initNav(): void {
 export function initNavMinimal(): void {
     registerSlashCommands();
     bindEvents();
-    ttlog.info(`${NAV_VERSION} minimal init (node smoke) autoTop=${isAutoTopEnabled() ? 'on' : 'off'} ttlog=${ttlogHealth()}`);
+    ttlog.info(`${NAV_VERSION} minimal init (node smoke) ttlog=${ttlogHealth()}`);
 }
 
 const flagWindow = globalThis as Record<string, unknown>;

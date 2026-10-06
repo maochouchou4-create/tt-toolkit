@@ -14,7 +14,6 @@ import {
 import { TOOLBOX_COMMAND } from '@/constants';
 import { getNavState, setNavState } from './storage';
 import { NAV_VERSION, ttlog } from './config';
-import { toggleAutoTop } from './auto-top';
 import { navigateAssistantReply, scrollCurrentMessageToTop } from './navigate';
 
 export const QR_SET_NAME = 'tt-toolkit 导航';
@@ -31,17 +30,16 @@ const TOOLBOX_QR = Object.freeze({
 const QR_POLL_INTERVAL_MS = 250;
 const QR_POLL_MAX_TRIES = 40;
 
-// 命令表＝slash 注册与 QR 按钮的单一事实源；qr=false 的项只注册命令、
-// 不建 QR 按钮（自动回顶在设置页有开关，QR 面上属重复入口——用户拍板）
+// 命令表＝slash 注册与 QR 按钮的单一事实源；每条命令都建对应 QR 按钮
+// （命令与 QR 面一一对应，无「只注册不建键」的特例）
 const NAV_ACTIONS = Object.freeze([
-    { command: 'ttnav-top', label: '回顶', title: '当前消息回顶：视口顶楼层对齐到顶', qr: true, run: (): Promise<void> => scrollCurrentMessageToTop() },
-    { command: 'ttnav-prev', label: '上一条', title: '跳到上一条角色回复', qr: true, run: (): Promise<void> => navigateAssistantReply(-1) },
-    { command: 'ttnav-next', label: '下一条', title: '跳到下一条角色回复', qr: true, run: (): Promise<void> => navigateAssistantReply(1) },
-    { command: 'ttnav-auto', label: '自动回顶', title: '自动回顶开关：生成结束后跳回最新楼层', qr: false, run: (): Promise<void> => toggleAutoTop() },
+    { command: 'ttnav-top', label: '回顶', title: '当前消息回顶：视口顶楼层对齐到顶', run: (): Promise<void> => scrollCurrentMessageToTop() },
+    { command: 'ttnav-prev', label: '上一条', title: '跳到上一条角色回复', run: (): Promise<void> => navigateAssistantReply(-1) },
+    { command: 'ttnav-next', label: '下一条', title: '跳到下一条角色回复', run: (): Promise<void> => navigateAssistantReply(1) },
 ] as const);
 
-// QR 面上的导航键数（qr=true 项），日志口径＝此数＋工具箱键
-const QR_NAV_COUNT = NAV_ACTIONS.filter(a => a.qr).length;
+// QR 面上的导航键数，日志口径＝此数＋工具箱键
+const QR_NAV_COUNT = NAV_ACTIONS.length;
 
 interface QuickReplyLike {
     message?: string;
@@ -101,19 +99,19 @@ export async function ensureNavQrSet(): Promise<void> {
         if (!api.getSetByName(QR_SET_NAME)) {
             await api.createSet(QR_SET_NAME);
         }
-        // 历史版本建过的「自动回顶」QR 键清理（本版起该入口只留命令与设置页
-        // 开关）：一次性标记短路（legacyQrCleaned），不做每启动探测——
-        // deleteQuickReply 对缺席键抛错，先探测后删
+        // 历史版本建过的「自动回顶」QR 键清理（该开关命令已随自动回顶
+        // 固化恒开退役，label 是历史键名非现役命令）：一次性标记短路
+        // （legacyQrCleaned），不做每启动探测——deleteQuickReply 对缺席键
+        // 抛错，先探测后删
         if (!getNavState().legacyQrCleaned) {
-            const legacyQrOnly = NAV_ACTIONS.find(a => !a.qr);
-            if (legacyQrOnly && api.getQrByLabel(QR_SET_NAME, legacyQrOnly.label)) {
-                api.deleteQuickReply(QR_SET_NAME, legacyQrOnly.label);
-                ttlog.info(`legacy QR "${legacyQrOnly.label}" removed`);
+            const LEGACY_AUTO_TOP_QR_LABEL = '自动回顶';
+            if (api.getQrByLabel(QR_SET_NAME, LEGACY_AUTO_TOP_QR_LABEL)) {
+                api.deleteQuickReply(QR_SET_NAME, LEGACY_AUTO_TOP_QR_LABEL);
+                ttlog.info(`legacy QR "${LEGACY_AUTO_TOP_QR_LABEL}" removed`);
             }
             setNavState({ legacyQrCleaned: true });
         }
         for (const action of NAV_ACTIONS) {
-            if (!action.qr) continue;
             const qr = api.getQrByLabel(QR_SET_NAME, action.label);
             if (!qr) {
                 await api.createQuickReply(QR_SET_NAME, action.label, {

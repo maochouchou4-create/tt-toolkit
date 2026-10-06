@@ -9,7 +9,7 @@ import { getGlobal, setGlobal } from '@/storage/service';
 import type { NavStorageState } from '@/storage/service';
 
 /** nav 域缺省态（域缺席/形状损坏时回退）。 */
-const NAV_DEFAULTS: NavStorageState = { autoTop: true, qrActivated: false, legacyAutoTopSnapshot: null };
+const NAV_DEFAULTS: NavStorageState = { qrActivated: false };
 
 /** nav 域便捷读取（getGlobal 深快照，返回值与存储单例解耦）。 */
 export function getNavState(): NavStorageState {

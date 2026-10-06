@@ -7,7 +7,7 @@
  * 删除，防键名随年代漂移、也断掉「回滚旧版再升回」的增量采纳分支。
  *
  * 顺序硬约束（main.ts 接线保证）：本清理位于启动管线末位——先跑完
- * 全部既有幂等迁移（initStorage 的 nav 增量迁移、initApis 的 persona
+ * 全部既有幂等迁移（initStorage 的 nav 迁移、initApis 的 persona
  * 域迁移＋统一端点收编），迁移消费在先、删除在后；清理只删
  * localStorage 遗留键，绝不碰已迁移数据与 settings.json 里旧扩展自身
  * 的 settings 域。
@@ -82,8 +82,8 @@ export function wipeLegacyKeysOnce(): LegacyWipeReport {
 // 判别式：迁移数据「未受损」用与缺省值相反的种子态证明——
 //   userContext.request 缺省 ''（种子非空只能来自 smoke.mjs 预种＋boot
 //   迁移搬运）；localConfig 已随任务参数固化退役（种子 stream=false/
-//   timeoutSec=600 经域 normalize 丢弃——断言域内无该键）；nav.autoTop
-//   缺省 true（种子关态 false）。跨文件不共享标记字面量。
+//   timeoutSec=600 经域 normalize 丢弃——断言域内无该键）；nav.qrActivated
+//   缺省 false（种子激活态 true）。跨文件不共享标记字面量。
 // ---------------------------------------------------------------------------
 
 const wipeFailures: string[] = [];
@@ -148,7 +148,7 @@ export function runLegacyWipeSmoke(): void {
             'boot：persona 域 localConfig 键退役丢弃（任务参数固化，normalize 新形状清洗）',
             !('localConfig' in (persona as unknown as Record<string, unknown>)),
         );
-        check('boot：nav 域迁移数据未受损（种子关态存活）', getNavState().autoTop === false);
+        check('boot：nav 域迁移数据未受损（种子 qrActivated 激活态存活）', getNavState().qrActivated === true);
     } else {
         // 二次启动签名：标记在场 → boot 清理整段跳过 → 预重种的键须原样存活
         check(
