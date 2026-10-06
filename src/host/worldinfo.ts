@@ -22,7 +22,6 @@
 import { createWorldInfoEntry, loadWorldInfo, reloadEditor, saveWorldInfo } from '@sillytavern/scripts/world-info';
 import type { WorldInfoEntryHost } from '@sillytavern/scripts/world-info';
 import { chat_metadata, characters, this_chid } from './settings';
-import { getTavernContext } from './context';
 import { createTtlog } from './ttlog';
 
 const log = createTtlog('host/worldinfo');
@@ -40,15 +39,6 @@ export interface WorldBookEntrySummary {
 /** 宿主世界书数据（写通道按引用改 entries 后整本回写）。 */
 export interface WorldInfoBookData {
     entries: Record<string, WorldInfoEntryHost>;
-}
-
-/** 全量书目名（context 通道；宿主上下文缺席按空表处理）。 */
-export function listWorldInfoNames(): string[] {
-    const getter = getTavernContext()?.getWorldInfoNames;
-    if (typeof getter !== 'function') return [];
-    const raw = getter() as unknown;
-    if (!Array.isArray(raw)) return [];
-    return [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.length > 0))].sort();
 }
 
 /** 按书名装载世界书数据（null=书不存在或宿主通道异常）。 */

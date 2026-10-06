@@ -24,7 +24,5 @@ export const TEXT = {
     TOAST_CONN_OK: '连接成功！',
     TOAST_CONN_FAIL: '请求发送失败',
     TOAST_CONN_STATUS: (status: string | number) => `失败: ${status}`,
-    TOAST_PINNED: (book: string) => `已固定「${book}」，将在所有角色卡中自动加载`,
-    TOAST_UNPINNED: (book: string) => `已取消固定「${book}」`,
     TOAST_RESET_TO_WI: '已重置为世界书原始状态',
 } as const;

@@ -11,11 +11,27 @@
  * - 旧 localStorage 5 键迁移进 extension_settings.ttToolkit.persona 全局域。
  * - 1.2s 防抖热存改显式保存点（见 store.ts 头注）。
  */
+import { eventBus, event_types } from '@/host';
 import { usePersonaStore } from './store';
 import { migratePersonaDomain } from './storage';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/index');
+
+/** CHAT_CHANGED 订阅幂等标记（浏览器/node 两路 init 都可能调用）。 */
+let chatListenerInstalled = false;
+
+/**
+ * 会话感知订阅（扩展生命周期与页面同寿，监听常驻不退订；
+ * idempotent 安装防双路 init 重复挂）。
+ */
+function installChatChangedListener(): void {
+    if (chatListenerInstalled) return;
+    chatListenerInstalled = true;
+    eventBus.on(event_types.CHAT_CHANGED, () => {
+        usePersonaStore().handleChatChanged();
+    });
+}
 
 /**
  * persona 模块初始化（浏览器路径，main.ts 引导调用）。
@@ -27,6 +43,7 @@ export function initPersona(): void {
         log.info(`persona 域迁移完成：搬入 ${report.migratedKeys.join('、') || '（无）'}；退休键清理 ${report.retiredKeysCleaned.join('、') || '（无）'}`);
     }
     usePersonaStore().init();
+    installChatChangedListener();
 }
 
 /** node 冒烟最小初始化：迁移机判＋store 初始化（存根数据），不挂 DOM。 */

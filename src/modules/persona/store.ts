@@ -3,12 +3,16 @@
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
  * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）、
- * 保存配置与配置档 CRUD（localConfig）、生成启动（世界书勾选快照）。
- * 平时表单编辑只动内存，不写全局域（消旧版每次键击写 localStorage 的
- * IO 放大）。
+ * 保存配置与配置档 CRUD（localConfig）。平时表单编辑只动内存，
+ * 不写全局域（消旧版每次键击写 localStorage 的 IO 放大）。
  *
  * 互斥纪律：isProcessing 对生成/重 roll 全局互斥（旧模块私有
  * isProcessing 同语义）；lastRun 记忆最近一次请求（重 roll 语义）。
+ * 会话感知：CHAT_CHANGED 到达时 selectedGreetingIndex/lastRun 无条件
+ * 清空（开场白选择不跨会话携带；旧会话 wiText 快照不得被新会话
+ * reroll 消费），宿主快照无条件重拉（读取廉价且 loadCandidates 依赖
+ * userName 不在指纹内，门控会漏刷；会话身份指纹仅用于日志观测）。
+ * 世界书：全量注入（无勾选/钉选面），参考分区只读展示绑定书单。
  */
 
 import { defineStore } from 'pinia';
@@ -19,9 +23,7 @@ import {
     getPersonaDescription,
     getTavernContext,
     getUserDisplayName,
-    getWorldBookEntries,
     hostWindow,
-    listWorldInfoNames,
     upsertPersona,
     type WorldBookEntrySummary,
 } from '@/host';
@@ -31,13 +33,7 @@ import { resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
-import {
-    clampTimeout,
-    loadWiSelectionFor,
-    readPersonaDomain,
-    writePersonaDomain,
-    type LocalConfig,
-} from './storage';
+import { clampTimeout, readPersonaDomain, writePersonaDomain, type LocalConfig } from './storage';
 
 const log = createTtlog('modules/persona/store');
 
@@ -60,10 +56,6 @@ interface LastRunDescriptor {
     greetingsText: string;
 }
 
-function snapshotLocalConfig(config: LocalConfig): LocalConfig {
-    return { ...config, extraBooks: [...config.extraBooks] };
-}
-
 /**
  * 生成调用面配置解析：endpointId → 统一端点表实体。端点缺失（未配置或
  * 已被删除）返回 null，由 generate/reroll 统一 fail fast。
@@ -82,7 +74,7 @@ function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
 export const usePersonaStore = defineStore('tt-persona', {
     state: () => ({
         /** API 配置（表单内存态；保存点写域）。 */
-        config: snapshotLocalConfig(readPersonaDomain().localConfig),
+        config: readPersonaDomain().localConfig,
         /** 预设选择（'current'/'pure'/预设名）。 */
         generationPreset: readPersonaDomain().uiState.generationPreset,
         /** 人设分区：需求框/结果框。 */
@@ -93,10 +85,8 @@ export const usePersonaStore = defineStore('tt-persona', {
         processingLabel: '',
         /** 最近一次请求（重 roll 记忆）。 */
         lastRun: null as LastRunDescriptor | null,
-        /** 参考分区：书目/条目/勾选缓存/问候语。 */
-        availableBooks: [] as string[],
-        bookEntries: {} as Record<string, WorldBookEntrySummary[]>,
-        checkedByBook: {} as Record<string, string[]>,
+        /** 参考分区：当前会话绑定书单（只读展示，全量注入）与问候语。 */
+        boundBooks: [] as string[],
         greetings: [] as Array<{ label: string; content: string }>,
         selectedGreetingIndex: null as number | null,
         /** 生成通道分区：测连状态。 */
@@ -109,6 +99,10 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 当前角色键（字符串口径，'||' 兜底——勿用 === 比较 this_chid）。 */
         charKey(): string {
             return getTavernContext()?.characterId || 'global_no_char';
+        },
+        /** 会话身份指纹（charKey＋绑定书单）：CHAT_CHANGED 时判快照是否需重拉。 */
+        sessionFingerprint(): string {
+            return `${this.charKey}\u0001${this.boundBooks.join('\u0001')}`;
         },
         hasResult(): boolean {
             return this.resultText.trim().length > 0;
@@ -137,36 +131,37 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 从全局域读快照进内存态（显式保存点之外的唯一读时机）。 */
         loadFromDomain() {
             const domain = readPersonaDomain();
-            this.config = snapshotLocalConfig(domain.localConfig);
+            this.config = domain.localConfig;
             this.generationPreset = domain.uiState.generationPreset;
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
         },
 
         /**
-         * 宿主派生数据刷新（onActivate 快照）：书目/问候语/
+         * 宿主派生数据刷新（init/onActivate 快照）：问候语/绑定书单/
          * 载入候选。只读宿主，不写域。
          */
         refreshHostData() {
             this.greetings = getCharacterGreetingsList();
-            void listBooks(this.config.extraBooks).then(books => {
-                this.availableBooks = books;
-            });
+            this.boundBooks = getContextWorldBooks();
             void listWorldBookEntriesForLoad(getUserDisplayName()).then(candidates => {
                 this.loadCandidates = candidates;
             });
         },
 
-        /** 惰性装载单书条目（勾选初始化：已存选择 → enabled 兜底）。 */
-        async ensureBookEntries(book: string) {
-            if (this.bookEntries[book]) return;
-            const entries = await getWorldBookEntries(book);
-            this.bookEntries[book] = entries;
-            if (!this.checkedByBook[book]) {
-                const saved = loadWiSelectionFor(this.charKey, book);
-                this.checkedByBook[book] = saved && saved.length > 0
-                    ? saved
-                    : entries.filter(e => e.enabled).map(e => String(e.uid));
+        /**
+         * CHAT_CHANGED 处理（订阅在 persona/index.ts init 挂载）：
+         * selectedGreetingIndex 与 lastRun 无条件清空（不跨会话携带——
+         * lastRun 里的 wiText 是旧会话快照，reroll 禁用直到新生成）；
+         * 宿主派生快照无条件重拉（门控会漏刷 userName 派生面，见头注）。
+         */
+        handleChatChanged() {
+            const fingerprintBefore = this.sessionFingerprint;
+            this.selectedGreetingIndex = null;
+            this.lastRun = null;
+            this.refreshHostData();
+            if (this.sessionFingerprint !== fingerprintBefore) {
+                log.info(`会话切换：指纹 ${fingerprintBefore} → ${this.sessionFingerprint}，宿主快照已重拉`);
             }
         },
 
@@ -175,10 +170,8 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 保存 API 配置＋预设选择。 */
         persistConfig() {
             writePersonaDomain(domain => {
-                domain.localConfig = snapshotLocalConfig(this.config);
+                domain.localConfig = { ...this.config };
                 domain.uiState.generationPreset = this.generationPreset;
-                // 钉选常驻书与 extraBooks 同源（旧版两键合一的写侧收敛）
-                domain.pinnedBooks = [...this.config.extraBooks];
             });
         },
 
@@ -192,37 +185,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             });
         },
 
-        /** 世界书勾选快照进域（生成启动时＝自然保存点）。 */
-        persistSelections() {
-            const charKey = this.charKey;
-            const snapshot = { ...this.checkedByBook };
-            writePersonaDomain(domain => {
-                domain.wiSelection[charKey] = snapshot;
-            });
-        },
-
         // ---------------- 参考分区交互 ----------------
-
-        setCheck(book: string, uid: number, on: boolean) {
-            const list = this.checkedByBook[book] ?? [];
-            const id = String(uid);
-            this.checkedByBook[book] = on ? [...new Set([...list, id])] : list.filter(x => x !== id);
-        },
-
-        isBookChecked(book: string, uid: number): boolean {
-            return (this.checkedByBook[book] ?? []).includes(String(uid));
-        },
-
-        /** 钉选/取消钉选常驻书（写入 extraBooks；立即落域）。 */
-        togglePin(book: string) {
-            const pinned = this.config.extraBooks.includes(book);
-            this.config.extraBooks = pinned
-                ? this.config.extraBooks.filter(b => b !== book)
-                : [...this.config.extraBooks, book];
-            this.availableBooks = [...new Set([...this.availableBooks, book])].sort();
-            this.persistConfig();
-            toast(pinned ? TEXT.TOAST_UNPINNED(book) : TEXT.TOAST_PINNED(book));
-        },
 
         selectGreeting(index: number | null) {
             this.selectedGreetingIndex = index;
@@ -277,12 +240,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.isProcessing = true;
             this.processingLabel = '生成中…';
             try {
-                this.persistSelections();
-                const wiText = await collectWorldInfoContext({
-                    extraBooks: [...this.config.extraBooks],
-                    checkedByBook: { ...this.checkedByBook },
-                    charKey: this.charKey,
-                });
+                const wiText = await collectWorldInfoContext();
                 const greetingsText = this.selectedGreetingIndex !== null
                     ? (this.greetings[this.selectedGreetingIndex]?.content ?? '')
                     : '';
@@ -394,7 +352,7 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         /** 载入世界书条目进结果框（UI 选择器确认后调用）。 */
         loadWorldBookEntry(book: string, uid: number) {
-            const entry = this.bookEntries[book]?.find(e => e.uid === uid) ?? this.loadCandidates.find(c => c.book === book && c.entry.uid === uid)?.entry;
+            const entry = this.loadCandidates.find(c => c.book === book && c.entry.uid === uid)?.entry;
             if (!entry || !entry.content.trim()) {
                 toast(TEXT.TOAST_NO_VALID_CONTENT, 'warning');
                 return;
@@ -405,8 +363,3 @@ export const usePersonaStore = defineStore('tt-persona', {
         },
     },
 });
-
-/** 参考分区的书目清单（宿主全量书目 + 角色绑定书 + 钉选书，有序去重）。 */
-async function listBooks(extraBooks: string[]): Promise<string[]> {
-    return [...new Set([...listWorldInfoNames(), ...getContextWorldBooks(), ...extraBooks])].filter(Boolean).sort();
-}
