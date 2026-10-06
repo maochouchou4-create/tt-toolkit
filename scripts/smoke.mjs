@@ -336,8 +336,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
-// 期望构成：组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链，共 78。
-const CHOICE_PASS_EXPECTED = 78;
+// 期望构成：组装注入/解析回退＋解析守门＋runlog 接线＋池抽取分布/池注入/
+// 自动生成守卫链，共 85。
+const CHOICE_PASS_EXPECTED = 85;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

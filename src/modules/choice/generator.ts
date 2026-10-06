@@ -15,6 +15,7 @@ import {
     type PoolInjectionSupply,
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
+import { serializeMessages, useRunlogStore } from '@/modules/runlog/store';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
@@ -100,15 +101,35 @@ export async function generateOptions(): Promise<void> {
     activeAbort = controller;
 
     store.beginGenerate();
+    // runlog 接线：runId＝enrich/markFailed 目标；handedToClient＝调用 client
+    // 前置 true——client 一经调用，本轮失败记录权归传输层（防同次失败双记：
+    // client 抛错时 generator 拿不到 runId，null 判据会误判成「未发出」）
+    const runlogStore = useRunlogStore();
+    let runId: number | null = null;
+    let handedToClient = false;
+    let requestDump = '';
     try {
         const gen = choiceStorage.readDomain().gen;
         let rawText: string;
         let outputContract: GenerateRequestConfig['outputContract'] = 'prompt_only';
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
+        requestDump = serializeMessages(assembly.messages);
 
         if (gen.debugForceRaw) {
             rawText = DEBUG_MALFORMED_RAW;
+            runId = runlogStore.commit({
+                at: new Date().toISOString(),
+                task: 'choice',
+                endpointUrl: '(debugForceRaw)',
+                model: '(debugForceRaw)',
+                contract: outputContract,
+                stream: false,
+                durationMs: 0,
+                ok: true,
+                requestText: requestDump,
+                responseText: DEBUG_MALFORMED_RAW,
+            });
         } else {
             const endpoint = resolveChoiceEndpoint();
             const task = choiceStorage.readDomain().task;
@@ -117,6 +138,7 @@ export async function generateOptions(): Promise<void> {
             }
             outputContract = task.outputContract;
             const requestConfig: GenerateRequestConfig = {
+                task: 'choice',
                 baseUrl: endpoint.url,
                 apiKey: endpoint.key,
                 model: endpoint.model,
@@ -129,18 +151,44 @@ export async function generateOptions(): Promise<void> {
                 // 端点对 json_schema 档的支持度实测结论见 choice/api.ts 文件头
                 jsonSchema: task.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,
             };
+            handedToClient = true;
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
             rawText = result.content;
+            runId = result.runId;
         }
 
         const report = parseOptions(rawText, gen.count);
         if (report.options.length === 0) {
-            throw new Error(`解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 200)}`);
+            // 原始输出前缀 500（诊断面）：坏 JSON 骸骨排障需要看到骨架本身
+            const message = `解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 500)}`;
+            if (runId !== null) runlogStore.markFailed(runId, message);
+            throw new Error(message);
+        }
+        if (runId !== null) {
+            runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length });
         }
         store.succeed(report.options, report.path, assembly.dumpText);
         // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {
+        // 哨兵补记：仅「请求未发出」（端点缺失/组装抛错）时——client 抛错
+        // （含取消）已由传输层记录，再补即双记
+        if (runId === null && !handedToClient) {
+            const message = e instanceof Error ? e.message : String(e);
+            runlogStore.commit({
+                at: new Date().toISOString(),
+                task: 'choice',
+                endpointUrl: '(未发出)',
+                model: '',
+                contract: 'prompt_only',
+                stream: false,
+                durationMs: 0,
+                ok: false,
+                requestText: requestDump,
+                responseText: '',
+                error: message,
+            });
+        }
         if (controller.signal.aborted) {
             store.fail('已取消');
         } else {

@@ -459,7 +459,7 @@ async function runApiChecks(): Promise<void> {
     // 纯函数：请求体形状（缺省任务参数不进请求体——显式发送制）
     const body = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off' },
+        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off' },
     );
     check('api：buildGenerateBody 基础形状（quiet/openai/reverse_proxy/proxy_password/tool_choice；缺省温度与 max_tokens 不发）',
         body.type === 'quiet' && body.chat_completion_source === 'openai'
@@ -470,7 +470,7 @@ async function runApiChecks(): Promise<void> {
         && !('response_format' in body) && !('json_schema' in body));
     const bodyExplicit = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5, maxTokens: 128 },
+        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5, maxTokens: 128 },
     );
     check('api：buildGenerateBody 显式参数（temperature/max_tokens 进请求体、stream 恒发）',
         bodyExplicit.temperature === 0.5 && bodyExplicit.max_tokens === 128 && bodyExplicit.stream === true);
@@ -478,11 +478,11 @@ async function runApiChecks(): Promise<void> {
     // 输出契约三档
     const bodyJsonObject = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_object' },
+        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_object' },
     );
     const bodyJsonSchema = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_schema', jsonSchema: { options: [] } },
+        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_schema', jsonSchema: { options: [] } },
     );
     const jsonSchemaField = bodyJsonSchema.json_schema as Record<string, unknown> | undefined;
     check('api：输出契约三档（json_object→response_format；json_schema 转换；prompt_only 无契约键）',
@@ -493,7 +493,7 @@ async function runApiChecks(): Promise<void> {
     // reasoning_effort 纪律（off 不发已在基础形状断言——这里断言 high 发）
     const bodyEffort = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'prompt_only', reasoningEffort: 'high' },
+        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'prompt_only', reasoningEffort: 'high' },
     );
     check('api：reasoning_effort＝high 注入（low/medium/high 档）', bodyEffort.reasoning_effort === 'high');
 
@@ -526,7 +526,7 @@ async function runApiChecks(): Promise<void> {
     try {
         const r1 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
         );
         check('api：流式 SSE 帧状态机（\\n\\n 分帧、[DONE] 跳过、delta 拼接、走宿主路由）',
             r1.streamed && r1.content === '你' && sseCalls[0]?.url === '/api/backends/chat-completions/generate',
@@ -534,7 +534,7 @@ async function runApiChecks(): Promise<void> {
         globalThis.fetch = (async () => fakeSSEStream(['data: {"choices":[{"delta":{"content":"甲"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"乙"}}]}'])) as typeof fetch;
         const r2 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
         );
         check('api：流式 \\r\\n 归一＋尾帧无终止符补消费', r2.content === '甲乙', `text=${r2.content}`);
     } finally {
@@ -546,7 +546,7 @@ async function runApiChecks(): Promise<void> {
     try {
         const r3 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
         );
         check('api：非流式 content 读取（choices[0].message.content）', !r3.streamed && r3.content === '好的');
         globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ error: { message: 'quota exceeded' } }) })) as unknown as typeof fetch;
@@ -554,7 +554,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
             );
         } catch (e) {
             errorThrown = (e as Error).message.includes('quota');

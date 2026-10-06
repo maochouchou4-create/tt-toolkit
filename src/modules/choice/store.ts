@@ -36,6 +36,8 @@ export const useChoiceStore = defineStore('tt-choice', {
         fail(message: string) {
             this.phase = 'error';
             this.error = message;
+            // 错误态下残留上一轮徽标是误导（错误显示正确性）：fail 即清路径徽标
+            this.lastParsePath = '';
         },
         clearOptions() {
             this.options = [];

@@ -61,8 +61,8 @@ const parsePathLabel = computed(() => {
 });
 
 const parsePathLabelTitle = computed(() => {
-    // G5 拍板文案：回退解析＝宽松解析安全网，细节留在调试 tab
-    if (store.lastParsePath === 'bracket_fallback') return '模型输出不合 JSON 约定时的宽松解析安全网（详见调试 tab）';
+    // 回退解析＝宽松解析安全网，细节留在日志 tab
+    if (store.lastParsePath === 'bracket_fallback') return '模型输出不合 JSON 约定时的宽松解析安全网（详见日志 tab）';
     if (store.lastParsePath === 'json') return '模型输出符合 JSON 契约';
     return '';
 });

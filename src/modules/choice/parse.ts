@@ -16,7 +16,7 @@ export interface ParsedOption {
 
 /** 解析路径溯源（dump/排障：走了 JSON 主路径还是括号回退）。 */
 export interface ParseReport {
-    path: 'json' | 'bracket_fallback' | 'empty';
+    path: 'json' | 'bracket_fallback' | 'json_reject' | 'empty';
     options: ParsedOption[];
 }
 
@@ -191,6 +191,19 @@ export function parseOptions(text: string, count: number): ParseReport {
     if (c.startsWith('[')) {
         const json = parseJsonArray(c);
         if (json) return { path: 'json', options: json.slice(0, count) };
+    }
+    // JSON 骸骨守门：主路径解析失败而文本呈 JSON 形态时不进括号回退——回退会把
+    // 数组方括号当标题括号，把整坨 JSON 合成一条废选项（title=JSON 骸骨、
+    // content=尾随 }）。三臂判据：①对象开头（合法括号回退输入不可能以 { 开头，
+    // 零误判）；②数组开头且 [ 后首个非空白字符是 { 或 "（JSON 数组形态——
+    // [标题]正文 的设计形态首字符是标题文字，不误伤）；③全文含契约键字面量
+    // （兜住散文前缀＋截断 JSON 的混合形态）。fail fast 交上层报错带出原文。
+    const jsonAttempt =
+        c.startsWith('{')
+        || /^\[\s*[{"]/.test(c)
+        || c.includes('"title"') || c.includes('"content"') || c.includes('"options"');
+    if (jsonAttempt) {
+        return { path: 'json_reject', options: [] };
     }
     const fallback = parseBracketFallback(c);
     if (fallback.length === 0) return { path: 'empty', options: [] };

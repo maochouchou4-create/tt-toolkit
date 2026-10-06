@@ -37,6 +37,8 @@
  *   src/host/headers.ts 三级降级装配）。
  */
 import { getTavernRequestHeaders } from '@/host';
+import { serializeMessages, useRunlogStore } from '@/modules/runlog/store';
+import type { RunTask } from '@/modules/runlog/types';
 
 /** 组装消息（role 三态分离，不拼单段塞单条——架构约束沿 fork 实证形态）。 */
 export interface GenerateMessage {
@@ -66,6 +68,8 @@ export function normalizeReasoningEffort(raw: unknown, fallback: ReasoningEffort
 }
 
 export interface GenerateRequestConfig {
+    /** 任务归属（runlog 记录与摘要按任务区分；缺省会静默记错任务名，必填拒绝） */
+    task: RunTask;
     /** API base（宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径） */
     baseUrl: string;
     /** 直连密钥（走 proxy_password 通道，不进宿主 secret store） */
@@ -87,6 +91,8 @@ export interface GenerateResult {
     content: string;
     /** 请求走了流式还是非流式（GG 类假流式端点流式是硬需求） */
     streamed: boolean;
+    /** 本次生成的 runlog 记录 id（任务层 enrich/markFailed 的目标句柄） */
+    runId: number;
 }
 
 /** 生成端点（宿主前端路由，相对当前页面 origin）。 */
@@ -279,33 +285,61 @@ async function readStream(response: Response): Promise<string> {
  * 调用宿主生成端点。非流式：json.choices[0].message.content；
  * 流式：SSE delta 拼接。HTTP 非 2xx / json.error 均抛错（错误文本
  * 供上层提示与排障，Fail Fast 不吞）。
+ *
+ * 运行日志观测点（choice/persona 通吃的单一传输层）：成功失败（含
+ * abort/流读失败）全量 commit 一条记录后原样抛/返——任务层只凭返回的
+ * runId enrich，传输失败无 runId 也「失败有痕」。apiKey 不进记录。
  */
 export async function callGenerateEndpoint(
     messages: GenerateMessage[],
     config: GenerateRequestConfig,
     signal?: AbortSignal,
 ): Promise<GenerateResult> {
-    const response = await fetch(GENERATE_URL, {
-        method: 'POST',
-        headers: getTavernRequestHeaders(),
-        body: JSON.stringify(buildGenerateBody(messages, config)),
-        cache: 'no-cache',
-        signal,
-    });
-    if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        // 表达距离声明：AFPL 合规——错误文案自写措辞（fork 为「API 请求失败
-        // (status): 截断文本」模板）；保留的语义＝状态码＋响应体截断预览，
-        // 供上层提示与排障定位，Fail Fast 不吞。
-        throw new Error(`生成端点拒绝请求，HTTP ${response.status}。响应体开头：${text.slice(0, 300)}`);
+    const startedAt = performance.now();
+    const runlogStore = useRunlogStore();
+    const requestText = serializeMessages(messages);
+    const commitRun = (ok: boolean, responseText: string, error?: string): number =>
+        runlogStore.commit({
+            at: new Date().toISOString(),
+            task: config.task,
+            endpointUrl: normalizeApiBase(config.baseUrl),
+            model: config.model,
+            contract: config.outputContract,
+            stream: config.stream,
+            durationMs: Math.round(performance.now() - startedAt),
+            ok,
+            requestText,
+            responseText,
+            error,
+        });
+    try {
+        const response = await fetch(GENERATE_URL, {
+            method: 'POST',
+            headers: getTavernRequestHeaders(),
+            body: JSON.stringify(buildGenerateBody(messages, config)),
+            cache: 'no-cache',
+            signal,
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            // 表达距离声明：AFPL 合规——错误文案自写措辞（fork 为「API 请求失败
+            // (status): 截断文本」模板）；保留的语义＝状态码＋响应体截断预览，
+            // 供上层提示与排障定位，Fail Fast 不吞。
+            throw new Error(`生成端点拒绝请求，HTTP ${response.status}。响应体开头：${text.slice(0, 300)}`);
+        }
+        if (config.stream) {
+            const content = await readStream(response);
+            return { content, streamed: true, runId: commitRun(true, content) };
+        }
+        const data = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+            error?: { message?: string };
+        };
+        if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
+        const content = data?.choices?.[0]?.message?.content ?? '';
+        return { content, streamed: false, runId: commitRun(true, content) };
+    } catch (e) {
+        commitRun(false, '', e instanceof Error ? e.message : String(e));
+        throw e;
     }
-    if (config.stream) {
-        return { content: await readStream(response), streamed: true };
-    }
-    const data = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-        error?: { message?: string };
-    };
-    if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
-    return { content: data?.choices?.[0]?.message?.content ?? '', streamed: false };
 }
