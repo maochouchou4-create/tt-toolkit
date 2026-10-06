@@ -3,8 +3,8 @@
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
  * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）、
- * 保存配置与配置档 CRUD（localConfig）。平时表单编辑只动内存，
- * 不写全局域（消旧版每次键击写 localStorage 的 IO 放大）。
+ * 预设选择（uiState）。平时表单编辑只动内存，不写全局域（消旧版
+ * 每次键击写 localStorage 的 IO 放大）。
  *
  * 互斥纪律：isProcessing 对生成/重 roll 全局互斥（旧模块私有
  * isProcessing 同语义）；lastRun 记忆最近一次请求（重 roll 语义）。
@@ -29,12 +29,11 @@ import {
     type WorldBookEntrySummary,
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
-import { testConnection } from '@/modules/apis/client';
 import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
-import { clampTimeout, readPersonaDomain, writePersonaDomain, type LocalConfig } from './storage';
+import { readPersonaDomain, writePersonaDomain } from './storage';
 
 const log = createTtlog('modules/persona/store');
 
@@ -47,17 +46,13 @@ interface LastRunDescriptor {
 
 /**
  * 生成调用面配置解析：全局活动键 → 统一端点表实体。端点缺失（未选择或
- * 已被删除）返回 null，由 generate/reroll 统一 fail fast。
+ * 已被删除）返回 null，由 generate/reroll 统一 fail fast。任务参数固化
+ * 于 TASK_DEFAULTS，调用面只剩端点。
  */
-function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
+function buildApiConfig(): GenerationApiConfig | null {
     const endpoint = resolveEndpointById(readActiveEndpointId());
     if (!endpoint) return null;
-    return {
-        endpoint,
-        stream: config.stream,
-        thinkingEffort: config.thinkingEffort,
-        timeoutSec: clampTimeout(config.timeoutSec),
-    };
+    return { endpoint };
 }
 
 /** store 实例类型（模块级私有装配函数专用——不扩 store 公开面）。 */
@@ -95,8 +90,6 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
 
 export const usePersonaStore = defineStore('tt-persona', {
     state: () => ({
-        /** API 配置（表单内存态；保存点写域）。 */
-        config: readPersonaDomain().localConfig,
         /** 预设选择（'current'/'pure'/预设名）。 */
         generationPreset: readPersonaDomain().uiState.generationPreset,
         /** 人设分区：需求框/结果框。 */
@@ -111,8 +104,6 @@ export const usePersonaStore = defineStore('tt-persona', {
         boundBooks: [] as string[],
         greetings: [] as Array<{ label: string; content: string }>,
         selectedGreetingIndex: null as number | null,
-        /** 生成通道分区：测连状态。 */
-        connectionStatus: '',
         /** 载入世界书条目的候选清单（onActivate 时刷新）。 */
         loadCandidates: [] as Array<{ book: string; entry: WorldBookEntrySummary }>,
     }),
@@ -154,7 +145,6 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 从全局域读快照进内存态（显式保存点之外的唯一读时机）。 */
         loadFromDomain() {
             const domain = readPersonaDomain();
-            this.config = domain.localConfig;
             this.generationPreset = domain.uiState.generationPreset;
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
@@ -192,10 +182,9 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 显式保存点 ----------------
 
-        /** 保存 API 配置＋预设选择。 */
-        persistConfig() {
+        /** 保存预设选择（uiState 写域）。 */
+        persistUiState() {
             writePersonaDomain(domain => {
-                domain.localConfig = { ...this.config };
                 domain.uiState.generationPreset = this.generationPreset;
             });
         },
@@ -218,32 +207,7 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         selectPreset(name: string) {
             this.generationPreset = name;
-            this.persistConfig();
-        },
-
-        // ---------------- 生成通道分区交互 ----------------
-
-        /** 保存生成通道配置（persona 任务参数；端点选择在「API」页）。 */
-        saveConfig() {
-            this.persistConfig();
-            toast(TEXT.TOAST_CONFIG_SAVED);
-        },
-
-        async runTestConnection() {
-            const endpoint = resolveEndpointById(readActiveEndpointId());
-            if (!endpoint) {
-                this.connectionStatus = TEXT.TOAST_NO_ENDPOINT;
-                toast(TEXT.TOAST_NO_ENDPOINT, 'warning');
-                return;
-            }
-            try {
-                const res = await testConnection(endpoint.url, endpoint.key, endpoint.model);
-                this.connectionStatus = res.ok ? TEXT.TOAST_CONN_OK : TEXT.TOAST_CONN_STATUS(String(res.status));
-                toast(this.connectionStatus, res.ok ? 'success' : 'error');
-            } catch (err) {
-                this.connectionStatus = err instanceof Error ? err.message : String(err);
-                toast(TEXT.TOAST_CONN_FAIL, 'error');
-            }
+            this.persistUiState();
         },
 
         // ---------------- 人设分区：生成/重 roll ----------------
@@ -251,7 +215,7 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 生成（首次两段链）。互斥：isProcessing 期间静默忽略。 */
         async generate() {
             if (this.isProcessing) return;
-            const api = buildApiConfig(this.config);
+            const api = buildApiConfig();
             if (!api) {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;
@@ -283,7 +247,7 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_LAST_REQUEST, 'warning');
                 return;
             }
-            const api = buildApiConfig(this.config);
+            const api = buildApiConfig();
             if (!api) {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;

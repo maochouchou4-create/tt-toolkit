@@ -10,8 +10,8 @@
  *   两条通道合一，走统一端点表＋共享请求客户端。
  * - 字符串拼接组装退役——消息组装走引擎管线（persona 两任务
  *   键的模块与模板在代码默认模板内置）。
- * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：配置由
- *   store 从存储域透传（GenerationApiConfig）。
+ * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：任务参数
+ *   固化于 TASK_DEFAULTS，调用面只剩端点（GenerationApiConfig）。
  * - setGenProgress 直写 jQuery 按钮退役：onProgress 回调由 store 接管。
  * - toastr.info(prefill 重试) 退役：onPrefillRetry 回调归调用方 toast。
  * - collectContextData 的 DOM 勾选读取与「UI 勾选 → 存储域已存选择 →
@@ -24,7 +24,8 @@
  */
 
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt } from '@/host';
-import { callGenerateEndpoint, type GenerateMessage, type ReasoningEffort } from '@/modules/apis/client';
+import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
+import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
     assembleMessages,
@@ -43,16 +44,10 @@ import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
 
-/** 生成调用面的任务配置（store 从存储域透传；timeout 已夹取 30~1800s）。 */
+/** 生成调用面的任务配置（store 侧解析端点；任务参数固化于 TASK_DEFAULTS）。 */
 export interface GenerationApiConfig {
     /** 选中统一端点（url/key/model；store 侧已解析非空）。 */
     endpoint: ApiEndpoint;
-    /** 流式输出（长请求防挂死姿势）。 */
-    stream: boolean;
-    /** 思考强度（'off'＝不注入 reasoning_effort；档位守门同 client 单点）。 */
-    thinkingEffort: ReasoningEffort;
-    /** 单段超时（秒，段间独立——两段链每段各自计时）。 */
-    timeoutSec: number;
 }
 
 /**
@@ -170,12 +165,14 @@ function assemblePersonaMessages(task: TaskKey, sources: PersonaAssemblySources)
  * 请求并处理超时/中断/错误分类。生成链每段各调一次（每段超时独立）。
  *
  * 单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
- * persona 任务参数面：temperature 固定 1、不发送 max_tokens（长 YAML 友
- * 好，依赖宿主 insert_if_present 语义）、输出契约 prompt_only（纯文本）。
+ * persona 任务参数面（固化于 TASK_DEFAULTS）：temperature 1、不发送
+ * max_tokens（长 YAML 友好，依赖宿主 insert_if_present 语义）、输出契约
+ * prompt_only（纯文本）、stream 恒开、reasoning_effort high、超时 600s。
  */
 async function requestOnce(params: RequestOnceParams): Promise<string> {
     const { config, messages, trace, prefillContent, label } = params;
-    log.info(`发送请求 (${label})，超时 ${config.timeoutSec}s，流式 ${String(config.stream)}`);
+    const timeoutSec = TASK_DEFAULTS.personaTimeoutSec;
+    log.info(`发送请求 (${label})，超时 ${timeoutSec}s，流式 ${String(TASK_DEFAULTS.stream)}`);
     log.info(`模块管线 (${label}): ${renderTraceCompact({ messages, trace })}`);
 
     let responseContent = '';
@@ -184,7 +181,7 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
     const timeoutId = setTimeout(() => {
         timedOutBySelf = true;
         try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
-    }, config.timeoutSec * 1000);
+    }, timeoutSec * 1000);
 
     try {
         const promptArray: GenerateMessage[] = messages.map(m => ({ ...m }));
@@ -197,11 +194,11 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
                 baseUrl: config.endpoint.url,
                 apiKey: config.endpoint.key,
                 model: config.endpoint.model,
-                temperature: 1,
+                temperature: TASK_DEFAULTS.temperature,
                 // max_tokens 不发：人设长文本依赖服务端模型默认上限
-                stream: config.stream,
+                stream: TASK_DEFAULTS.stream,
                 outputContract: 'prompt_only',
-                reasoningEffort: config.thinkingEffort,
+                reasoningEffort: TASK_DEFAULTS.reasoningEffort,
             }, controller.signal);
             return result.content;
         };
@@ -217,7 +214,7 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
             const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
 
             if (timedOutBySelf || (isAbort && controller.signal.aborted)) {
-                throw new Error(`请求超时 (${config.timeoutSec}s)：第三方 / Claude 中转站响应过慢。可在「API 设置 → 请求超时」里调大该值（建议 300~600 秒），或检查中转站 / 网络稳定性。`);
+                throw new Error(`请求超时（${TASK_DEFAULTS.personaTimeoutSec} 秒）——中转站响应过慢或网络不稳，可稍后重试或更换端点`);
             }
 
             if (prefillContent && isBadRequest) {

@@ -7,6 +7,7 @@
  */
 import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
 import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
+import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -21,36 +22,6 @@ import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
-
-/**
- * 选项 JSON 契约 schema（json_schema 档位的结构化输出定义；与 output_format
- * 模块文本同一契约：顶层 {"options":[...]} 对象、元素 {title,content}——
- * schema 与提示词说的是同一件事，不各说各话）。
- * 顶层用对象而非裸数组：json_object 档的规范只保证「输出是 JSON 对象」，
- * 顶层数组契约与之矛盾；统一对象形态让两档语义一致。数量不在 schema
- * 硬编码（{{count}} 运行时变化），由提示词约束。客户端解析对裸数组
- * 仍容错（parse 回退吸收，兼容旧输出与不守契约的模型）。
- */
-const OPTIONS_JSON_SCHEMA = {
-    type: 'object',
-    properties: {
-        options: {
-            type: 'array',
-            items: {
-                type: 'object',
-                properties: {
-                    title: { type: 'string', description: '简短标题（10字内）' },
-                    content: { type: 'string', description: '选项正文（具体的行动描述）' },
-                },
-                required: ['title', 'content'],
-                additionalProperties: false,
-            },
-            minItems: 1,
-        },
-    },
-    required: ['options'],
-    additionalProperties: false,
-} as const;
 
 /** 外部取消信号（选项条「取消」按钮）。 */
 let activeAbort: AbortController | null = null;
@@ -110,8 +81,9 @@ export async function generateOptions(): Promise<void> {
     let requestDump = '';
     try {
         const gen = choiceStorage.readDomain().gen;
+        // 输出契约日志口径随常量（任务参数固化，两分支同值）
+        const outputContract: GenerateRequestConfig['outputContract'] = TASK_DEFAULTS.choiceOutputContract;
         let rawText: string;
-        let outputContract: GenerateRequestConfig['outputContract'] = 'prompt_only';
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
         requestDump = serializeMessages(assembly.messages);
@@ -132,23 +104,19 @@ export async function generateOptions(): Promise<void> {
             });
         } else {
             const endpoint = resolveChoiceEndpoint();
-            const task = choiceStorage.readDomain().task;
             if (!endpoint) {
                 throw new Error('未选择生成端点——到「API」页点端点条目上的「使用」按钮');
             }
-            outputContract = task.outputContract;
+            // 任务参数固化（TASK_DEFAULTS 单一真相源；用户面零旋钮）
             const requestConfig: GenerateRequestConfig = {
                 task: 'choice',
                 baseUrl: endpoint.url,
                 apiKey: endpoint.key,
                 model: endpoint.model,
-                temperature: task.temperature,
-                stream: task.stream,
-                outputContract: task.outputContract,
-                reasoningEffort: task.reasoningEffort,
-                // 对象 schema 与提示词契约同步（顶层 {"options":[...]}）；
-                // 端点对 json_schema 档的支持度实测结论见 choice/api.ts 文件头
-                jsonSchema: task.outputContract === 'json_schema' ? OPTIONS_JSON_SCHEMA : undefined,
+                temperature: TASK_DEFAULTS.temperature,
+                stream: TASK_DEFAULTS.stream,
+                outputContract: TASK_DEFAULTS.choiceOutputContract,
+                reasoningEffort: TASK_DEFAULTS.reasoningEffort,
             };
             handedToClient = true;
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
