@@ -1,29 +1,15 @@
 <template>
   <!--
-    条目池 tab（只读）：内容随插件仓库发布（default-pool.json 是唯一
-    真相源，编辑走 git 更新链），本页只剩运行时开关＋只读浏览。原编辑面
-    （池配置/抽取参数/条目编辑/导入备份）已砍除——数据层不动，
+    条目池 tab（只读浏览）：内容随插件仓库发布（default-pool.json 是唯一
+    真相源，编辑走 git 更新链），本页无任何控制面——生成行为开关（每轮
+    自动生成/按分类轮询）在「选项生成」页的生成参数卡。数据层不动，
     生成管线消费面零变化。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系；类名独立
     tt-pool- 前缀——样式块是全局的，与 ChoiceSettingsTab 的 tt-choice- 前缀
     互不干扰）。
   -->
   <div class="tt-pool-tab">
-    <!-- a. 开关卡 -->
-    <div class="tt-card">
-      <div class="tt-card-title">生成开关</div>
-      <div class="tt-card-sub">条目内容随插件更新，这里只控制「怎么生成、怎么抽」。</div>
-      <label class="tt-pool-switch">
-        <input :checked="pool.poolGen.autoGenerate" type="checkbox" @change="onAutoToggle">
-        <span>AI 回复后自动生成选项（生成中 / 未配 API 自动跳过）</span>
-      </label>
-      <label class="tt-pool-switch">
-        <input :checked="pool.poolGen.categoriesEnabled" type="checkbox" @change="onCategoriesToggle">
-        <span>按分类轮询（每轮选项尽量来自不同分类，保证多样性）</span>
-      </label>
-    </div>
-
-    <!-- b. 只读条目列表卡 -->
+    <!-- 只读条目列表卡 -->
     <div class="tt-card">
       <div class="tt-card-title">条目池</div>
       <div class="tt-card-sub">
@@ -68,17 +54,7 @@ import type { PoolEntry } from '@/modules/choice/pool/types';
 
 const pool = usePoolStore();
 
-// ---- a. 开关卡（仅运行时开关；内容域归 asset，见 pool/asset.ts） ----
-
-function onAutoToggle(e: Event) {
-    pool.updatePoolGen({ autoGenerate: (e.target as HTMLInputElement).checked });
-}
-
-function onCategoriesToggle(e: Event) {
-    pool.updatePoolGen({ categoriesEnabled: (e.target as HTMLInputElement).checked });
-}
-
-// ---- b. 只读列表卡 ----
+// ---- 只读列表 ----
 
 const expandedId = ref('');
 
@@ -108,15 +84,6 @@ function toggleExpand(entry: PoolEntry) {
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.tt-pool-switch {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-    cursor: pointer;
 }
 
 .tt-pool-note {

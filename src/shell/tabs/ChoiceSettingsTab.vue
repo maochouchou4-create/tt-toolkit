@@ -1,6 +1,7 @@
 <template>
   <!--
-    选项生成设置：生成参数＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
+    选项生成设置：生成参数（含每轮自动生成/按分类轮询开关——生成行为
+    参数归一处）＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
     任务参数（输出契约/思考强度/流式/温度）已固化为 TASK_DEFAULTS，端点选择
     唯一入口＝「API」页「使用」按钮——本页不再有生成通道卡。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
@@ -8,6 +9,14 @@
   <div class="tt-choice-settings-tab">
     <div class="tt-card">
       <div class="tt-card-title">生成参数</div>
+      <label class="tt-choice-switch">
+        <input :checked="settings.gen.autoGenerate" type="checkbox" @change="onAutoToggle">
+        <span>AI 回复后自动生成选项（生成中 / 未配 API 自动跳过）</span>
+      </label>
+      <label class="tt-choice-switch">
+        <input :checked="settings.gen.categoriesEnabled" type="checkbox" @change="onCategoriesToggle">
+        <span>按分类轮询（每轮选项尽量来自不同分类，保证多样性）</span>
+      </label>
       <label class="tt-choice-field">
         <span>每次生成条数</span>
         <input :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, 4) })">
@@ -99,6 +108,14 @@ function onBehaviorChange(event: Event): void {
     settings.updateGen({ clickBehavior: targetValue(event) as ChoiceGenParams['clickBehavior'] });
 }
 
+function onAutoToggle(event: Event): void {
+    settings.updateGen({ autoGenerate: (event.target as HTMLInputElement).checked });
+}
+
+function onCategoriesToggle(event: Event): void {
+    settings.updateGen({ categoriesEnabled: (event.target as HTMLInputElement).checked });
+}
+
 function clampInt(event: Event, min: number, max: number, fallback: number): number {
     const value = Number(targetValue(event));
     if (!Number.isFinite(value)) return fallback;
@@ -171,6 +188,15 @@ onBeforeUnmount(() => {
     min-width: 9em;
     opacity: 0.8;
     flex-shrink: 0;
+}
+
+.tt-choice-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 0.85em;
+    cursor: pointer;
 }
 
 .tt-choice-field input,
