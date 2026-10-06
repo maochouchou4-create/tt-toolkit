@@ -4,7 +4,8 @@
     单 tab 纵向卡片流：人设编织＋落库与载入两卡；生成参考收 <details>
     折叠块。任务参数（流式/思考强度/超时）已固化为 TASK_DEFAULTS，
     端点选择唯一入口＝「API」页「使用」按钮（未选端点由 generate 的
-    fail-fast toast 引导）。
+    fail-fast toast 引导）。生成按钮双态：进行中点击＝取消（choice
+    选项条同款长请求逃生姿势）。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系），类名前缀 tt-persona-。
   -->
   <div class="tt-persona-tab">
@@ -25,8 +26,8 @@
       </details>
 
       <div class="tt-actions">
-        <button type="button" :disabled="store.isProcessing" @click="store.generate()">
-          {{ store.isProcessing ? (store.processingLabel || '处理中…') : '生成人设' }}
+        <button type="button" @click="onGenerateClick">
+          {{ store.isProcessing ? `${store.processingLabel || '处理中…'} · 停止` : '生成人设' }}
         </button>
         <button v-if="store.hasResult" type="button" :disabled="store.isProcessing" @click="store.reroll()">重 roll</button>
         <button v-if="store.hasResult" type="button" @click="confirmClear">清空</button>
@@ -103,6 +104,12 @@ const loadCandidateKey = ref('');
 function confirmClear(): void {
     if (!confirm('清空需求/结果？（已落库的配置不受影响）')) return;
     store.clearAll();
+}
+
+/** 生成按钮双态：空闲＝发起生成；进行中＝取消（长请求逃生，choice 选项条同款）。 */
+function onGenerateClick(): void {
+    if (store.isProcessing) store.cancelGeneration();
+    else void store.generate();
 }
 
 const selectedLoadCandidate = computed(() => {

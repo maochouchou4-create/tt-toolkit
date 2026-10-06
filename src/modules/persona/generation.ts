@@ -44,6 +44,14 @@ import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
 
+/** 外部取消（「停止」按钮）的哨兵异常——store 侧降级为取消提示，不作错误弹报。 */
+export class PersonaRunCancelled extends Error {
+    constructor() {
+        super('已取消');
+        this.name = 'PersonaRunCancelled';
+    }
+}
+
 /** 生成调用面的任务配置（store 侧解析端点；任务参数固化于 TASK_DEFAULTS）。 */
 export interface GenerationApiConfig {
     /** 选中统一端点（url/key/model；store 侧已解析非空）。 */
@@ -146,6 +154,8 @@ interface RequestOnceParams {
     label: string;
     /** prefill 兼容重试时的用户提示（toast 归调用方）。 */
     onPrefillRetry?: () => void;
+    /** 外部取消信号（整条两段链共用一个；段内超时与它汇入同一 abort 通道）。 */
+    signal?: AbortSignal;
 }
 
 /**
@@ -178,6 +188,12 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
     let responseContent = '';
     const controller = new AbortController();
     let timedOutBySelf = false;
+    // 外部取消汇入段内 controller：一处 abort 同时命中 fetch 与超时定时器
+    const onExternalAbort = () => {
+        try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
+    };
+    if (params.signal?.aborted) throw new PersonaRunCancelled();
+    params.signal?.addEventListener('abort', onExternalAbort);
     const timeoutId = setTimeout(() => {
         timedOutBySelf = true;
         try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
@@ -203,32 +219,43 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
             return result.content;
         };
 
-        try {
-            responseContent = await doRequest(promptArray);
-        } catch (err) {
-            // 分类：1) 自触发超时 2) 网络层错误 3) 400/Bad Request + prefill → 去 prefill 重试 4) 其它原样抛
+        /** 错误归类（首发与 prefill 重试共用）：取消→哨兵；超时/网络→人话；其余原样抛。 */
+        const classifyFailure = (err: unknown): never => {
             const errStr = (err && (err instanceof Error ? err.message : err.toString()) || '').toString();
             const errLower = errStr.toLowerCase();
             const isAbort = err && ((err as Error).name === 'AbortError' || errLower.includes('abort'));
             const isNetwork = err && ((err as Error).name === 'TypeError' || errLower.includes('failed to fetch') || errLower.includes('networkerror'));
-            const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
 
+            // 外部取消优先归类（外部 abort 也会触发 isAbort，先判它防误报超时）
+            if (params.signal?.aborted) throw new PersonaRunCancelled();
             if (timedOutBySelf || (isAbort && controller.signal.aborted)) {
                 throw new Error(`请求超时（${TASK_DEFAULTS.personaTimeoutSec} 秒）——中转站响应过慢或网络不稳，可稍后重试或更换端点`);
             }
-
-            if (prefillContent && isBadRequest) {
-                log.warn('生成失败 (400/Bad Request)，去 prefill 重试', err);
-                params.onPrefillRetry?.();
-                responseContent = await doRequest(promptArrayNoPrefill);
-            } else if (isNetwork) {
+            if (isNetwork) {
                 throw new Error(`网络请求失败：${errStr}。请检查中转站地址、API Key、网络连通性（梯子 / 公司网络代理等可能拦截）。`);
-            } else {
-                throw err;
+            }
+            throw err;
+        };
+
+        try {
+            responseContent = await doRequest(promptArray);
+        } catch (err) {
+            // 分类：1) 自触发超时 2) 网络层错误 3) 400/Bad Request + prefill → 去 prefill 重试 4) 其它原样抛
+            const errLower = (err && (err instanceof Error ? err.message : err.toString()) || '').toString().toLowerCase();
+            const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
+            if (!(prefillContent && isBadRequest)) classifyFailure(err);
+            log.warn('生成失败 (400/Bad Request)，去 prefill 重试', err);
+            params.onPrefillRetry?.();
+            try {
+                responseContent = await doRequest(promptArrayNoPrefill);
+            } catch (retryErr) {
+                // 重试期间的超时/取消/网络错误与首发同口径归类，不裸冒泡
+                classifyFailure(retryErr);
             }
         }
     } finally {
         clearTimeout(timeoutId);
+        params.signal?.removeEventListener('abort', onExternalAbort);
     }
 
     return responseContent;
@@ -243,6 +270,8 @@ export interface RunGenerationConfig extends GenerationApiConfig {
     onPrefillRetry?: () => void;
     /** 段边界进度文案（「策展模板中…」/「生成中…」；store 接管按钮态）。 */
     onProgress?: (label: string) => void;
+    /** 外部取消信号（「停止」按钮；贯穿两段）。 */
+    signal?: AbortSignal;
 }
 
 /**
@@ -303,6 +332,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
             prefillContent: PREFILL_SCHEMA,
             label: 'curator',
             onPrefillRetry: config.onPrefillRetry,
+            signal: config.signal,
         });
         const curated = raw ? stripYamlFence(raw, PREFILL_SCHEMA) : '';
         if (!isParsableSchema(curated)) {
@@ -328,6 +358,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
         prefillContent: profilePrefill,
         label: 'personaGen',
         onPrefillRetry: config.onPrefillRetry,
+        signal: config.signal,
     });
     return finalize(raw, profilePrefill);
 }
