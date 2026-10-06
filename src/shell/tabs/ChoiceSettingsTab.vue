@@ -1,8 +1,8 @@
 <template>
   <!--
-    选项生成设置：生成通道（统一端点表引用＋choice 任务参数）＋生成参数
+    选项生成设置：生成通道（全局活动端点只读展示＋choice 任务参数）＋生成参数
     ＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
-    端点实体（增删改/测连/拉模型）在「API」页维护，此处只做选择与参数。
+    端点实体与端点选择（「使用」按钮）都在「API」页维护，此处只读展示与调参。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
   -->
   <div class="tt-choice-settings-tab">
@@ -12,15 +12,13 @@
         独立旁路请求（不走宿主生成通道）；密钥经宿主后端转发直达上游。
         实测档位：DeepSeek 官方端点请选「JSON 对象」（不支持结构化 schema）；GG 类假流式端点必须开「流式」。
       </div>
-      <label v-if="apis.endpoints.length" class="tt-choice-field">
-        <span>生成端点</span>
-        <select :value="settings.activeEndpointId" @change="onEndpointChange">
-          <option value="" disabled>（选择端点）</option>
-          <option v-for="e in apis.endpoints" :key="e.id" :value="e.id">{{ e.name || '（未命名）' }} · {{ e.model || '未填模型' }}</option>
-        </select>
-      </label>
+      <div v-if="apis.activeEndpoint" class="tt-choice-field">
+        <span>当前端点</span>
+        <span class="tt-choice-endpoint-value">{{ apis.activeEndpoint.name || '（未命名）' }} · {{ apis.activeEndpoint.model || '未填模型' }}</span>
+        <button type="button" class="tt-choice-link" @click="goApi">到「API」页切换</button>
+      </div>
       <div v-else class="tt-choice-empty">
-        未配置端点——<button type="button" class="tt-choice-link" @click="goApi">到「API」页添加</button>
+        未选择端点——<button type="button" class="tt-choice-link" @click="goApi">到「API」页选择</button>
       </div>
       <label class="tt-choice-field">
         <span>输出契约</span>
@@ -147,10 +145,6 @@ function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
 }
 
-function onEndpointChange(event: Event): void {
-    settings.setActiveEndpoint(targetValue(event));
-}
-
 function onContractChange(event: Event): void {
     settings.updateTask({ outputContract: targetValue(event) as ChoiceTaskParams['outputContract'] });
 }
@@ -251,6 +245,16 @@ onBeforeUnmount(() => {
     min-width: 9em;
     opacity: 0.8;
     flex-shrink: 0;
+}
+
+/* 全局活动端点只读行：取值文本占满中段，切换动作收在右侧链接
+   （选择器带父类限定压过 .tt-choice-field > span 的 min-width 基线） */
+.tt-choice-field > .tt-choice-endpoint-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tt-choice-note {

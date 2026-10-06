@@ -15,7 +15,7 @@ import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { migrateApiDomain } from '@/modules/apis/migration';
-import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
+import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
@@ -47,13 +47,14 @@ function wipeDomain(): void {
     if (tt) delete tt.persona;
 }
 
-/** 统一端点表＋choice 域整体抹掉（收编场景需要三域全部从零起步）。 */
+/** 统一端点表＋choice 域＋全局活动键整体抹掉（收编场景需要三域＋全局键从零起步）。 */
 function wipeApiScenarioDomains(): void {
     const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
     if (tt) {
         delete tt.apis;
         delete tt.choice;
         delete tt.persona;
+        delete tt[ACTIVE_ENDPOINT_KEY];
     }
 }
 
@@ -80,9 +81,8 @@ function runMigrationChecks(): void {
     // 1a. 空 localStorage → 写默认域
     const first = migratePersonaDomain();
     const defaults = readPersonaDomain();
-    check('迁移：空 localStorage 首启动写入默认域（endpointId 空、preset=current）',
+    check('迁移：空 localStorage 首启动写入默认域（preset=current）',
         !first.skipped && first.migratedKeys.length === 0
-        && defaults.localConfig.endpointId === ''
         && defaults.uiState.generationPreset === 'current'
         && defaults.userContext.request === '' && defaults.userContext.result === '',
         `skipped=${first.skipped} migrated=${first.migratedKeys.join(',') || '无'}`);
@@ -135,11 +135,12 @@ function runMigrationChecks(): void {
         !('wiSelection' in (migrated as unknown as Record<string, unknown>))
         && !('pinnedBooks' in (migrated as unknown as Record<string, unknown>))
         && !('extraBooks' in (migrated.localConfig as unknown as Record<string, unknown>)));
-    // v1.1.0 存量域（含世界书勾选/钉选字段）导入：normalize 丢弃退役字段，
-    // 其余字段逐项保真——判据「迁移数据未受损」的读侧证明
+    // v1.1.0 存量域（含世界书勾选/钉选字段＋v1.3 的 localConfig.endpointId
+    // 旧键）导入：normalize 丢弃退役字段，其余字段逐项保真——判据「迁移
+    // 数据未受损」的读侧证明
     wipeDomain();
     (extension_settings.ttToolkit as Record<string, unknown>).persona = {
-        localConfig: { ...defaultLocalConfig(), extraBooks: ['v1.1.0追加书'] },
+        localConfig: { ...defaultLocalConfig(), endpointId: 'v1.3旧引用', extraBooks: ['v1.1.0追加书'] },
         wiSelection: { charA: { '旧书': ['1', '2'] } },
         pinnedBooks: ['v1.1.0钉选书'],
         uiState: { generationPreset: 'pure' },
@@ -151,7 +152,8 @@ function runMigrationChecks(): void {
         && upgraded.userContext.request === 'v1.1.0现场' && upgraded.userContext.result === '姓名: 旧人设'
         && !('wiSelection' in (upgraded as unknown as Record<string, unknown>))
         && !('pinnedBooks' in (upgraded as unknown as Record<string, unknown>))
-        && !('extraBooks' in (upgraded.localConfig as unknown as Record<string, unknown>)));
+        && !('extraBooks' in (upgraded.localConfig as unknown as Record<string, unknown>))
+        && !('endpointId' in (upgraded.localConfig as unknown as Record<string, unknown>)));
     check('迁移：退休键 removeItem 清理（pw_template_v6_new_yaml）',
         second.retiredKeysCleaned.includes('pw_template_v6_new_yaml') && ls.get('pw_template_v6_new_yaml') === null);
     check('迁移：旧键保留作 legacy 快照（防回滚丢增量）',
@@ -206,8 +208,8 @@ function runMigrationChecks(): void {
         `remaps=${JSON.stringify(report.idRemaps)} merged=${report.mergedDuplicates}`);
     const rawChoice = (tt.choice ?? {}) as Record<string, unknown>;
     const choiceTask = (rawChoice.task ?? {}) as Record<string, unknown>;
-    check('收编：choice 域 v2 重写（activeEndpointId 重映射＋任务参数从选中端点拷贝＋gen/pool 透传）',
-        rawChoice.activeEndpointId === 'c2'
+    check('收编：choice 域 v2 重写（全局活动键提升＝activeApiId 重映射＋任务参数从选中端点拷贝＋gen/pool 透传）',
+        readActiveEndpointId() === 'c2'
         && choiceTask.outputContract === 'json_object' && choiceTask.reasoningEffort === 'off'
         && choiceTask.stream === true && choiceTask.temperature === 0.9 && choiceTask.maxTokens === 1024
         && ((rawChoice.gen ?? {}) as Record<string, unknown>).count === 5
@@ -216,11 +218,11 @@ function runMigrationChecks(): void {
         `choice=${JSON.stringify(rawChoice)}`);
     const afterCollect = readPersonaDomain();
     const rawPersonaAfter = (rawPersona().localConfig ?? {}) as Record<string, unknown>;
-    check('收编：persona localConfig v2 重写（endpointId 重映射＋任务参数收编＋旧字段清退）',
-        afterCollect.localConfig.endpointId === 'c1'
-        && afterCollect.localConfig.stream === true
+    check('收编：persona localConfig v2 重写（任务参数收编；endpointId 旧键退役、选中不参与提升——choice 优先）',
+        afterCollect.localConfig.stream === true
         && afterCollect.localConfig.thinkingEffort === 'medium'
         && afterCollect.localConfig.timeoutSec === 90
+        && !('endpointId' in rawPersonaAfter)
         && !('apiSource' in rawPersonaAfter) && !('apiProfiles' in rawPersonaAfter)
         && !('indepApiUrl' in rawPersonaAfter) && !('activeApiProfileId' in rawPersonaAfter));
 
@@ -235,6 +237,13 @@ function runMigrationChecks(): void {
         && JSON.stringify(tt.apis) === apisBefore
         && JSON.stringify(tt.choice) === choiceBefore
         && domainJson() === personaBefore);
+
+    // 1h. 删活动端点 → 全局选中键联动清空（回未选态，两任务生成入口 fail fast）
+    writeApiDomain([{ id: 'smoke-del', name: '待删端点', url: 'https://del.example.com/v1', key: 'k', model: 'm' }]);
+    setActiveEndpointId('smoke-del');
+    deleteEndpoint('smoke-del');
+    check('端点删除：删活动端点联动清空全局选中键（回未选态）',
+        readActiveEndpointId() === '' && readApiDomain().every(e => e.id !== 'smoke-del'));
 
     // 1g. 退休键清理无条件（域在场也清）——再放回验证
     ls.set('pw_custom_themes_v1', '残留');
@@ -562,9 +571,9 @@ async function runApiChecks(): Promise<void> {
 
 async function runPersonaE2EChecks(): Promise<void> {
     const store = usePersonaStore();
-    // 端点表放一个冒烟端点，store 快照指向它
+    // 端点表放一个冒烟端点，全局活动键指向它
     writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟端点', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model' }]);
-    store.config.endpointId = 'smoke-endpoint';
+    setActiveEndpointId('smoke-endpoint');
     store.config.stream = false;
     store.requestText = '生成一个侦探人设';
     store.isProcessing = false;
@@ -611,7 +620,7 @@ async function runPersonaE2EChecks(): Promise<void> {
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);
-        store.config.endpointId = '';
+        setActiveEndpointId('');
     }
 }
 
@@ -650,14 +659,14 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     store.isProcessing = false;
     store.processingLabel = '';
 
-    // 端点缺失 fail fast（统一端点口径）
-    store.config.endpointId = 'no-such-endpoint';
+    // 端点缺失 fail fast（全局活动键悬空指向）
+    setActiveEndpointId('no-such-endpoint');
     store.requestText = '合成需求';
     const resultBefore = store.resultText;
     await store.generate();
     check('store：端点缺失 fail fast（不进生成、互斥态干净、结果不误写）',
         store.isProcessing === false && store.processingLabel === '' && store.resultText === resultBefore);
-    store.config.endpointId = '';
+    setActiveEndpointId('');
 
     // 会话感知：CHAT_CHANGED 处理（开场白选择与 lastRun 无条件清空、
     // 宿主快照无条件重拉——读取廉价且 loadCandidates 依赖 userName，
@@ -720,5 +729,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/3 旧键搬入＋过渡透传/域形状收缩＋v1.1.0 存量域退役字段丢弃/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（统一端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知清空全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/3 旧键搬入＋过渡透传/域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知清空全部通过。');
 }

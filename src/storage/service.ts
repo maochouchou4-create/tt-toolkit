@@ -46,6 +46,13 @@ export interface NavStorageState {
 export interface GlobalDomain {
     nav: NavStorageState;
     /**
+     * 全局活动端点（引用统一端点表条目 id；''/缺席/指向已删端点＝未选态）。
+     * 「当前用的端点」是全局概念：choice 与 persona 两任务共用同一选中，
+     * 读写走 modules/apis/storage 的 readActiveEndpointId/setActiveEndpointId
+     * 单通道，其他位置不直接碰此键。
+     */
+    activeEndpointId?: string;
+    /**
      * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
      * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
      */

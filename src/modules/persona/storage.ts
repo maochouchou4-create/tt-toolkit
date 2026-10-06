@@ -5,10 +5,11 @@
  * getGlobal/setGlobal 单通道）。域形状 normalize 纪律照 choice/pool：
  * 未知字段丢弃（显式保真注释），缺字段补默认，反复读写幂等。
  *
- * 端点身份（url/key/model）移入统一端点表（modules/apis），
- * localConfig 只保留 persona 任务参数＋选中端点引用 endpointId。旧字段
- * （apiSource、indepApi 前缀三键、apiProfiles、activeApiProfileId）由 migrateApiDomain
- * 一次性收编，此后在 normalize 的未知字段丢弃面自然退休。
+ * 端点身份（url/key/model）移入统一端点表（modules/apis），端点选择
+ * 收归全局活动键（v1.4.0 起）——localConfig 只保留 persona 任务参数。
+ * 旧字段（apiSource、indepApi 前缀三键、apiProfiles、activeApiProfileId）
+ * 由 migrateApiDomain 一次性收编；v1.3 存量的 localConfig.endpointId 旧键
+ * 不参与提升（choice 侧优先），在 normalize 的未知字段丢弃面自然退休。
  *
  * 迁移纪律（nav 同款幂等）：域不存在→读 3 个旧键搬入新域→保留旧键
  * 作 legacy 快照（回滚旧版本不丢存量；新版本不再写旧键）→退休键
@@ -46,10 +47,8 @@ export const RETIRED_KEYS = [
     'pw_pinned_books_v1',
 ] as const;
 
-/** persona 任务配置（localConfig v2：端点引用＋任务参数，无端点身份）。 */
+/** persona 任务配置（localConfig：persona 任务参数；端点选择归全局键）。 */
 export interface LocalConfig {
-    /** 选中统一端点表条目 id（空＝未配置端点）。字段名即存储键。 */
-    endpointId: string;
     /** 流式请求（长请求防挂死姿势；旧 indepStream）。 */
     stream: boolean;
     /** 思考强度（档位与守门同 apis/client 单点；字段名是存量存储键）。 */
@@ -77,7 +76,6 @@ export function defaultUserContext(): UserContext {
 
 export function defaultLocalConfig(): LocalConfig {
     return {
-        endpointId: '',
         stream: true,
         thinkingEffort: 'off',
         timeoutSec: 300,
@@ -109,7 +107,6 @@ function normalizeLocalConfig(value: unknown): LocalConfig {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
     const timeout = Number(raw.timeoutSec);
     return {
-        endpointId: normalizeString(raw.endpointId, ''),
         stream: typeof raw.stream === 'boolean' ? raw.stream : true,
         thinkingEffort: normalizeReasoningEffort(raw.thinkingEffort),
         timeoutSec: clampTimeout(Number.isFinite(timeout) && timeout > 0 ? timeout : 300),

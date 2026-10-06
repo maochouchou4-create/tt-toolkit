@@ -8,7 +8,7 @@
     <div class="tt-card">
       <div class="tt-card-title">API 端点</div>
       <div class="tt-card-sub">
-        选项生成与人设生成共用这里的端点；到各自设置页的「生成通道」里选择用哪一个。
+        选项生成与人设生成共用这里的端点与同一个「当前端点」——点条目上的「使用」切换，两任务即时生效。
         密钥经宿主后端转发直达上游，不存进宿主的密钥库。
       </div>
 
@@ -16,7 +16,7 @@
         还没有端点——点下方「新增端点」开始配置。
       </div>
 
-      <div v-for="e in apis.endpoints" :key="e.id" class="tt-api-row">
+      <div v-for="e in apis.endpoints" :key="e.id" class="tt-api-row" :class="{ 'tt-api-row--active': apis.activeEndpointId === e.id }">
         <div class="tt-api-row-main">
           <span class="tt-api-name">{{ e.name || '（未命名）' }}</span>
           <span class="tt-api-url" :title="e.url">{{ e.url || '（未填地址）' }}</span>
@@ -24,6 +24,8 @@
           <span class="tt-api-key" :title="e.key ? '密钥已保存（打码显示）' : '未填密钥'">{{ maskKey(e.key) }}</span>
         </div>
         <div class="tt-api-row-actions">
+          <span v-if="apis.activeEndpointId === e.id" class="tt-api-active-mark">使用中</span>
+          <button v-else type="button" class="tt-api-btn" title="设为当前端点（选项生成与人设生成同时生效）" @click="apis.useEndpoint(e.id)">使用</button>
           <button type="button" class="tt-api-btn" @click="apis.startDraft(e)">编辑</button>
           <button type="button" class="tt-api-btn tt-api-btn-danger" @click="confirmRemove(e)">删除</button>
         </div>
@@ -92,7 +94,7 @@ function maskKey(key: string): string {
 
 function confirmRemove(endpoint: ApiEndpoint): void {
     const label = endpoint.name || endpoint.url || '该端点';
-    // 删除是破坏性操作：确认后执行；两侧「生成通道」的选中引用悬空由各页引导兜底
+    // 删除是破坏性操作：确认后执行；删的是当前端点时全局选中键由存储层联动清空
     if (!window.confirm(`确定删除「${label}」？该操作不可撤销。`)) return;
     apis.removeEndpoint(endpoint.id);
 }
@@ -204,8 +206,19 @@ function onSave(): void {
 
 .tt-api-row-actions {
     display: flex;
+    align-items: center;
     gap: 6px;
     flex-shrink: 0;
+}
+
+/* 「使用中」标记与活动行高亮（当前全局端点的可视锚点） */
+.tt-api-active-mark {
+    font-size: 0.8em;
+    color: var(--SmartThemeQuoteColor, #4b8b5f);
+}
+
+.tt-api-row--active .tt-api-name {
+    color: var(--SmartThemeQuoteColor, #4b8b5f);
 }
 
 .tt-api-btn {
