@@ -19,6 +19,7 @@
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
+import { normalizeReasoningEffort, type ReasoningEffort } from '@/modules/apis/client';
 
 /** persona 域键（extension_settings.ttToolkit 下）。 */
 export const PERSONA_DOMAIN_KEY = 'persona';
@@ -45,16 +46,14 @@ export const RETIRED_KEYS = [
     'pw_pinned_books_v1',
 ] as const;
 
-/** 思考强度档位（'off'＝不注入 reasoning_effort 字段）。 */
-export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high';
-
 /** persona 任务配置（localConfig v2：端点引用＋任务参数，无端点身份）。 */
 export interface LocalConfig {
-    /** 选中统一端点表条目 id（空＝未配置端点）。 */
+    /** 选中统一端点表条目 id（空＝未配置端点）。字段名即存储键。 */
     endpointId: string;
     /** 流式请求（长请求防挂死姿势；旧 indepStream）。 */
     stream: boolean;
-    thinkingEffort: ThinkingEffort;
+    /** 思考强度（档位与守门同 apis/client 单点；字段名是存量存储键）。 */
+    thinkingEffort: ReasoningEffort;
     /** 请求超时秒数（钳制 30..1800；旧 indepTimeout）。 */
     timeoutSec: number;
 }
@@ -97,8 +96,6 @@ export function defaultPersonaDomain(): PersonaDomain {
 // normalize（域形状保真：未知字段丢弃，缺字段补默认）
 // ============================================================================
 
-const THINKING_EFFORTS: readonly string[] = ['off', 'low', 'medium', 'high'];
-
 /** 超时钳制（旧 clampTimeout 同语义：30..1800 秒）。 */
 export function clampTimeout(sec: number): number {
     return Math.min(1800, Math.max(30, sec));
@@ -111,11 +108,10 @@ function normalizeString(value: unknown, fallback: string): string {
 function normalizeLocalConfig(value: unknown): LocalConfig {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
     const timeout = Number(raw.timeoutSec);
-    const effort = normalizeString(raw.thinkingEffort, 'off');
     return {
         endpointId: normalizeString(raw.endpointId, ''),
         stream: typeof raw.stream === 'boolean' ? raw.stream : true,
-        thinkingEffort: (THINKING_EFFORTS.includes(effort) ? effort : 'off') as ThinkingEffort,
+        thinkingEffort: normalizeReasoningEffort(raw.thinkingEffort),
         timeoutSec: clampTimeout(Number.isFinite(timeout) && timeout > 0 ? timeout : 300),
     };
 }

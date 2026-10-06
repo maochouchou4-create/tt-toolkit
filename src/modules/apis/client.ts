@@ -53,6 +53,18 @@ export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
  */
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
 
+const REASONING_EFFORTS: readonly string[] = ['off', 'low', 'medium', 'high'];
+
+/**
+ * 思考强度档位守门（choice/persona 两活域共用单点）：存档里的历史值
+ * 不可信，枚举外回退 fallback（活域语义＝'off' 不发送字段）。
+ * legacy 迁移侧的流式缺省特例见 apis/migration.ts（与本函数无关——
+ * 那是 stream 字段的旧用户行为保真，不是思考强度档位问题）。
+ */
+export function normalizeReasoningEffort(raw: unknown, fallback: ReasoningEffort = 'off'): ReasoningEffort {
+    return (typeof raw === 'string' && REASONING_EFFORTS.includes(raw) ? raw : fallback) as ReasoningEffort;
+}
+
 export interface GenerateRequestConfig {
     /** API base（宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径） */
     baseUrl: string;

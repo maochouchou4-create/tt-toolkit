@@ -12,7 +12,13 @@
  */
 
 import { createApp } from 'vue';
-import { appendWandMenuEntry, eventBus, event_types, isSlashCommandRegistered, registerSlashCommand } from '@/host';
+import {
+    appendWandMenuEntry,
+    isSlashCommandRegistered,
+    registerSlashCommand,
+    waitForResource,
+    type WandMenuEntry,
+} from '@/host';
 import { pinia } from '@/pinia';
 import { version } from '@/version';
 import ShellApp from './ShellApp.vue';
@@ -32,6 +38,14 @@ export const TOOLBOX_COMMAND = 'tt-toolbox';
 // 头注核实），三段等待为纵深防御——轮询仍按最坏情况放宽
 const WAND_POLL_INTERVAL_MS = 250;
 const WAND_POLL_MAX_TRIES = 40;
+
+// 魔棒入口配置（立查与轮询共用同一对象——单点防两侧漂移）
+const WAND_ENTRY: WandMenuEntry = {
+    icon: 'fa-toolbox',
+    label: 'TT 工具箱',
+    title: '打开 TT 工具箱面板',
+    onClick: () => toggleShell(),
+};
 
 // 壳的斜令通道：QR「工具箱」按钮（nav 集末位）与魔棒入口共用，命令名经
 // TOOLBOX_COMMAND 常量导出给 nav（单一事实源）。**注册在模块求值期执行
@@ -98,44 +112,22 @@ function installWandEntry(): void {
     const dbg = globalThis as Record<string, unknown>;
     dbg.__TTK_DEBUG__ = Object.freeze({ version, isOpen: () => useShellStore().open });
 
-    tryWandEntry();
+    void ensureWandEntry();
 }
 
-function tryWandEntry(): void {
-    const ok = appendWandMenuEntry(
-        {
-            icon: 'fa-toolbox',
-            label: 'TT 工具箱',
-            title: '打开 TT 工具箱面板',
-            onClick: () => toggleShell(),
-        },
-        WAND_ENTRY_ID,
-    );
-    if (ok) return;
-
-    // 三段等待的第二段：APP_READY 晚订阅会立即重放（EventEmitter 语义）
-    eventBus.once(event_types.APP_READY, tryWandEntry);
-    // 第三段：轮询兜底（APP_READY 已发而菜单仍缺席＝宿主未建菜单的情形）
-    let tries = 0;
-    const timer = setInterval(() => {
-        const done = appendWandMenuEntry(
-            {
-                icon: 'fa-toolbox',
-                label: 'TT 工具箱',
-                title: '打开 TT 工具箱面板',
-                onClick: () => toggleShell(),
-            },
-            WAND_ENTRY_ID,
-        );
-        tries++;
-        if (done || tries >= WAND_POLL_MAX_TRIES) {
-            clearInterval(timer);
-            if (!done && tries >= WAND_POLL_MAX_TRIES) {
-                console.warn(`[tt-toolkit][shell] #extensionsMenu 等待超时（${version}），魔棒入口未注入`);
-            }
-            return;
-        }
-    }, WAND_POLL_INTERVAL_MS);
+/**
+ * 魔棒入口三段等待（host 单点：立查 → APP_READY 重放复测 → 轮询兜底）。
+ * 探测带副作用（注入入口），幂等可重入（appendWandMenuEntry 对已注入
+ * id 直接返回 true）；超时＝宿主未建菜单，留痕供排障（fail fast 不静默）。
+ */
+async function ensureWandEntry(): Promise<void> {
+    const done = await waitForResource(() => (appendWandMenuEntry(WAND_ENTRY, WAND_ENTRY_ID) ? true : null), {
+        intervalMs: WAND_POLL_INTERVAL_MS,
+        maxTries: WAND_POLL_MAX_TRIES,
+    });
+    if (!done) {
+        console.warn(`[tt-toolkit][shell] #extensionsMenu 等待超时（${version}），魔棒入口未注入`);
+    }
 }
 
 /**

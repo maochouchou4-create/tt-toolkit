@@ -39,8 +39,12 @@ export {
     type WorldInfoBuckets,
     type WorldInfoScanInput,
 } from './chat';
-export { createTtlog } from './ttlog';
+export { createTtlog, safeText } from './ttlog';
 export type { Ttlog, TtlogEntry } from './ttlog';
+export { showToast } from './toast';
+export type { ToastLevel } from './toast';
+export { waitForResource } from './wait';
+export type { WaitResourceOptions } from './wait';
 export { formatProbeResults, probeHost } from './probe';
 export type { ProbeResult } from './probe';
 export {

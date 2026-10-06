@@ -5,7 +5,7 @@
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施（批B 验收断言的
  * 依赖设施——用户靠它核对各注入模块逐项可见）。
  */
-import { getSendTextareaValue, sendInputMessage, setSendTextareaValue } from '@/host';
+import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
 import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
 import {
     assembleMessages,
@@ -145,6 +145,8 @@ export async function generateOptions(): Promise<void> {
         } else {
             const message = e instanceof Error ? e.message : String(e);
             store.fail(message);
+            // 失败表面化（persona/nav 同款纪律）：选项条错误态＋toast＋console 各司其职
+            showToast(`选项生成失败：${message}`, 'error');
             console.error('[tt-toolkit][choice] 生成失败', e);
         }
     } finally {

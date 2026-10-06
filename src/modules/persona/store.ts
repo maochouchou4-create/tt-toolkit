@@ -23,7 +23,7 @@ import {
     getPersonaDescription,
     getTavernContext,
     getUserDisplayName,
-    hostWindow,
+    showToast as toast,
     upsertPersona,
     type WorldBookEntrySummary,
 } from '@/host';
@@ -36,18 +36,6 @@ import { TEXT } from './strings';
 import { clampTimeout, readPersonaDomain, writePersonaDomain, type LocalConfig } from './storage';
 
 const log = createTtlog('modules/persona/store');
-
-// 主窗口内 toastr 为全局；不可用时退回日志，不静默丢失用户反馈（nav 同款纪律）
-function toast(message: string, level: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
-    try {
-        const t = hostWindow.toastr;
-        const fn = t?.[level] ?? t?.info;
-        if (fn) fn.call(t, message);
-        else log.info(`toast-fallback ${level}: ${message}`);
-    } catch {
-        log.info(`toast-fallback ${level}: ${message}`);
-    }
-}
 
 /** 最近一次生成请求的记忆（重 roll 同参再来）。 */
 interface LastRunDescriptor {
@@ -69,6 +57,39 @@ function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
         thinkingEffort: config.thinkingEffort,
         timeoutSec: clampTimeout(config.timeoutSec),
     };
+}
+
+/** store 实例类型（模块级私有装配函数专用——不扩 store 公开面）。 */
+type PersonaStore = ReturnType<typeof usePersonaStore>;
+
+/**
+ * 生成单次执行（generate/reroll 共用装配）：互斥、进度、调用、落盘、
+ * 异常提示一条龙。差异参数化：run＝请求快照（generate 现场收集并先记
+ * lastRun；reroll 只重放既有 lastRun——批1 后 reroll 不再重收集）；
+ * successToast＝成功提示（reroll 专属）。
+ */
+async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, api: GenerationApiConfig, successToast?: string): Promise<void> {
+    store.isProcessing = true;
+    store.processingLabel = '生成中…';
+    try {
+        const result = await runGeneration({
+            ...api,
+            request: run.request,
+            wiText: run.wiText,
+            greetingsText: run.greetingsText,
+            generationPreset: store.generationPreset,
+            onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
+            onProgress: label => { store.processingLabel = label; },
+        });
+        store.resultText = result;
+        store.persistUserContext();
+        if (successToast) toast(successToast);
+    } catch (err) {
+        toast(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+        store.isProcessing = false;
+        store.processingLabel = '';
+    }
 }
 
 export const usePersonaStore = defineStore('tt-persona', {
@@ -237,39 +258,27 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;
             }
+            // 互斥先于 wiText 收集（异步窗口内二次点击不得重入）
             this.isProcessing = true;
             this.processingLabel = '生成中…';
             try {
                 const wiText = await collectWorldInfoContext();
-                const greetingsText = this.selectedGreetingIndex !== null
-                    ? (this.greetings[this.selectedGreetingIndex]?.content ?? '')
-                    : '';
                 const run: LastRunDescriptor = {
                     request: this.requestText,
                     wiText,
-                    greetingsText,
+                    greetingsText: this.selectedGreetingIndex !== null
+                        ? (this.greetings[this.selectedGreetingIndex]?.content ?? '')
+                        : '',
                 };
                 this.lastRun = run;
-                const result = await runGeneration({
-                    ...api,
-                    request: run.request,
-                    wiText,
-                    greetingsText,
-                    generationPreset: this.generationPreset,
-                    onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
-                    onProgress: label => { this.processingLabel = label; },
-                });
-                this.resultText = result;
-                this.persistUserContext();
-            } catch (err) {
-                toast(err instanceof Error ? err.message : String(err), 'error');
+                await executeGeneration(this, run, api);
             } finally {
                 this.isProcessing = false;
                 this.processingLabel = '';
             }
         },
 
-        /** 重 roll：同 lastRun 参数再来一次。 */
+        /** 重 roll：只重放 lastRun 快照（wiText 不重收集）。 */
         async reroll() {
             if (this.isProcessing) return;
             if (!this.lastRun) {
@@ -281,28 +290,7 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;
             }
-            const run = this.lastRun;
-            this.isProcessing = true;
-            this.processingLabel = '生成中…';
-            try {
-                const newText = await runGeneration({
-                    ...api,
-                    request: run.request,
-                    wiText: run.wiText,
-                    greetingsText: run.greetingsText,
-                    generationPreset: this.generationPreset,
-                    onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
-                    onProgress: label => { this.processingLabel = label; },
-                });
-                this.resultText = newText;
-                this.persistUserContext();
-                toast(TEXT.TOAST_REROLLED);
-            } catch (err) {
-                toast(err instanceof Error ? err.message : String(err), 'error');
-            } finally {
-                this.isProcessing = false;
-                this.processingLabel = '';
-            }
+            await executeGeneration(this, this.lastRun, api, TEXT.TOAST_REROLLED);
         },
 
         /** 清空（UI 层 confirm）。 */

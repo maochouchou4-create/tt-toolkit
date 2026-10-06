@@ -37,6 +37,9 @@ import {
     hostWindow,
     isSlashCommandRegistered,
     registerSlashCommand,
+    safeText,
+    showToast as toast,
+    waitForResource,
     type ChatMessage,
     type Ttlog,
 } from '@/host';
@@ -94,18 +97,8 @@ const CONFIG = Object.freeze({
 // --------------------------------------------------------
 const ttlog: Ttlog = createTtlog('msgnav');
 
-// dump 排障口的数据序列化（与转发器同规则：Error 给栈、异常对象不炸）
-function safeDumpText(value: unknown): string {
-    if (value === null || value === undefined) return '';
-    if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
-    if (typeof value === 'string') return value;
-    try {
-        return JSON.stringify(value) ?? String(value);
-    } catch {
-        return String(value);
-    }
-}
-
+// dump 排障口的数据序列化与转发器同规则（host/ttlog safeText 单点：
+// Error 给栈、嵌套 Error 走 replacer、循环引用不炸）
 // host/ttlog 不暴露熔断态，dump 以宿主 invoke ABI 可用性作同阶诊断
 function ttlogHealth(): string {
     const invoke = (globalThis as { __TAURI__?: { core?: { invoke?: unknown } }; __TAURITAVERN__?: { core?: { invoke?: unknown } } })
@@ -116,18 +109,6 @@ function ttlogHealth(): string {
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// 主窗口内 toastr 为全局；不可用时退回日志，不静默丢失用户反馈
-function toast(message: string, level: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
-    try {
-        const t = hostWindow.toastr;
-        const fn = t?.[level] ?? t?.info;
-        if (fn) fn.call(t, message);
-        else ttlog.info(`toast-fallback ${level}: ${message}`);
-    } catch {
-        ttlog.info(`toast-fallback ${level}: ${message}`);
-    }
 }
 
 // --------------------------------------------------------
@@ -541,37 +522,13 @@ function getQuickReplyApi(): QuickReplyApiLike | null {
     return typeof api === 'object' && api !== null ? (api as QuickReplyApiLike) : null;
 }
 
-// 三段等待：立查 → APP_READY（autoFire 事件，晚订阅会立即重放，不悬挂）
-// → 轮询兜底；APP_READY 已发而 api 仍缺席＝QR 扩展被禁用，立即认定失败
-async function waitForQuickReplyApi(): Promise<QuickReplyApiLike | null> {
-    const immediate = getQuickReplyApi();
-    if (immediate) return immediate;
-
-    await new Promise<void>(resolve => {
-        let settled = false;
-        let timer: ReturnType<typeof setInterval> | null = null;
-        // 单一出口：finish 自清轮询——APP_READY 晚订阅同步重放可能先于
-        // setInterval 创建而 settle，此时不再起轮询（防 detached 计时器
-        // 空转到 deadline）
-        const finish = () => {
-            if (settled) return;
-            settled = true;
-            if (timer !== null) clearInterval(timer);
-            resolve();
-        };
-        try {
-            eventBus.once(event_types.APP_READY, finish);
-        } catch (e) {
-            ttlog.warn('APP_READY subscribe failed, poll only', e instanceof Error ? e.message : String(e));
-        }
-        if (!settled) {
-            const deadline = Date.now() + QR_POLL_INTERVAL_MS * QR_POLL_MAX_TRIES;
-            timer = setInterval(() => {
-                if (getQuickReplyApi() || Date.now() >= deadline) finish();
-            }, QR_POLL_INTERVAL_MS);
-        }
+// 三段等待走 host 单点（立查 → APP_READY 重放复测 → 轮询兜底到 deadline）；
+// APP_READY 已发而 api 仍缺席＝QR 扩展被禁用，返回 null 即认定失败
+function waitForQuickReplyApi(): Promise<QuickReplyApiLike | null> {
+    return waitForResource(getQuickReplyApi, {
+        intervalMs: QR_POLL_INTERVAL_MS,
+        maxTries: QR_POLL_MAX_TRIES,
     });
-    return getQuickReplyApi();
 }
 
 function qrActivated(): boolean {
@@ -716,7 +673,7 @@ function dump(): string {
             + ` mounted=${root ? root.querySelectorAll(CONFIG.SEL.MESSAGE).length : 0}`
             + ` lastId=${getLastMessageIdSafe()} genActive=${noDom ? 'n/a' : isGenerationActive()}`,
         '--- ring (oldest first) ---',
-        ...ttlog.getBuffer().map(e => `${e.timestamp} [${e.type}] ${e.message}${e.data !== null && e.data !== undefined ? ` | ${safeDumpText(e.data)}` : ''}`),
+        ...ttlog.getBuffer().map(e => `${e.timestamp} [${e.type}] ${e.message}${e.data !== null && e.data !== undefined ? ` | ${safeText(e.data)}` : ''}`),
     ];
     return lines.join('\n');
 }

@@ -13,12 +13,17 @@
  */
 import { getGlobal, setGlobal } from '@/storage';
 import type { OutputContract, ReasoningEffort } from '@/modules/apis/client';
+import { normalizeReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import { readApiDomain } from '@/modules/apis/storage';
 import type { PoolGenParams } from './pool/types';
 import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
-const GLOBAL_CHOICE_KEY = 'choice';
+/**
+ * choice 域键（extension_settings.ttToolkit 下；migration 侧引用此常量，
+ * 字面量单一事实源）。
+ */
+export const GLOBAL_CHOICE_KEY = 'choice';
 
 /** choice 任务参数（挂在统一端点上的生成档位；端点身份不在其列）。 */
 export interface ChoiceTaskParams {
@@ -50,7 +55,11 @@ export interface ChoiceGenParams extends PoolGenParams {
 export interface ChoiceDomain {
     /** choice 任务参数（输出契约/思考强度/流式/温度/max_tokens） */
     task: ChoiceTaskParams;
-    /** 选中端点（引用统一端点表条目 id；空＝未配置） */
+    /**
+     * 选中端点（引用统一端点表条目 id；空＝未配置）。字段名即存储键，
+     * 与 persona 侧的 endpointId 不同名是存量数据契约——改名即丢用户
+     * 端点选择，两侧命名差异保留。
+     */
     activeEndpointId: string;
     gen: ChoiceGenParams;
     /** 条目池数据（批C：两层结构，见 pool/types.ts）。 */
@@ -80,10 +89,9 @@ function normalizeTaskParams(raw: unknown): ChoiceTaskParams {
     // 存档里的历史值不可信：档位枚举/数值范围逐字段守门
     const r = (raw ?? {}) as Partial<Record<keyof ChoiceTaskParams, unknown>>;
     const contract = r.outputContract === 'json_schema' || r.outputContract === 'prompt_only' ? r.outputContract : 'json_object';
-    const effort = r.reasoningEffort === 'low' || r.reasoningEffort === 'medium' || r.reasoningEffort === 'high' ? r.reasoningEffort : 'off';
     return {
         outputContract: contract,
-        reasoningEffort: effort,
+        reasoningEffort: normalizeReasoningEffort(r.reasoningEffort),
         stream: typeof r.stream === 'boolean' ? r.stream : true,
         temperature: typeof r.temperature === 'number' && Number.isFinite(r.temperature) ? r.temperature : 0.7,
         maxTokens: typeof r.maxTokens === 'number' && Number.isInteger(r.maxTokens) && r.maxTokens > 0 ? r.maxTokens : 2048,

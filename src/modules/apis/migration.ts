@@ -13,14 +13,13 @@
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
-import { normalizeApiUrl } from './client';
+import { newId } from '@/storage';
+import { normalizeApiUrl, normalizeReasoningEffort, type ReasoningEffort } from './client';
 import { APIS_DOMAIN_KEY, readApiDomain, writeApiDomain } from './storage';
 import type { ApiEndpoint } from './types';
-import type { ChoiceTaskParams } from '@/modules/choice/api';
+import { GLOBAL_CHOICE_KEY, type ChoiceTaskParams } from '@/modules/choice/api';
 import { DEFAULT_TASK_PARAMS } from '@/modules/choice/api';
 import { PERSONA_DOMAIN_KEY, clampTimeout, writePersonaDomain } from '@/modules/persona/storage';
-
-const CHOICE_DOMAIN_KEY = 'choice';
 
 const DEFAULT_INDEP_URL = 'https://api.openai.com/v1';
 const DEFAULT_INDEP_MODEL = 'gpt-3.5-turbo';
@@ -45,7 +44,7 @@ function endpointKey(url: string, model: string): string {
 }
 
 function newEndpointId(): string {
-    return `endpoint-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return newId('endpoint');
 }
 
 /** 旧 choice ApiConfig（v1 域形状；端点身份＋任务参数同居）。 */
@@ -94,7 +93,7 @@ interface PersonaLegacyApi {
     activeProfileId: string;
     apiSource: string;
     stream: boolean;
-    thinkingEffort: 'off' | 'low' | 'medium' | 'high';
+    thinkingEffort: ReasoningEffort;
     timeoutSec: number;
 }
 
@@ -137,9 +136,7 @@ function readPersonaLegacyApi(): PersonaLegacyApi | null {
     if (profiles.length === 0 && !meaningfulCustom && local.apiSource === undefined) return null;
 
     const timeoutRaw = typeof local.timeoutSec === 'number' ? local.timeoutSec : Number(local.indepTimeout);
-    const effort = typeof local.thinkingEffort === 'string' && ['off', 'low', 'medium', 'high'].includes(local.thinkingEffort)
-        ? local.thinkingEffort as PersonaLegacyApi['thinkingEffort']
-        : 'off';
+    const effort = normalizeReasoningEffort(local.thinkingEffort);
     return {
         profiles,
         custom: meaningfulCustom
@@ -147,6 +144,8 @@ function readPersonaLegacyApi(): PersonaLegacyApi | null {
             : null,
         activeProfileId,
         apiSource,
+        // 缺省 false 特例（不并入活域 normalize 的缺省 true）：旧档无流式
+        // 字段＝用户从不流式，收编成 true 是升级行为翻转——旧用户行为保真
         stream: typeof local.stream === 'boolean' ? local.stream : (local.indepStream === true),
         thinkingEffort: effort,
         timeoutSec: clampTimeout(Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 300),
@@ -158,9 +157,7 @@ function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
     const contract = api.outputContract === 'json_schema' || api.outputContract === 'prompt_only'
         ? api.outputContract
         : 'json_object';
-    const effort = api.reasoningEffort === 'low' || api.reasoningEffort === 'medium' || api.reasoningEffort === 'high'
-        ? api.reasoningEffort
-        : 'off';
+    const effort = normalizeReasoningEffort(api.reasoningEffort);
     const temperature = typeof api.temperature === 'number' && Number.isFinite(api.temperature)
         ? api.temperature
         : DEFAULT_TASK_PARAMS.temperature;
@@ -170,6 +167,7 @@ function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
     return {
         outputContract: contract,
         reasoningEffort: effort,
+        // 缺省 false 特例同 persona 侧：旧档无 stream 字段＝从不流式，缺省 true 是行为翻转
         stream: api.stream === true,
         temperature,
         maxTokens,
@@ -179,7 +177,7 @@ function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
 export function migrateApiDomain(): ApiMigrationReport {
     const report: ApiMigrationReport = { skipped: false, collectedFrom: [], idRemaps: [], mergedDuplicates: 0, endpointCount: 0 };
 
-    const rawChoice = getGlobal(CHOICE_DOMAIN_KEY);
+    const rawChoice = getGlobal(GLOBAL_CHOICE_KEY);
     const choiceDomain = (rawChoice && typeof rawChoice === 'object' ? rawChoice : null) as Record<string, unknown> | null;
     const legacyChoiceApis = readLegacyChoiceApis(rawChoice);
     const personaLegacy = readPersonaLegacyApi();
@@ -249,7 +247,7 @@ export function migrateApiDomain(): ApiMigrationReport {
         const active = legacyChoiceApis.find(a => a.id === activeRaw) ?? legacyChoiceApis[0] ?? null;
         const activeEndpointId = active ? (choiceIdMap.get(active.id) ?? '') : '';
         const task = active ? legacyTaskParams(active) : DEFAULT_TASK_PARAMS;
-        setGlobal(CHOICE_DOMAIN_KEY, {
+        setGlobal(GLOBAL_CHOICE_KEY, {
             task,
             activeEndpointId,
             gen: choiceDomain.gen ?? undefined,

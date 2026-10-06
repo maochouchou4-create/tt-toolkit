@@ -7,6 +7,7 @@
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
+import { newId } from '@/storage';
 import type { ApiEndpoint } from './types';
 
 /** 统一端点表域键（extension_settings.ttToolkit 下）。 */
@@ -58,7 +59,7 @@ export function resolveEndpointById(id: string): ApiEndpoint | null {
 /** 新建端点骨架（id 冲突域内唯一；字段由调用方填）。 */
 export function createEndpoint(name: string): ApiEndpoint {
     return {
-        id: `endpoint-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        id: newId('endpoint'),
         name,
         url: '',
         key: '',

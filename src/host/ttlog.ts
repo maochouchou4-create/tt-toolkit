@@ -48,8 +48,10 @@ function ttLevel(type: TtlogType): 'info' | 'warn' | 'error' {
     return 'info';
 }
 
-// 安全序列化：Error → message+stack；循环引用/异常对象不炸转发器
-function safeText(value: unknown): string {
+// 安全序列化：Error → message+stack；循环引用/异常对象不炸转发器。
+// 导出面＝dump 类排障文本与转发器同一条序列化规则（嵌套 Error 走
+// replacer 保栈，nav dump 消费同款），不各写第二份弱化版。
+export function safeText(value: unknown): string {
     if (value === null || value === undefined) return '';
     if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
     if (typeof value === 'string') return value;

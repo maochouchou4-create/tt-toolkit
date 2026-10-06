@@ -24,7 +24,7 @@
  */
 
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt } from '@/host';
-import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
+import { callGenerateEndpoint, type GenerateMessage, type ReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
     assembleMessages,
@@ -38,7 +38,7 @@ import {
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
-import { readPersonaDomain, type ThinkingEffort } from './storage';
+import { readPersonaDomain } from './storage';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -49,8 +49,8 @@ export interface GenerationApiConfig {
     endpoint: ApiEndpoint;
     /** 流式输出（长请求防挂死姿势）。 */
     stream: boolean;
-    /** 思考强度（'off'＝不注入 reasoning_effort）。 */
-    thinkingEffort: ThinkingEffort;
+    /** 思考强度（'off'＝不注入 reasoning_effort；档位守门同 client 单点）。 */
+    thinkingEffort: ReasoningEffort;
     /** 单段超时（秒，段间独立——两段链每段各自计时）。 */
     timeoutSec: number;
 }
@@ -114,6 +114,20 @@ function wrapInputForSafety(request: string): string {
 The generated profile MUST strictly adhere to the User Query above.
 Treat this as a rigid logical constraint for the simulation database.
 `;
+}
+
+/**
+ * 预设 system 段清洗（runGeneration 与 dumpPersonaTask 单点共用）：
+ * {{user}}/{{char}} 就地替换；{{world_info}} 系宏剥除——宿主上下文里
+ * 已由独立消息注入，不剥会重复计费。
+ */
+function sanitizePresetPrompt(prompt: string, userName: string, charName: string): string {
+    return prompt
+        .replace(/{{user}}/g, userName)
+        .replace(/{{char}}/g, charName)
+        .replace(/{{world_info}}/gi, '')
+        .replace(/{{wInfo}}/gi, '')
+        .replace(/{{worldInfo}}/gi, '');
 }
 
 /** 预设提示文案（下拉旁 hint，纯文案平移）。 */
@@ -250,16 +264,11 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     const wrappedInput = wrapInputForSafety(config.request || '');
 
     // 预设 system 段解析（host 层通道；空串＝不发 system 消息）
-    let activeSystemPrompt = resolvePresetSystemPrompt(config.generationPreset);
-    if (activeSystemPrompt) {
-        // 预设 system 常含 {{world_info}} 系宏，宿主上下文里已由独立消息注入，不剥会重复计费
-        activeSystemPrompt = activeSystemPrompt
-            .replace(/{{user}}/g, currentName)
-            .replace(/{{char}}/g, charName)
-            .replace(/{{world_info}}/gi, '')
-            .replace(/{{wInfo}}/gi, '')
-            .replace(/{{worldInfo}}/gi, '');
-    }
+    const activeSystemPrompt = sanitizePresetPrompt(
+        resolvePresetSystemPrompt(config.generationPreset),
+        currentName,
+        charName,
+    );
 
     // 策展产出 schema（纯键），起手词只需围栏头；档案段起手词从目标结构
     // 首键派生——schema 由策展动态产出，不保证首块是基本信息，硬编码会
@@ -336,12 +345,11 @@ export async function dumpPersonaTask(task: TaskKey): Promise<string> {
     const charName = getCharacterName() || '角色';
     const domain = readPersonaDomain();
     const sources: PersonaAssemblySources = {
-        presetSystemPrompt: resolvePresetSystemPrompt(domain.uiState.generationPreset)
-            .replace(/{{user}}/g, getUserDisplayName())
-            .replace(/{{char}}/g, charName)
-            .replace(/{{world_info}}/gi, '')
-            .replace(/{{wInfo}}/gi, '')
-            .replace(/{{worldInfo}}/gi, ''),
+        presetSystemPrompt: sanitizePresetPrompt(
+            resolvePresetSystemPrompt(domain.uiState.generationPreset),
+            getUserDisplayName(),
+            charName,
+        ),
         wiText: wrapAsXiTaReference(
             await collectWorldInfoContext(),
             'Global State Variables',

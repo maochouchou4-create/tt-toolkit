@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 统一设置存储（方案 §2.2 三域一层服务的批A 落地面）。
  *
  * 域划分：
@@ -15,6 +15,7 @@
  */
 
 import { chat_metadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
+import { newId } from './id';
 
 /** 全局域存储键（extension_settings 下本扩展命名空间）。 */
 export const GLOBAL_KEY = 'ttToolkit';
@@ -198,10 +199,6 @@ export interface RoundtripReport {
 
 const SMOKE_KEY = '_smoke';
 
-function randomToken(): string {
-    return `rt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 /**
  * storage 写读 roundtrip：全局域与聊天域各写一个随机 token 再读回比对。
  * 读回走同一读取路径（getGlobal/getChat），链路＝用户实际数据链路。
@@ -211,7 +208,7 @@ function randomToken(): string {
 export function runStorageRoundtrip(): RoundtripReport[] {
     const reports: RoundtripReport[] = [];
 
-    const globalToken = randomToken();
+    const globalToken = newId('rt');
     setGlobal(SMOKE_KEY, { token: globalToken });
     const globalRead = getGlobal<{ token: string }>(SMOKE_KEY)?.token;
     reports.push({
@@ -222,7 +219,7 @@ export function runStorageRoundtrip(): RoundtripReport[] {
         at: new Date().toISOString(),
     });
 
-    const chatToken = randomToken();
+    const chatToken = newId('rt');
     setChat(SMOKE_KEY, { token: chatToken });
     const chatRead = getChat<{ token: string }>(SMOKE_KEY)?.token;
     reports.push({

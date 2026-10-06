@@ -26,7 +26,7 @@
  *     引擎消费（行为面，非 UI 面）。
  */
 import { defineStore } from 'pinia';
-import { getChat, getGlobal, setChat, setGlobal } from '@/storage';
+import { getChat, getGlobal, newId, setChat, setGlobal } from '@/storage';
 import { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
 import { TASK_KEYS } from './types';
 import type { DirectionPreset, PromptConfig, StoryDirection, TaskKey } from './types';
@@ -189,7 +189,7 @@ export const usePromptsStore = defineStore('tt-prompts', {
         addDirectionPreset(text: string): void {
             const value = text.trim();
             if (!value) return;
-            const preset: DirectionPreset = { id: `dir-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text: value };
+            const preset: DirectionPreset = { id: newId('dir'), text: value };
             setGlobal(GLOBAL_DIRECTION_PRESETS_KEY, [...this.directionPresets, preset]);
             this.revision++;
         },
