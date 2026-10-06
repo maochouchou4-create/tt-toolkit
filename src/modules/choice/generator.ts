@@ -16,6 +16,7 @@ import {
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
+import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
@@ -76,7 +77,7 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
     const gen = choiceStorage.readDomain().gen;
     const poolInjection: PoolInjectionSupply = drawPoolInjection();
     const sources = await collectAssemblySources({
-        storyDirection: promptsStore.storyDirection,
+        storyDirection: useStoryDirectionStore().storyDirection,
         contextRounds: gen.contextRounds,
         count: gen.count,
         minChars: gen.minChars,

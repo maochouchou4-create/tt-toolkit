@@ -12,6 +12,8 @@
  */
 
 import { createApp } from 'vue';
+import { TOOLBOX_COMMAND } from '@/constants';
+import { toolkitGlobalPort } from '@/global-port';
 import {
     appendWandMenuEntry,
     isSlashCommandRegistered,
@@ -27,12 +29,6 @@ import type { ShellTab } from './types';
 
 const MOUNT_ID = 'tt-shell-mount';
 const WAND_ENTRY_ID = 'tt-toolkit-wand-entry';
-
-/**
- * 工具箱入口斜令名——单一事实源，导出给 nav 消费（QR「工具箱」按钮的
- * message）：命令名字面量只允许出现这一处，防双侧各自硬编码漂移断链。
- */
-export const TOOLBOX_COMMAND = 'tt-toolbox';
 
 // 魔棒入口等待参数：#extensionsMenu 理论先于扩展脚本在场（host/dom.ts
 // 头注核实），三段等待为纵深防御——轮询仍按最坏情况放宽
@@ -107,10 +103,10 @@ function installWandEntry(): void {
     app.mount(mount);
 
     // 排障口：开合状态类问题（如「要点两遍才唤起」）的观测面——
-    // devtools 直取 __TTK_DEBUG__.isOpen() 对比肉眼可见状态即可定位
-    // 「状态与显示脱钩」还是「事件没送达」（freeze 同 __TT_NAV__ 先例）
-    const dbg = globalThis as Record<string, unknown>;
-    dbg.__TTK_DEBUG__ = Object.freeze({ version, isOpen: () => useShellStore().open });
+    // devtools 直取 __TT_TOOLKIT__.debug.isOpen() 对比肉眼可见状态即可
+    // 定位「状态与显示脱钩」还是「事件没送达」（子键 freeze，同 nav 先例）
+    const port = toolkitGlobalPort();
+    port.debug = Object.freeze({ version, isOpen: () => useShellStore().open });
 
     void ensureWandEntry();
 }

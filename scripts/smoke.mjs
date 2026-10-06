@@ -235,7 +235,7 @@ globalThis.__TT_SMOKE_STUBS__ = {
 
 // ---------------------------------------------------------------------------
 // 驱动 dist：main.ts 检测无 document 走冒烟分支并打印全部输出。
-// 收集 stdout 行做机判断言（roundtrip PASS、nav __TT_NAV__ 在场）。
+// 收集 stdout 行做机判断言（roundtrip PASS、nav __TT_TOOLKIT__.nav 在场）。
 // ---------------------------------------------------------------------------
 const outputLines = [];
 const origLog = console.log;
@@ -298,9 +298,9 @@ if (!outputLines.some(l => l.includes('host API 探测清单'))) {
     failures.push('未见 host 探测清单输出');
 }
 
-const nav = globalThis.__TT_NAV__;
+const nav = globalThis.__TT_TOOLKIT__?.nav;
 if (!nav || typeof nav.dump !== 'function') {
-    failures.push('__TT_NAV__ 不在场或无 dump()');
+    failures.push('__TT_TOOLKIT__.nav 不在场或无 dump()');
 } else if (!String(nav.dump()).includes('nav-')) {
     failures.push('nav dump 输出异常');
 }
@@ -362,10 +362,10 @@ if (dumpStart < 0) {
     }
 }
 
-// 全局口 __TTK_PROMPTS__：dump/assemble/parseOptions 三件套在场
-const promptsPort = globalThis.__TTK_PROMPTS__;
+// 全局口 __TT_TOOLKIT__.prompts：dump/assemble/parseOptions 三件套在场
+const promptsPort = globalThis.__TT_TOOLKIT__?.prompts;
 if (!promptsPort || typeof promptsPort.dump !== 'function' || typeof promptsPort.parseOptions !== 'function' || typeof promptsPort.assemble !== 'function') {
-    failures.push('__TTK_PROMPTS__ 全局口不在场或接口不全（dump/assemble/parseOptions）');
+    failures.push('__TT_TOOLKIT__.prompts 全局口不在场或接口不全（dump/assemble/parseOptions）');
 }
 
 // 回退确定性触发：畸形样本解析走回退路径且产出 4 条（choice-smoke 内部
@@ -501,4 +501,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

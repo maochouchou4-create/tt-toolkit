@@ -17,7 +17,8 @@
  */
 
 import { LEGACY_KEYS, readPersonaDomain } from '@/modules/persona/storage';
-import { getGlobal, getNavState, LEGACY_NAV_AUTO_TOP_KEY, LEGACY_NAV_QR_ACTIVATED_KEY, setGlobal } from './service';
+import { getNavState } from '@/modules/nav/storage';
+import { getGlobal, LEGACY_NAV_AUTO_TOP_KEY, LEGACY_NAV_QR_ACTIVATED_KEY, setGlobal } from './service';
 
 /**
  * 清理键清单：单一真相源＝迁移代码的常量表（persona LEGACY_KEYS＋nav

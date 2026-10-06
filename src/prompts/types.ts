@@ -101,32 +101,11 @@ export interface InjectModule {
 
 export type PromptModule = TextModule | InjectModule;
 
-/**
- * 编辑器信息架构分组（G5 拍板）：核心模板（文本模块）/上下文注入
- * （人设、角色卡、世界书、历史等现场数据）/高级（外部插件内容搬运）。
- * 整合轮II 验收修整：编辑面已删（分组无渲染消费方），保留纯函数与
- * ModuleGroupId 导出——数据层最小改动（smoke/导入面不破坏）。
- */
-export type ModuleGroupId = 'text' | 'context_inject' | 'external_inject';
-
-/** 模块的编辑器分组归属（纯函数，供分组渲染与组内相邻移动共用）。 */
-export function moduleGroupOf(mod: PromptModule): ModuleGroupId {
-    if (mod.kind === 'text') return 'text';
-    return mod.source === 'external_slot' || mod.source === 'baibai' ? 'external_inject' : 'context_inject';
-}
-
 /** 提示词配置集（单一真相源：每套自带 modules[]）。 */
 export interface PromptConfig {
     id: string;
     name: string;
     modules: PromptModule[];
-}
-
-/** 用户自建剧情走向预设（全局域；G4 拍板：自定义预设取代固定六标签）。 */
-export interface DirectionPreset {
-    id: string;
-    /** 预设正文（应用后注入 <direction> 段的走向指令本体） */
-    text: string;
 }
 
 /**

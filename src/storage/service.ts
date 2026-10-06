@@ -1,9 +1,10 @@
-﻿/**
+/**
  * 统一设置存储（方案 §2.2 三域一层服务的批A 落地面）。
  *
  * 域划分：
  *   - 全局域 extension_settings.ttToolkit：提示词配置集、条目池、API 配置、
- *     UI 偏好、nav 迁移数据、schema version（批B/C 扩展内容域）。
+ *     UI 偏好、nav 迁移数据（批B/C 扩展内容域）。各内容子域自带版本机制
+ *     （如 choice 域 assetVersion），顶层不再持 schema version 概念。
  *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置（批B 落）。
  *     写入纪律：同步变更当前 chat_metadata + 立即 getContext().saveMetadata
  *     显式保存（host/settings.ts，无防抖无排队、目标即当前活跃聊天）。
@@ -15,7 +16,6 @@
  */
 
 import { chat_metadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
-import { newId } from './id';
 
 /** 全局域存储键（extension_settings 下本扩展命名空间）。 */
 export const GLOBAL_KEY = 'ttToolkit';
@@ -29,14 +29,13 @@ export const CHAT_KEY = 'ttToolkit';
 export const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
 export const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
 
-// schema version：存储结构演进时 bump；旧档缺字段由默认值补齐
-const SCHEMA_VERSION = 2;
-
 export interface NavStorageState {
     /** 自动回顶开关（旧 localStorage 键迁移而来） */
     autoTop: boolean;
     /** QR 集「首次激活」标记（激活一次制，见 nav 模块） */
     qrActivated: boolean;
+    /** 历史版本「自动回顶」QR 键的一次性清理标记（见 nav 模块 qr 接线） */
+    legacyQrCleaned?: boolean;
     /**
      * 迁移时旧键 autoTop 值的快照（幂等增量基线）；null＝旧键缺席。
      * 后续启动旧键值偏离快照＝用户回滚旧版期间改过，采纳为新意图。
@@ -45,7 +44,6 @@ export interface NavStorageState {
 }
 
 export interface GlobalDomain {
-    schemaVersion: number;
     nav: NavStorageState;
     /**
      * 旧 localStorage 遗留键一次性清理标记（批E/v1.0.0，见 legacy-wipe）：
@@ -59,12 +57,14 @@ export interface ChatDomain {
     [key: string]: unknown;
 }
 
-function readGlobalDomain(): GlobalDomain {
+/** 读全局域原始单例（不快照——storage 内部面与调试 dump 用）。 */
+export function readGlobalDomain(): GlobalDomain {
     const raw = extension_settings[GLOBAL_KEY];
     return (raw ?? {}) as GlobalDomain;
 }
 
-function readChatDomain(): ChatDomain {
+/** 读聊天域原始单例（不快照——storage 内部面与调试 dump 用）。 */
+export function readChatDomain(): ChatDomain {
     const raw = chat_metadata[CHAT_KEY];
     return (raw ?? {}) as ChatDomain;
 }
@@ -97,7 +97,6 @@ function deepSnapshot<T>(value: T): T {
 export function initStorage(): void {
     writeExtensionSettings(settings => {
         const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as GlobalDomain;
-        if (typeof domain.schemaVersion !== 'number') domain.schemaVersion = SCHEMA_VERSION;
 
         // nav 域迁移：storage 值缺省时从旧 localStorage 键搬（旧键保留）
         const nav = (isRecord(domain.nav) ? domain.nav : {}) as Partial<NavStorageState>;
@@ -168,94 +167,7 @@ export function setChat(key: string, value: unknown): void {
     });
 }
 
-/** nav 域便捷读取（深快照；写入走 setNavState）。 */
-export function getNavState(): NavStorageState {
-    const nav = readGlobalDomain().nav;
-    if (!isRecord(nav)) return { autoTop: true, qrActivated: false, legacyAutoTopSnapshot: null };
-    return deepSnapshot(nav as unknown as NavStorageState);
-}
-
-export function setNavState(patch: Partial<NavStorageState>): void {
-    const nav = { ...getNavState(), ...patch };
-    setGlobal('nav', nav);
-}
-
 /** 订阅聊天切换（storage 消费方需要丢弃聊天相关缓存时用）。 */
 export function onChatChanged(handler: () => void): void {
     eventBus.on(event_types.CHAT_CHANGED, handler);
-}
-
-// ---------------------------------------------------------------------------
-// 烟雾 roundtrip（批A 判据机判：写读回显）
-// ---------------------------------------------------------------------------
-
-export interface RoundtripReport {
-    scope: 'global' | 'chat';
-    ok: boolean;
-    written: string;
-    readBack: string;
-    at: string;
-}
-
-const SMOKE_KEY = '_smoke';
-
-/**
- * storage 写读 roundtrip：全局域与聊天域各写一个随机 token 再读回比对。
- * 读回走同一读取路径（getGlobal/getChat），链路＝用户实际数据链路。
- * 比对完成后经正式变更器删除 _smoke 键——测试残留会随用户数据落盘
- * 并出现在调试 dump 里。
- */
-export function runStorageRoundtrip(): RoundtripReport[] {
-    const reports: RoundtripReport[] = [];
-
-    const globalToken = newId('rt');
-    setGlobal(SMOKE_KEY, { token: globalToken });
-    const globalRead = getGlobal<{ token: string }>(SMOKE_KEY)?.token;
-    reports.push({
-        scope: 'global',
-        ok: globalRead === globalToken,
-        written: globalToken,
-        readBack: String(globalRead),
-        at: new Date().toISOString(),
-    });
-
-    const chatToken = newId('rt');
-    setChat(SMOKE_KEY, { token: chatToken });
-    const chatRead = getChat<{ token: string }>(SMOKE_KEY)?.token;
-    reports.push({
-        scope: 'chat',
-        ok: chatRead === chatToken,
-        written: chatToken,
-        readBack: String(chatRead),
-        at: new Date().toISOString(),
-    });
-
-    writeExtensionSettings(settings => {
-        const domain = settings[GLOBAL_KEY];
-        if (isRecord(domain)) delete domain[SMOKE_KEY];
-    });
-    writeChatMetadata(metadata => {
-        const domain = metadata[CHAT_KEY];
-        if (isRecord(domain)) delete domain[SMOKE_KEY];
-    });
-
-    return reports;
-}
-
-/**
- * 存储三域快照序列化（调试 dump 用；角色域批C 接入后并入）。
- * 密钥掩码（双复核 P3）：调试面板不回显明文——choice.apis[].key 只保留
- * 前 6 字符＋省略号（判断「填没填、填的是哪把」足够，整把钥匙不进 DOM）。
- */
-export function dumpStorage(): string {
-    const maskedGlobal = JSON.stringify(readGlobalDomain(), null, 2)
-        ?.replace(/("key"\s*:\s*")([^"]*)(")/g, (_m, p1: string, val: string, p3: string) =>
-            val ? `${p1}${val.slice(0, 6)}…${p3}` : `${p1}${val}${p3}`)
-        ?? '';
-    const lines = [
-        `storage dump @ ${new Date().toISOString()}`,
-        `global(${GLOBAL_KEY}) = ${maskedGlobal}`,
-        `chat(${CHAT_KEY}) = ${JSON.stringify(readChatDomain(), null, 2)}`,
-    ];
-    return lines.join('\n');
 }

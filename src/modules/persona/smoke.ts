@@ -8,6 +8,7 @@
  * （dist 加载即覆盖）。
  */
 import { event_types, extension_settings } from '@/host';
+import { toolkitGlobalPort } from '@/global-port';
 import { getGlobal, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS, clampTimeout, defaultLocalConfig } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
@@ -15,7 +16,7 @@ import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { migrateApiDomain } from '@/modules/apis/migration';
 import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
-import { TASK_KEYS, usePromptsStore, assembleMessages, type PersonaAssemblySources } from '@/prompts';
+import { TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
 import { usePersonaStore } from './store';
@@ -265,18 +266,24 @@ function runPromptsChecks(): void {
         `keys=${Object.keys(record).join('/')}`);
 
     // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺三键。
-    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
-    // revision，否则返回缓存快照看不到外部写（写穿纪律：正常路径写域
-    // 都走 store action 自带 bump，这里模拟的是「旧档在场」的启动读迁移）
+    // 迁移写在启动 init（ensurePromptConfigs——读路径零副作用后的唯一
+    // 落盘口），模拟「旧档在场」的启动即调 init
     const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
     setGlobal('promptConfigs', [legacySet]);
+    ensurePromptConfigs();
+    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
+    // revision，否则返回首次调用的缓存快照看不到外部写
     prompts.$patch({ revision: prompts.revision + 1 });
     const migratedChoice = prompts.configFor('choice');
     const rawAfter = getGlobal('promptConfigs') as unknown;
     check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 两键）',
         migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
         && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
-    prompts.resetToDefault('choice'); // 还原 choice 18 模块红线
+    // 还原 choice 18 模块红线（恢复默认＝smoke 直调写通道，store 无编辑面 action）
+    const restored = getGlobal('promptConfigs') as Record<string, unknown>;
+    setGlobal('promptConfigs', { ...restored, choice: createTaskDefaultConfig('choice') });
+    // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）
+    prompts.$patch({ revision: prompts.revision + 1 });
 
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
@@ -351,9 +358,9 @@ function runPersonaAssemblyChecks(): void {
         offOk && on.messages.length === 2 && on.messages[1].role === 'user');
 }
 
-/** dump 观测口断言（异步——__TTK_PROMPTS__.dump 按任务返回全文）。 */
+/** dump 观测口断言（异步——__TT_TOOLKIT__.prompts.dump 按任务返回全文）。 */
 async function runPersonaAssemblyDumpChecks(): Promise<void> {
-    const port = (globalThis as { __TTK_PROMPTS__?: { dump: (task?: string) => Promise<string> } }).__TTK_PROMPTS__;
+    const port = (toolkitGlobalPort().prompts as { dump: (task?: string) => Promise<string> } | undefined);
     const dumpText = await (port ? port.dump('persona_gen') : Promise.reject(new Error('口缺席')));
     check('dump 口：按任务 dump 全文（persona_gen：组装 dump 标头＋模块清单＋指令正文）',
         dumpText.includes('=== 消息组装 dump') && dumpText.includes('生成指令')

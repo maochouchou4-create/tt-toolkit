@@ -335,7 +335,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
 }
 
 /**
- * persona 任务的观测 dump（__TTK_PROMPTS__.dump(task) 分派口）：宿主真实
+ * persona 任务的观测 dump（__TT_TOOLKIT__.prompts.dump(task) 分派口）：宿主真实
  * 上下文（角色卡/开场白/世界书/预设）＋空任务态——用户请求与策展 schema
  * 是运行时输入，dump 无从得知，占位符以空串呈现模板形状。与 choice 的
  * dump 同口径（renderDump 全文输出，可整段粘贴给模型/人工核对）。
