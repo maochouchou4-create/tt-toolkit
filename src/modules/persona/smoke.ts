@@ -168,7 +168,7 @@ function runMigrationChecks(): void {
         ],
         activeApiId: 'c2',
         gen: { count: 5, contextRounds: 2, minChars: 5, maxChars: 50, clickBehavior: 'append', debugForceRaw: false },
-        pool: { masterPool: [], poolConfigs: [] },
+        pool: { masterPool: [] },
     };
     ls.set(LEGACY_KEYS.state, JSON.stringify({
         localConfig: {

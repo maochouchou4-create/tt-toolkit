@@ -334,17 +334,12 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
-// 批B 37 条＋批C 37 条（抽取分布 5/导入 9/注入 8/绑定 5/自动生成 10，含
-// stub 在场 1 条）＝74；双复核修复轮 +3（pinned≥count 覆盖语义、
-// safeWeight fork 语义、非数字 messageId 跳过）＝77；批C.2 只读化 +11
-//（asset 静态形状 7＋同步行为 4）＝88；反馈轮 +1（asset v2 条目规则全移除）
-// ＝89；m03359 整合轮 +1（few-shot 7 条计数）＝90（注入区 9 条不变：删
-// pool_rules 分层/空规则两断言，加池规则并入/模块移除两断言）；整合轮II
-// +1（PoolBackup v2 备份升格断言：v1 apis→统一端点表＋choiceTask 派生）
-// ＝91；整合轮II 验收修整 +4（外部注入自动形态：无槽位段缺席留痕 1＋
-// 生成管线自动搬入可见/空槽位跳过 1＋depth 升序 1＋柏宝书在场即带 1）
-// ＝95。
-const CHOICE_PASS_EXPECTED = 95;
+// 历史构成见 git（批B 37→批C/C.2/整合轮/整合轮II 逐步累加至 95）。
+// 批2 池用户写面全删：导入往返（旧档/备份/幂等/畸形拒）、绑定级联、
+// asset 引用层镜像三区断言随功能删除；safeWeight 断言移入抽取区、
+// asset 新增「无停用条目」断言；自动生成区前置落 stub 端点（非流式档）
+// 补上原由导入链提供的端点前置——实跑计数 78 写死。
+const CHOICE_PASS_EXPECTED = 78;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -506,4 +501,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（批E：boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
