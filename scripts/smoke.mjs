@@ -414,8 +414,9 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
 // 提示词配置初始化：默认模板落进全局域 storage（choice
 // 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。
 // 存储形态 Record<taskKey, PromptConfig> 三任务键：choice 18 模块红线
-// 不变，persona 两任务键在场（各 4 模块：preset/wi/任务指令；已退休的
-// persona_refine 任务键不在期望清单——存量配置读侧出局，写回自然清除）
+// 不变，persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
+// 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
+// 读侧出局，写回自然清除）
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;

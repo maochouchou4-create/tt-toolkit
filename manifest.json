@@ -1,7 +1,7 @@
 {
     "display_name": "TT Toolkit",
     "name": "tt-toolkit",
-    "version": "1.5.7",
+    "version": "1.5.8",
     "author": "maochouchou4-create",
     "js": "dist/index.js",
     "css": "dist/index.css",

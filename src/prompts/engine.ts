@@ -91,8 +91,6 @@ export interface AssemblyResult {
  * （宿主数据与任务运行态——策展 schema、用户请求都是运行时才知道的）。
  */
 export interface PersonaAssemblySources {
-    /** 生成用预设 system 段（已解析+宏清洗；空串＝纯净模式/无预设） */
-    presetSystemPrompt: string;
     /** 世界书参考（XiTa 式围栏包装后的文本；空＝无世界书） */
     wiText: string;
     /** 角色卡全量信息（包装后；{{charInfo}} 占位符同源） */
@@ -148,10 +146,6 @@ function resolvePersonaInjectContent(
     sources: PersonaAssemblySources,
 ): { content: string; note: string } {
     switch (source) {
-        case 'persona_preset':
-            return sources.presetSystemPrompt.trim()
-                ? { content: sources.presetSystemPrompt, note: '预设 system 段' }
-                : { content: '', note: '未选择预设（纯净模式）' };
         case 'persona_wi':
             return sources.wiText.trim()
                 ? { content: sources.wiText, note: '世界书参考' }

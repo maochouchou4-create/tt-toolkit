@@ -82,9 +82,9 @@ function runMigrationChecks(): void {
     // 1a. 空 localStorage → 写默认域
     const first = migratePersonaDomain();
     const defaults = readPersonaDomain();
-    check('迁移：空 localStorage 首启动写入默认域（preset=current）',
+    check('迁移：空 localStorage 首启动写入默认域（只剩 userContext）',
         !first.skipped && first.migratedKeys.length === 0
-        && defaults.uiState.generationPreset === 'current'
+        && !('uiState' in (defaults as unknown as Record<string, unknown>))
         && defaults.userContext.request === '' && defaults.userContext.result === '',
         `skipped=${first.skipped} migrated=${first.migratedKeys.join(',') || '无'}`);
 
@@ -109,10 +109,10 @@ function runMigrationChecks(): void {
 
     const second = migratePersonaDomain();
     const migrated = readPersonaDomain();
-    check('迁移：3 旧键全部搬入（migratedKeys 齐）',
-        second.migratedKeys.length === 3
+    check('迁移：2 旧键搬入（uiState 键退役不读——快照留存）',
+        second.migratedKeys.length === 2
         && LEGACY_KEYS.state && second.migratedKeys.includes(LEGACY_KEYS.state)
-        && second.migratedKeys.includes(LEGACY_KEYS.uiState)
+        && !second.migratedKeys.includes(LEGACY_KEYS.uiState)
         && second.migratedKeys.includes(LEGACY_KEYS.dataUser),
         `migrated=${second.migratedKeys.join(',')}`);
     // 过渡透传已随 localConfig 域退役换形：端点旧字段不再进域，收编原料
@@ -121,11 +121,12 @@ function runMigrationChecks(): void {
     check('迁移：localConfig 键不进域（任务参数固化；端点旧字段走 legacy 快照）',
         !('localConfig' in rawPersona())
         && ls.get(LEGACY_KEYS.state)?.includes('indepApiUrl') === true);
-    check('迁移：uiState/userContext 形状正确（淘汰字段丢弃）',
-        migrated.uiState.generationPreset === 'Pure'
+    check('迁移：userContext 形状正确＋uiState 键不进域（任务级预设选择退役）',
+        !('uiState' in (migrated as unknown as Record<string, unknown>))
         && migrated.userContext.request === '写个侦探' && migrated.userContext.result === '姓名: 阿德'
         && !('template' in (migrated.userContext as unknown as Record<string, unknown>))
-        && !('hasResult' in (migrated.userContext as unknown as Record<string, unknown>)));
+        && !('hasResult' in (migrated.userContext as unknown as Record<string, unknown>))
+        && ls.get(LEGACY_KEYS.uiState) !== null);
     check('迁移：域形状收缩（wiSelection/pinnedBooks/extraBooks 不再是域字段）',
         !('wiSelection' in (migrated as unknown as Record<string, unknown>))
         && !('pinnedBooks' in (migrated as unknown as Record<string, unknown>)));
@@ -142,7 +143,7 @@ function runMigrationChecks(): void {
     };
     const upgraded = readPersonaDomain();
     check('迁移：v1.1.0 存量域导入（退役字段丢弃、其余字段逐项相等）',
-        upgraded.uiState.generationPreset === 'pure'
+        !('uiState' in (upgraded as unknown as Record<string, unknown>))
         && upgraded.userContext.request === 'v1.1.0现场' && upgraded.userContext.result === '姓名: 旧人设'
         && !('wiSelection' in (upgraded as unknown as Record<string, unknown>))
         && !('pinnedBooks' in (upgraded as unknown as Record<string, unknown>))
@@ -208,10 +209,10 @@ function runMigrationChecks(): void {
         && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
         `choice=${JSON.stringify(rawChoice)}`);
     const afterCollect = readPersonaDomain();
-    check('收编：persona 域 v2 重写（整键清洗后无 localConfig 键；选中不参与提升——choice 优先）',
+    check('收编：persona 域 v2 重写（整键清洗后无 localConfig/uiState 键；选中不参与提升——choice 优先）',
         !('localConfig' in (afterCollect as unknown as Record<string, unknown>))
         && !('localConfig' in rawPersona())
-        && afterCollect.uiState.generationPreset === 'current');
+        && !('uiState' in (afterCollect as unknown as Record<string, unknown>)));
 
     // 1f. 二次启动零重写（统一表在场＋两域 v2 → 全部 skip，逐字节不变）
     const apisBefore = JSON.stringify(tt.apis);
@@ -294,7 +295,7 @@ function runPromptsChecks(): void {
     check('prompts：旧默认快照版本化重建（整键重建＋版本号写入）',
         afterRebuild.persona_gen?.id === 'default'
         && afterRebuild.persona_gen?.defaultsVersion === DEFAULTS_VERSION
-        && Array.isArray(afterRebuild.persona_gen?.modules) && afterRebuild.persona_gen.modules.length === 3);
+        && Array.isArray(afterRebuild.persona_gen?.modules) && afterRebuild.persona_gen.modules.length === 2);
 
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
@@ -320,7 +321,6 @@ function runPromptsChecks(): void {
 // ---------------------------------------------------------------------------
 
 const assemblySources: PersonaAssemblySources = {
-    presetSystemPrompt: '你是人设生成器',
     wiText: '> [FILE: 设定书]\n"""\n魔法世界\n"""',
     charInfo: '林霜，温柔',
     greetings: '「你好，旅行者」',
@@ -333,13 +333,13 @@ const assemblySources: PersonaAssemblySources = {
 function runPersonaAssemblyChecks(): void {
     const prompts = usePromptsStore();
 
-    // curator 管线：preset+wi 两条 system 被引擎合并为一条（与旧 fork
-    // 实现分两条发语义等价），user 指令占位符清零
+    // curator 管线：wi 一条 system（任务级预设源已退役——预设影响走传输层
+    // 破限注入，不进引擎），user 指令占位符清零
     const curator = assembleMessages(prompts.configFor('persona_curator')?.modules ?? [], assemblySources);
-    check('persona 组装：curator 管线（preset+wi 合并 system＋user 指令、占位符清零）',
+    check('persona 组装：curator 管线（wi system＋user 指令、占位符清零、无预设段）',
         curator.messages.length === 2
         && curator.messages[0].role === 'system'
-        && curator.messages[0].content.includes('你是人设生成器') && curator.messages[0].content.includes('魔法世界')
+        && curator.messages[0].content.includes('魔法世界') && !curator.messages[0].content.includes('你是人设生成器')
         && curator.messages[1].role === 'user'
         && curator.messages[1].content.includes('林霜，温柔') && curator.messages[1].content.includes('写个侦探')
         && !curator.messages[1].content.includes('{{charInfo}}') && !curator.messages[1].content.includes('{{userRequirements}}'));
@@ -873,5 +873,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/3 旧键搬入＋localConfig 退役快照保留/域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }

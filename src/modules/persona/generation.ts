@@ -19,11 +19,12 @@
  *   拼接，无视任何条目规则），勾选/钉选域已随域形状删除。
  * - yieldToBrowser(requestAnimationFrame) 退役：Vue 渲染不靠逐书让帧。
  * - 宿主导入一律经 host 层（check-imports 纪律）：getCharacterName /
- *   getUserDisplayName / 世界书与预设通道都从 '@/host' 进；模型请求走
- *   '@/modules/apis/client'（@sillytavern 导入面只在 src/host/）。
+ *   getUserDisplayName / 世界书通道都从 '@/host' 进；预设影响不走 host
+ *   预设解析（任务级预设已退役）——破限注入走 apis/preset-inject 传输层
+ *   前缀；模型请求走 '@/modules/apis/client'（@sillytavern 导入面只在 src/host/）。
  */
 
-import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt } from '@/host';
+import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries } from '@/host';
 import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
@@ -40,7 +41,6 @@ import {
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
-import { readPersonaDomain } from './storage';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -118,31 +118,6 @@ function wrapInputForSafety(request: string): string {
 The generated profile MUST strictly adhere to the User Query above.
 Treat this as a rigid logical constraint for the simulation database.
 `;
-}
-
-/**
- * 预设 system 段清洗（runGeneration 与 dumpPersonaTask 单点共用）：
- * {{user}}/{{char}} 就地替换；{{world_info}} 系宏剥除——宿主上下文里
- * 已由独立消息注入，不剥会重复计费。
- */
-function sanitizePresetPrompt(prompt: string, userName: string, charName: string): string {
-    return prompt
-        .replace(/{{user}}/g, userName)
-        .replace(/{{char}}/g, charName)
-        .replace(/{{world_info}}/gi, '')
-        .replace(/{{wInfo}}/gi, '')
-        .replace(/{{worldInfo}}/gi, '');
-}
-
-/** 预设提示文案（下拉旁 hint，纯文案平移）。 */
-export function getPresetHintText(val: string): string {
-    if (val === 'pure') {
-        return '纯净模式可避免受预设风格影响或剧情续写，但无破限功能。如遇拒答，请尝试切换至其他包含破限的预设。';
-    }
-    if (val === 'current') {
-        return '将使用酒馆当前激活的预设（Main + Jailbreak）。如果当前预设包含强烈的剧情续写指令，可能会影响生成结果。';
-    }
-    return `将强制使用指定预设 "${val}" 的 System Prompt 进行生成。`;
 }
 
 interface RequestOnceParams {
@@ -269,8 +244,6 @@ export interface RunGenerationConfig extends GenerationApiConfig {
     request: string;
     wiText: string;
     greetingsText: string;
-    /** 预设选择（'current'/'pure'/预设名，来自存储域 uiState）。 */
-    generationPreset: string;
     onPrefillRetry?: () => void;
     /** 段边界进度文案（「策展模板中…」/「生成中…」；store 接管按钮态）。 */
     onProgress?: (label: string) => void;
@@ -294,13 +267,6 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     const wrappedGreetings = wrapAsXiTaReference(config.greetingsText || '', 'Init Sequence');
     const wrappedInput = wrapInputForSafety(config.request || '');
 
-    // 预设 system 段解析（host 层通道；空串＝不发 system 消息）
-    const activeSystemPrompt = sanitizePresetPrompt(
-        resolvePresetSystemPrompt(config.generationPreset),
-        currentName,
-        charName,
-    );
-
     // 策展产出 schema（纯键），起手词只需围栏头；档案段起手词从目标结构
     // 首键派生——schema 由策展动态产出，不保证首块是基本信息，硬编码会
     // 逼模型续写出 schema 外的块。
@@ -317,8 +283,8 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
 
     // AI 调用 1：策展 Schema。空输出或剥围栏后不可解析 → 回退默认模板，链路不中断。
     // 任务上下文供给（引擎占位符/注入源消费面；策展段 curatedSchema 为空）。
+    // 预设影响不走这里——统一走传输层破限注入（apis/preset-inject，两段各带）。
     const baseSources: PersonaAssemblySources = {
-        presetSystemPrompt: activeSystemPrompt,
         wiText: wrappedWi,
         charInfo: wrappedCharInfo,
         greetings: wrappedGreetings,
@@ -369,20 +335,15 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
 
 /**
  * persona 任务的观测 dump（__TT_TOOLKIT__.prompts.dump(task) 分派口）：宿主真实
- * 上下文（角色卡/开场白/世界书/预设）＋空任务态——用户请求与策展 schema
+ * 上下文（角色卡/开场白/世界书）＋空任务态——用户请求与策展 schema
  * 是运行时输入，dump 无从得知，占位符以空串呈现模板形状。与 choice 的
- * dump 同口径（renderDump 全文输出，可整段粘贴给模型/人工核对）。
+ * dump 同口径（renderDump 全文输出，可整段粘贴给模型/人工核对；传输层
+ * 破限前缀不进 dump——实发全文以运行日志为准）。
  */
 export async function dumpPersonaTask(task: TaskKey): Promise<string> {
     if (task === 'choice') throw new Error('dumpPersonaTask 只处理 persona 任务');
     const charName = getCharacterName() || '角色';
-    const domain = readPersonaDomain();
     const sources: PersonaAssemblySources = {
-        presetSystemPrompt: sanitizePresetPrompt(
-            resolvePresetSystemPrompt(domain.uiState.generationPreset),
-            getUserDisplayName(),
-            charName,
-        ),
         wiText: wrapAsXiTaReference(
             await collectWorldInfoContext(),
             'Global State Variables',
