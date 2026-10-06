@@ -19,7 +19,6 @@ import { migrateApiDomain } from '@/modules/apis/migration';
 import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
-import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
 import { usePersonaStore } from './store';
 
 const failures: string[] = [];
@@ -313,6 +312,18 @@ function runPromptsChecks(): void {
     check('prompts：默认用户人设模板五块（基本信息/外貌/性格/喜恶/背景）',
         keys.length === 5 && ['基本信息', '外貌', '性格', '喜恶', '背景'].every(k => keys.includes(k)),
         `blocks=${keys.join('/')}`);
+
+    // 骨架双源机判：回退骨架（DEFAULT_TEMPLATES.user）的性格叶键名与
+    // 策展清单 <reference_modules> 性格行声明一致——两处原文包含性比对，
+    // 改策展清单漏改回退骨架在此翻红（对齐不再靠注释纪律）
+    const personaLeaves = (templateBlocks.get('性格') ?? '')
+        .split('\n').map(l => l.trim().replace(/:$/, '')).filter(Boolean);
+    const curatorLine = curatorText.split('\n').find(l => l.startsWith('性格——')) ?? '';
+    check('prompts：骨架双源机判（回退骨架性格三叶＝策展清单性格行声明）',
+        curatorLine !== ''
+        && personaLeaves.length === 3
+        && ['核心矛盾', '情绪反应', '说话风格'].every(k => personaLeaves.includes(k) && curatorLine.includes(k)),
+        `骨架叶=${personaLeaves.join('/')} 清单行=${curatorLine}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -720,25 +731,10 @@ async function runPersonaE2EChecks(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 7) worldbook 纯函数＋store 互斥
+// 7) store 互斥＋会话感知
 // ---------------------------------------------------------------------------
 
-async function runWorldbookAndStoreChecks(): Promise<void> {
-    // generateSmartKeywords：姓名+别名行拆分+静态 User；短键滤除
-    const kw = generateSmartKeywords('林·小霜', '姓名: 林·小霜\n别名: 霜霜、Frost，喵\n', ['User']);
-    check('worldbook：智能触发词（别名行拆 /[,，、]/、·取前段、静态 User、短键滤除）',
-        kw.includes('林·小霜') && kw.includes('霜霜') && kw.includes('Frost') && kw.includes('User') && kw.every(k => k.length > 1),
-        `kw=${kw.join('/')}`);
-
-    // sync 无绑定世界书 → fail fast 抛错
-    let wiThrown = false;
-    try {
-        await syncPersonaToWorldInfo('测试用户', '姓名: 测试用户\n年龄: 20');
-    } catch (e) {
-        wiThrown = (e as Error).message.includes('未绑定世界书');
-    }
-    check('worldbook：无绑定世界书 fail fast 抛错（不静默降级）', wiThrown);
-
+async function runStoreChecks(): Promise<void> {
     // collectWorldInfoContext：全量注入（无绑定书＝空桶 → 空白上下文）
     const wiText = await collectWorldInfoContext();
     check('generation：全量注入上下文收集空桶返回空串（不抛错）', typeof wiText === 'string');
@@ -765,8 +761,7 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
 
     // 会话感知：CHAT_CHANGED 处理（lastRun 无条件清空、开场白重置为默认档
     // ＝greetings 在场注入 #0、宿主快照无条件重拉
-    // ——读取廉价且 loadCandidates 依赖 userName，指纹门控反而会漏刷；指纹
-    // 仅用于日志观测）
+    // ——读取廉价，指纹门控收益为零；指纹仅用于日志观测）
     const liveStubs = (globalThis as unknown as {
         __TT_SMOKE_STUBS__: {
             characters: unknown[];
@@ -877,12 +872,12 @@ export async function runPersonaSmoke(): Promise<void> {
     runPureFunctionChecks();
     await runApiChecks();
     await runPersonaE2EChecks();
-    await runWorldbookAndStoreChecks();
+    await runStoreChecks();
     runHostLiveBindingChecks();
     if (failures.length > 0) {
         console.error(`[persona-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }

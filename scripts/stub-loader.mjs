@@ -32,15 +32,9 @@ const STUB_EXPORTS = {
     'scripts/events.js': ['eventSource', 'event_types'],
     'scripts/RossAscends-mods.js': ['dragElement'],
     'scripts/power-user.js': ['power_user'],
-    // personas 写回通道（host/personas.ts 导入面）＋世界书写侧
-    // （host/worldinfo.ts）＋findPersona（utils）
-    'scripts/world-info.js': [
-        'getWorldInfoPrompt',
-        'loadWorldInfo',
-        'createWorldInfoEntry',
-        'saveWorldInfo',
-        'reloadEditor',
-    ],
+    // personas 写回通道（host/personas.ts 导入面）＋世界书读取
+    // （host/worldinfo.ts，生成参考链）＋findPersona（utils）
+    'scripts/world-info.js': ['getWorldInfoPrompt', 'loadWorldInfo'],
     'scripts/personas.js': ['getUserAvatars', 'initPersona', 'setUserAvatar', 'user_avatar'],
     'scripts/utils.js': ['findPersona'],
     'scripts/slash-commands/SlashCommandParser.js': ['SlashCommandParser'],

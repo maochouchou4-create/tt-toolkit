@@ -1,26 +1,16 @@
 /**
- * TT 宿主世界书通道（persona 的参考/写回数据面＋绑定书读取）。
+ * TT 宿主世界书通道（persona 的参考读取面＋绑定书读取）。
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - world-info.js:2241 `export async function loadWorldInfo(name)`：按书名
  *   装载 {entries:{uid字符串:条目}}；书不存在返回 null。
- * - world-info.js:4295 `createWorldInfoEntry(_name, data)`：书内新建条目
- *   （宿主负责 uid 分配与字段模板），null=uid 分配失败。
- * - world-info.js:4362 `saveWorldInfo(name, data, immediately=false)`：
- *   immediately 必须 true——漏 true 会「保存后读回为空」（防抖队列里被
- *   后续装载覆盖）；true 时 await 返回即宿主已确认 HTTP 落盘。
- * - world-info.js:1144 `reloadEditor(file, loadIfNotSelected=false)`：刷新
- *   世界书编辑器视图（编辑器开着才刷新，内部自判；不刷会导致
- *   「存上了但界面没变」）。
  * - st-context.js:289 `getWorldInfoNames: () => [...world_names]`：全量
  *   书目快照（宿主启动时 updateWorldInfoList 装载），走 context 通道。
- * - 当前角色绑定书顺序（写回取首本）：data.extensions.world（主书必须
- *   排内嵌书之前）→ data.character_book.name → data.world →
- *   chat_metadata.world_info。
+ * - 当前角色绑定书顺序：data.extensions.world（主书必须排内嵌书之前）
+ *   → data.character_book.name → data.world → chat_metadata.world_info。
  */
 
-import { createWorldInfoEntry, loadWorldInfo, reloadEditor, saveWorldInfo } from '@sillytavern/scripts/world-info';
-import type { WorldInfoEntryHost } from '@sillytavern/scripts/world-info';
+import { loadWorldInfo } from '@sillytavern/scripts/world-info';
 import { currentCharacterData } from './characters';
 import { currentChatMetadata } from './settings';
 import { createTtlog } from './ttlog';
@@ -34,16 +24,6 @@ export interface WorldBookEntrySummary {
     enabled: boolean;
     depth: number;
     position: number | 'unknown';
-}
-
-/** 宿主世界书数据（写通道按引用改 entries 后整本回写）。 */
-export interface WorldInfoBookData {
-    entries: Record<string, WorldInfoEntryHost>;
-}
-
-/** 按书名装载世界书数据（null=书不存在或宿主通道异常）。 */
-export async function loadWorldInfoBook(bookName: string): Promise<WorldInfoBookData | null> {
-    return await loadWorldInfo(bookName);
 }
 
 /**
@@ -74,7 +54,7 @@ function strField(obj: Record<string, unknown> | undefined, key: string): string
 }
 
 /**
- * 当前聊天绑定的世界书（有序去重；主书必须排内嵌书之前——写回取首本）。
+ * 当前聊天绑定的世界书（有序去重；主书必须排内嵌书之前——顺序即优先级）。
  */
 export function getContextWorldBooks(): string[] {
     const books = new Set<string>();
@@ -89,41 +69,4 @@ export function getContextWorldBooks(): string[] {
     const chatBook = currentChatMetadata().world_info;
     if (typeof chatBook === 'string' && chatBook) books.add(chatBook);
     return Array.from(books).filter(Boolean);
-}
-
-/**
- * 人设条目写回世界书（PersonaWeaver fork 平移的写通道）：
- * 读全量 → 定位/新建指定 comment 的条目 → saveWorldInfo(immediately=true)
- * 整本回写 → reloadEditor。原生条目字段口径：key 是数组、disable 是反向
- * 布尔（与旧依赖的 keys/enabled 语义不同，映射反了＝条目静默失效）。
- * 失败抛错（成败即真判据：immediately=true 时 await 返回即已落盘，链上
- * 再无用户代码）；toast 归调用方。
- */
-export async function upsertWorldInfoPersonaEntry(
-    bookName: string,
-    entryTitle: string,
-    content: string,
-    entryKeys: string[],
-): Promise<void> {
-    const data = await loadWorldInfo(bookName);
-    if (!data) throw new Error(`世界书不存在: ${bookName}`);
-    const entries = Object.values(data.entries || {});
-    const existingEntry = entries.find(e => e.comment === entryTitle);
-
-    if (existingEntry) {
-        existingEntry.content = content;
-        existingEntry.key = entryKeys;
-        existingEntry.disable = false;
-    } else {
-        // 条目创建走宿主正规 helper（uid 分配＋字段模板由宿主维护）；
-        // 模板不含 displayIndex，自设 max+1 保证编辑器排序稳定（宿主排序回退 uid）
-        const entry = createWorldInfoEntry(bookName, data);
-        if (!entry) throw new Error('无法为新条目分配 uid');
-        entry.comment = entryTitle;
-        entry.content = content;
-        entry.key = entryKeys;
-        entry.displayIndex = entries.reduce((m, e) => Math.max(m, Number(e.displayIndex) || 0), -1) + 1;
-    }
-    await saveWorldInfo(bookName, data, true);
-    reloadEditor(bookName);
 }

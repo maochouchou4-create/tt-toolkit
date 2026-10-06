@@ -222,30 +222,6 @@ declare module '@sillytavern/scripts/world-info' {
      * @hostAnchor scripts/world-info.js:2241 export async function loadWorldInfo(name) {
      */
     export function loadWorldInfo(name: string): Promise<{ entries: Record<string, WorldInfoEntryHost> } | null>;
-    /**
-     * 世界书内新建条目（返回带 uid 的新 entry，宿主负责 uid 分配；
-     * null=uid 分配失败）。
-     * @hostAnchor scripts/world-info.js:4295 export function createWorldInfoEntry(_name, data) {
-     */
-    export function createWorldInfoEntry(
-        _name: string,
-        data: { entries: Record<string, WorldInfoEntryHost> },
-    ): WorldInfoEntryHost | null;
-    /**
-     * 世界书落盘（immediately 必须 true——persona 写回纪律；
-     * 漏 true 会「保存后读回为空」）。
-     * @hostAnchor scripts/world-info.js:4362 export async function saveWorldInfo(name, data, immediately = false) {
-     */
-    export function saveWorldInfo(
-        name: string,
-        data: { entries: Record<string, WorldInfoEntryHost> },
-        immediately?: boolean,
-    ): Promise<boolean>;
-    /**
-     * 刷新世界书编辑器视图（写回后调用，幂等）。
-     * @hostAnchor scripts/world-info.js:1144 export function reloadEditor(file, loadIfNotSelected = false) {
-     */
-    export function reloadEditor(file: string, loadIfNotSelected?: boolean): void;
 
     /**
      * 宿主世界书条目字段（本仓消费面子集；宽松形态见 host/worldinfo.ts 收窄）。

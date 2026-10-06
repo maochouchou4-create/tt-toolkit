@@ -65,8 +65,5 @@ export { listOpenAIPresetNames, readPresetInjectMessages, type PresetInjectMessa
 export {
     getContextWorldBooks,
     getWorldBookEntries,
-    loadWorldInfoBook,
-    upsertWorldInfoPersonaEntry,
     type WorldBookEntrySummary,
-    type WorldInfoBookData,
 } from './worldinfo';

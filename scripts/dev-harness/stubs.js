@@ -268,7 +268,7 @@
 
     // --------------------------------------------------------
     // world-info.js stub：固定桶返回（各 wi_* 注入模块可见真实形态）＋
-    // 的写通道四函数（内存书库，saveWorldInfo 落 Map、reloadEditor 空转）
+    // 内存书库（loadWorldInfo 读取——生成参考链供给）
     // --------------------------------------------------------
     async function getWorldInfoPrompt() {
         return {
@@ -288,30 +288,6 @@
     ]);
     function loadWorldInfo(name) {
         return Promise.resolve(wiBooks.has(name) ? { entries: wiBooks.get(name) } : null);
-    }
-    function createWorldInfoEntry(_name, data) {
-        const entries = data.entries || {};
-        const uids = Object.keys(entries).map(Number);
-        const entry = {
-            uid: uids.length ? Math.max(...uids) + 1 : 0,
-            comment: '',
-            content: '',
-            key: [],
-            disable: false,
-            position: 0,
-            depth: 4,
-            displayIndex: Object.keys(entries).length,
-        };
-        entries[String(entry.uid)] = entry;
-        return entry;
-    }
-    function saveWorldInfo(name, data, immediately = false) {
-        wiBooks.set(name, data.entries);
-        console.info(`[harness] saveWorldInfo(${name}, immediately=${String(immediately)}): ${Object.keys(data.entries).length} entries`);
-        return Promise.resolve();
-    }
-    function reloadEditor(file) {
-        console.info('[harness] reloadEditor:', file);
     }
 
     // --------------------------------------------------------
@@ -437,7 +413,7 @@
         slash_command_parser: { SlashCommandParser },
         ross_ascends_mods: { dragElement },
         power_user: { power_user },
-        world_info: { getWorldInfoPrompt, loadWorldInfo, createWorldInfoEntry, saveWorldInfo, reloadEditor },
+        world_info: { getWorldInfoPrompt, loadWorldInfo },
         personas: { getUserAvatars, initPersona, setUserAvatar, user_avatar: userAvatar },
         utils: { findPersona },
         i18n: { translate },

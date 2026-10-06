@@ -2,7 +2,7 @@
  * PersonaWeaver fork 状态层（Pinia）。
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
- * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）。
+ * 「store 内存态 + 显式保存点」——生成落地时持久化（userContext）。
  * 平时表单编辑只动内存，不写全局域（消旧版每次键击写 localStorage
  * 的 IO 放大）。任务级预设选择已退役——预设影响统一走传输层破限
  * 注入（apis/preset-inject，API 页「生成注入」卡全局一份）。
@@ -12,8 +12,7 @@
  * 会话感知：CHAT_CHANGED 到达时 lastRun 无条件清空（旧会话 wiText
  * 快照不得被新会话 reroll 消费）、开场白选择重置为默认档（greetings
  * 在场＝注入 #0；显式「不注入」仅本聊天内保留，不跨会话携带），宿主
- * 快照无条件重拉（读取廉价且 loadCandidates
- * 依赖 userName 不在指纹内，门控会漏刷；会话身份指纹仅用于日志观测）。
+ * 快照无条件重拉（读取廉价；会话身份指纹仅用于日志观测）。
  * 世界书：全量注入（无勾选/钉选面），参考分区只读展示绑定书单。
  */
 
@@ -21,17 +20,14 @@ import { defineStore } from 'pinia';
 import {
     getContextWorldBooks,
     getCharacterGreetingsList,
-    getPersonaDescription,
     getTavernContext,
     getUserDisplayName,
     showToast as toast,
     upsertPersona,
-    type WorldBookEntrySummary,
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
-import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
 import { readPersonaDomain, writePersonaDomain } from './storage';
 
@@ -112,8 +108,6 @@ export const usePersonaStore = defineStore('tt-persona', {
             boundBooks: [] as string[],
             greetings: [] as Array<{ label: string; content: string }>,
             selectedGreetingIndex: null as number | null,
-            /** 载入世界书条目的候选清单（onActivate 时刷新）。 */
-            loadCandidates: [] as Array<{ book: string; entry: WorldBookEntrySummary }>,
         };
     },
 
@@ -149,15 +143,12 @@ export const usePersonaStore = defineStore('tt-persona', {
         },
 
         /**
-         * 宿主派生数据刷新（init/onActivate 快照）：问候语/绑定书单/
-         * 载入候选。只读宿主，不写域。
+         * 宿主派生数据刷新（init/onActivate 快照）：问候语/绑定书单。
+         * 只读宿主，不写域。
          */
         refreshHostData() {
             this.greetings = getCharacterGreetingsList();
             this.boundBooks = getContextWorldBooks();
-            void listWorldBookEntriesForLoad(getUserDisplayName()).then(candidates => {
-                this.loadCandidates = candidates;
-            });
         },
 
         /**
@@ -165,7 +156,7 @@ export const usePersonaStore = defineStore('tt-persona', {
          * lastRun 无条件清空（不跨会话携带——lastRun 里的 wiText 是旧会话
          * 快照，reroll 禁用直到新生成）；开场白重置为默认档（在场＝#0，
          * 显式「不注入」只保留到本聊天）；宿主派生快照无条件重拉
-         * （门控会漏刷 userName 派生面，见头注）。
+         * （读取廉价，指纹门控收益为零）。
          */
         handleChatChanged() {
             const fingerprintBefore = this.sessionFingerprint;
@@ -264,7 +255,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.persistUserContext();
         },
 
-        // ---------------- 落库与载入 ----------------
+        // ---------------- 落库 ----------------
 
         /** 覆盖当前人设（宿主 persona 写回通道）。 */
         async saveToPersona() {
@@ -278,39 +269,6 @@ export const usePersonaStore = defineStore('tt-persona', {
             } catch (err) {
                 toast(TEXT.TOAST_SAVE_FAIL(err instanceof Error ? err.message : String(err)), 'error');
             }
-        },
-
-        /** 保存至世界书（USER:姓名 条目 + 智能触发词）。 */
-        async saveToWorldInfo() {
-            if (!this.resultText.trim()) {
-                toast(TEXT.TOAST_EMPTY_RESULT, 'warning');
-                return;
-            }
-            try {
-                const result = await syncPersonaToWorldInfo(getUserDisplayName(), this.resultText);
-                toast(`${TEXT.TOAST_WI_SUCCESS(result.book, result.entryTitle)}\n触发词: ${result.keywords.join(', ')}`, 'success');
-            } catch (err) {
-                toast(`${TEXT.TOAST_WI_WRITE_FAIL}${err instanceof Error ? err.message : String(err)}`, 'error');
-            }
-        },
-
-        /** 载入当前人设进结果框。 */
-        loadCurrentPersona() {
-            this.resultText = getPersonaDescription();
-            this.persistUserContext();
-            toast(TEXT.TOAST_LOAD_CURRENT);
-        },
-
-        /** 载入世界书条目进结果框（UI 选择器确认后调用）。 */
-        loadWorldBookEntry(book: string, uid: number) {
-            const entry = this.loadCandidates.find(c => c.book === book && c.entry.uid === uid)?.entry;
-            if (!entry || !entry.content.trim()) {
-                toast(TEXT.TOAST_NO_VALID_CONTENT, 'warning');
-                return;
-            }
-            this.resultText = entry.content;
-            this.persistUserContext();
-            toast(TEXT.TOAST_RESET_TO_WI);
         },
     },
 });
