@@ -11,7 +11,6 @@ import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';
 import NavSettingsTab from './NavSettingsTab.vue';
 import PersonaTab from './PersonaTab.vue';
-import PoolTab from './PoolTab.vue';
 
 export function createApiTab(): ShellTab {
     return {
@@ -55,18 +54,6 @@ export function createPersonaTab(): ShellTab {
         tabTitle: '人设',
         mount(container) {
             const app = createApp(PersonaTab);
-            app.use(pinia);
-            app.mount(container);
-        },
-    };
-}
-
-export function createPoolTab(): ShellTab {
-    return {
-        id: 'pool',
-        tabTitle: '条目池',
-        mount(container) {
-            const app = createApp(PoolTab);
             app.use(pinia);
             app.mount(container);
         },

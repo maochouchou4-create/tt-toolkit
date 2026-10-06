@@ -18,6 +18,7 @@ export const TEXT = {
     TOAST_NO_ENDPOINT: '未配置端点——到「API」页添加并选择后再试',
     TOAST_NO_LAST_REQUEST: '未找到上一次的生成需求',
     TOAST_REROLLED: '已重新生成',
+    TOAST_CANCELLED: '已取消生成',
     TOAST_NO_VALID_CONTENT: '未找到有效内容',
     TOAST_EMPTY_RESULT: '内容为空',
     TOAST_RESET_TO_WI: '已重置为世界书原始状态',

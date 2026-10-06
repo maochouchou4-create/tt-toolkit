@@ -30,12 +30,15 @@ import {
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
-import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
+import { collectWorldInfoContext, getPresetHintText, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
 import { readPersonaDomain, writePersonaDomain } from './storage';
 
 const log = createTtlog('modules/persona/store');
+
+/** 进行中生成的取消通道（生成/重 roll 共用；null＝无进行中请求——模块级单例，与互斥标记同生命周期）。 */
+let activeAbort: AbortController | null = null;
 
 /** 最近一次生成请求的记忆（重 roll 同参再来）。 */
 interface LastRunDescriptor {
@@ -64,7 +67,7 @@ type PersonaStore = ReturnType<typeof usePersonaStore>;
  * lastRun；reroll 只重放既有 lastRun——批1 后 reroll 不再重收集）；
  * successToast＝成功提示（reroll 专属）。
  */
-async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, api: GenerationApiConfig, successToast?: string): Promise<void> {
+async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, api: GenerationApiConfig, successToast?: string, signal?: AbortSignal): Promise<void> {
     store.isProcessing = true;
     store.processingLabel = '生成中…';
     try {
@@ -76,12 +79,18 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
             generationPreset: store.generationPreset,
             onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
             onProgress: label => { store.processingLabel = label; },
+            signal,
         });
         store.resultText = result;
         store.persistUserContext();
         if (successToast) toast(successToast);
     } catch (err) {
-        toast(err instanceof Error ? err.message : String(err), 'error');
+        // 取消不是失败：降级为轻提示，不作错误弹报（结果框保持原值）
+        if (err instanceof PersonaRunCancelled) {
+            toast(TEXT.TOAST_CANCELLED);
+        } else {
+            toast(err instanceof Error ? err.message : String(err), 'error');
+        }
     } finally {
         store.isProcessing = false;
         store.processingLabel = '';
@@ -220,7 +229,10 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;
             }
-            // 互斥先于 wiText 收集（异步窗口内二次点击不得重入）
+            // 互斥先于 wiText 收集（异步窗口内二次点击不得重入）；取消通道
+            // 同步建立——世界书收集段也在「停止」覆盖面内
+            const controller = new AbortController();
+            activeAbort = controller;
             this.isProcessing = true;
             this.processingLabel = '生成中…';
             try {
@@ -233,10 +245,11 @@ export const usePersonaStore = defineStore('tt-persona', {
                         : '',
                 };
                 this.lastRun = run;
-                await executeGeneration(this, run, api);
+                await executeGeneration(this, run, api, undefined, controller.signal);
             } finally {
                 this.isProcessing = false;
                 this.processingLabel = '';
+                activeAbort = null;
             }
         },
 
@@ -252,7 +265,18 @@ export const usePersonaStore = defineStore('tt-persona', {
                 toast(TEXT.TOAST_NO_ENDPOINT, 'error');
                 return;
             }
-            await executeGeneration(this, this.lastRun, api, TEXT.TOAST_REROLLED);
+            const controller = new AbortController();
+            activeAbort = controller;
+            try {
+                await executeGeneration(this, this.lastRun, api, TEXT.TOAST_REROLLED, controller.signal);
+            } finally {
+                activeAbort = null;
+            }
+        },
+
+        /** 取消进行中的生成（「停止」；无进行中请求时静默）。 */
+        cancelGeneration() {
+            activeAbort?.abort();
         },
 
         /** 清空（UI 层 confirm）。 */

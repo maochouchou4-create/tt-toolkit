@@ -639,6 +639,32 @@ async function runPersonaE2EChecks(): Promise<void> {
             store.resultText === '姓名: 阿德\n年龄: 20'
             && store.isProcessing === false && store.processingLabel === '',
             `result=${store.resultText}`);
+
+        // 取消通道：挂起不响应的端点（只认 signal）＋「停止」→ 中断传播、
+        // 互斥复位、结果不误写、取消不作错误弹报（lastRun.request 换种子
+        // 证明第二次生成确已进入链路；轮询等 fetch 真被进入后才取消——
+        // 请求中 abort→归类才是主战场，pre-aborted 入口只是兜底）
+        let fetchEntered = false; // 闭包内赋值：真值连词判定（初始化字面量会窄化，禁 === true 比较）
+        globalThis.fetch = ((_url: string | URL, init?: RequestInit) => {
+            fetchEntered = true;
+            return new Promise<Response>((_resolve, reject) => {
+                const abortLike = () => reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+                if (init?.signal?.aborted) abortLike();
+                else init?.signal?.addEventListener('abort', abortLike);
+            });
+        }) as typeof fetch;
+        const resultBeforeCancel = store.resultText;
+        store.requestText = '取消试验';
+        const pending = store.generate();
+        for (let i = 0; i < 100 && !fetchEntered; i++) await new Promise(r => setTimeout(r, 1));
+        store.cancelGeneration();
+        await pending;
+        check('端到端：生成可中途停止（请求已发出后取消、归类为取消、复位不误写）',
+            fetchEntered
+            && store.lastRun?.request === '取消试验'
+            && store.isProcessing === false && store.processingLabel === ''
+            && store.resultText === resultBeforeCancel,
+            `fetchEntered=${String(fetchEntered)} result=${store.resultText}`);
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);

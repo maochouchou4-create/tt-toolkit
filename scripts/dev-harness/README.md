@@ -54,4 +54,4 @@ build.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更新 
 
 ## 布局自查基线（screenshots/）
 
-文字基线（当前五 tab：选项生成／条目池／API／导航／人设）：壳为抽屉浮层（复用宿主 .drawer-content 皮肤），明暗两主题（SmartTheme 变量）、窄视口不越界（`.tt-shell` 宽 `min(560px, 100vw - 24px)`）。历史一轮 Playwright 程序化审计（getBoundingClientRect 全子树越界＋文本溢出，`.tt-tab-host` 滚动可达豁免）：宽视口 1038×666 明暗两主题、窄视口 420×700 暗主题全零问题；壳拖拽（dragElement→movingUIState 写入）实测通过。留存截图：`harness-01` 底页（明）、`harness-02` 壳+选项条（明）、`harness-04` 壳（暗）、`harness-05` 窄视口（暗）——早于当前五 tab 形态，重拍时整体替换。
+文字基线（当前五 tab：选项生成／API／导航／人设／日志）：壳为抽屉浮层（复用宿主 .drawer-content 皮肤），明暗两主题（SmartTheme 变量）、窄视口不越界（`.tt-shell` 宽 `min(560px, 100vw - 24px)`）。历史一轮 Playwright 程序化审计（getBoundingClientRect 全子树越界＋文本溢出，`.tt-tab-host` 滚动可达豁免）：宽视口 1038×666 明暗两主题、窄视口 420×700 暗主题全零问题；壳拖拽（dragElement→movingUIState 写入）实测通过。留存截图：`harness-01` 底页（明）、`harness-02` 壳+选项条（明）、`harness-04` 壳（暗）、`harness-05` 窄视口（暗）——早于当前五 tab 形态，重拍时整体替换。

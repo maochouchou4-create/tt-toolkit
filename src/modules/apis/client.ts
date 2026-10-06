@@ -137,6 +137,23 @@ function extractModelList(data: unknown): string[] {
         .sort();
 }
 
+/** 轻量探测（测连/拉模型）的响应上界——无上界时死端点会挂到浏览器默认超时（分钟级），按钮即不能停也不报错。 */
+const PROBE_TIMEOUT_MS = 30_000;
+
+/** 探测请求带超时上界：超时转译为人话错误（调用方 toast 即可读）。 */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+        if (controller.signal.aborted) throw new Error(`请求超时（${PROBE_TIMEOUT_MS / 1000} 秒）——端点无响应`);
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /**
  * 拉取模型名单（双候选端点探测：base 有 /vN → base/models，否则补
  * /v1/models；次选裸 base/models）。全部失败抛错（调用方 toast）。
@@ -149,7 +166,7 @@ export async function fetchModels(url: string, key: string): Promise<string[]> {
     ];
     for (const ep of endpoints) {
         try {
-            const res = await fetch(ep, { method: 'GET', headers: { 'Authorization': `Bearer ${key}` } });
+            const res = await fetchWithTimeout(ep, { method: 'GET', headers: { 'Authorization': `Bearer ${key}` } });
             if (res.ok) return extractModelList(await res.json());
         } catch {
             // 换下一个候选端点
@@ -160,12 +177,12 @@ export async function fetchModels(url: string, key: string): Promise<string[]> {
 
 /**
  * 连通性测试：发一次最小请求，原样返回 fetch 响应（ok 判定与 toast 归
- * 调用方）。无超时控制——浏览器默认超时兜底。
+ * 调用方）。30 秒上界——死端点快速失败，不等浏览器默认超时。
  */
 export async function testConnection(url: string, key: string, model: string): Promise<Response> {
     const cleanBase = normalizeApiBase(url);
     const ep = /\/v\d+$/.test(cleanBase) ? `${cleanBase}/chat/completions` : `${cleanBase}/v1/chat/completions`;
-    return await fetch(ep, {
+    return await fetchWithTimeout(ep, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 }),
