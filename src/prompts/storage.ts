@@ -11,7 +11,7 @@
  */
 
 import { getGlobal, setGlobal } from '@/storage';
-import { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
+import { DEFAULTS_VERSION, createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
 import { TASK_KEYS } from './types';
 import type { PromptConfig, TaskKey } from './types';
 
@@ -78,6 +78,15 @@ function normalizePromptConfigs(raw: unknown): { configs: Record<TaskKey, Prompt
     }
     for (const task of TASK_KEYS) {
         if (configs[task]) continue;
+        configs[task] = createTaskDefaultConfig(task);
+        changed = true;
+    }
+    // 默认配置版本化重建：三任务键无编辑面＝default 配置只能是旧默认
+    // 快照，版本落后即整键重建（覆盖无损）；非 default 定制配置不覆盖
+    // （防御分支——当前无定制来源，理论不存在）。
+    for (const task of TASK_KEYS) {
+        const config = configs[task]!;
+        if (config.id !== 'default' || config.defaultsVersion === DEFAULTS_VERSION) continue;
         configs[task] = createTaskDefaultConfig(task);
         changed = true;
     }

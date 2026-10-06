@@ -16,7 +16,7 @@ import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { migrateApiDomain } from '@/modules/apis/migration';
 import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
-import { TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
+import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
 import { usePersonaStore } from './store';
@@ -285,24 +285,37 @@ function runPromptsChecks(): void {
     // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）
     prompts.$patch({ revision: prompts.revision + 1 });
 
+    // 默认配置版本化重建：旧默认快照（无 defaultsVersion）启动后被整键
+    // 重建为新版并盖版本号（id!=='default' 的定制键不覆盖——防御分支）
+    const withStale = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
+    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, {
+        ...withStale,
+        persona_gen: { id: 'default', name: '默认', modules: [] },
+    });
+    ensurePromptConfigs();
+    prompts.$patch({ revision: prompts.revision + 1 });
+    const afterRebuild = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, { id?: string; defaultsVersion?: number; modules?: unknown[] }>;
+    check('prompts：旧默认快照版本化重建（整键重建＋版本号写入）',
+        afterRebuild.persona_gen?.id === 'default'
+        && afterRebuild.persona_gen?.defaultsVersion === DEFAULTS_VERSION
+        && Array.isArray(afterRebuild.persona_gen?.modules) && afterRebuild.persona_gen.modules.length === 3);
+
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
     const curatorText = (curatorConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
     const genText = (genConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
     check('prompts：curator 默认模板占位符（{{charInfo}}/{{userRequirements}}）',
         curatorText.includes('{{charInfo}}') && curatorText.includes('{{userRequirements}}'));
-    check('prompts：persona_gen 默认模板占位符（{{user}}/{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
-        genText.includes('{{user}}') && genText.includes('{{charInfo}}')
+    check('prompts：persona_gen 默认模板占位符（{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
+        genText.includes('{{charInfo}}')
         && genText.includes('{{greetings}}') && genText.includes('{{template}}')
         && genText.includes('{{input}}'));
 
     const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
     const keys = [...templateBlocks.keys()];
-    check('prompts：默认用户人设模板六块（基本信息/外貌/性格/背景/喜恶/NSFW）',
-        keys.length === 6 && ['基本信息', '外貌', '性格', '背景', '喜恶', 'NSFW'].every(k => keys.includes(k)),
+    check('prompts：默认用户人设模板五块（基本信息/外貌/性格/喜恶/背景）',
+        keys.length === 5 && ['基本信息', '外貌', '性格', '喜恶', '背景'].every(k => keys.includes(k)),
         `blocks=${keys.join('/')}`);
-    check('prompts：模板姓名占位符 {{user}} 在场（宏替换链路依赖）',
-        DEFAULT_TEMPLATES.user.includes('{{user}}'));
 }
 
 // ---------------------------------------------------------------------------
@@ -335,12 +348,13 @@ function runPersonaAssemblyChecks(): void {
         && curator.messages[1].content.includes('林霜，温柔') && curator.messages[1].content.includes('写个侦探')
         && !curator.messages[1].content.includes('{{charInfo}}') && !curator.messages[1].content.includes('{{userRequirements}}'));
 
-    // gen 管线：{{template}}←策展 schema、{{greetings}}、{{input}}、{{user}} 全填
+    // gen 管线：{{template}}←策展 schema、{{greetings}}、{{input}} 全填；
+    // 指令层无 {{user}} 宏——User 锚定行直接进正文
     const gen = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
     const genUser = gen.messages[gen.messages.length - 1].content;
-    check('persona 组装：persona_gen 管线（五个占位符全部填充）',
+    check('persona 组装：persona_gen 管线（占位符全部填充＋User 锚定行在场）',
         gen.messages.length === 2 && gen.messages[1].role === 'user'
-        && genUser.includes('王玉') && genUser.includes('林霜，温柔')
+        && genUser.includes('User——使用者本人的扮演身份') && genUser.includes('林霜，温柔')
         && genUser.includes('「你好，旅行者」') && genUser.includes('基本信息:\n姓名:\n年龄:')
         && genUser.includes('写个侦探') && !genUser.includes('{{'));
 
@@ -581,7 +595,7 @@ async function runPersonaE2EChecks(): Promise<void> {
             && calls[0].body.model === 'smoke-model' && calls[0].body.temperature === 1
             && !('max_tokens' in calls[0].body) && calls[0].body.stream === false);
         check('端到端：curator 段走引擎管线（策展指令全文进 messages＋assistant prefill 追加）',
-            firstJoined.includes('[任务：策展人设 schema]') && firstJoined.includes('<base_blocks>')
+            firstJoined.includes('[任务：策展人设 schema]') && firstJoined.includes('<reference_modules>')
             && !firstJoined.includes('{{charInfo}}') && !firstJoined.includes('{{userRequirements}}')
             && lastFirst?.role === 'assistant' && lastFirst?.content.startsWith('```yaml'));
         check('端到端：personaGen 段消费策展产出（<target_schema> 含 curator 输出、生成指令在场）',

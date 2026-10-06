@@ -97,6 +97,8 @@ export interface PromptConfig {
     id: string;
     name: string;
     modules: PromptModule[];
+    /** 写入时的默认模板版本——default 配置据此被版本化重建（storage 层），定制配置可缺席。 */
+    defaultsVersion?: number;
 }
 
 /**
