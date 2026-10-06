@@ -21,9 +21,9 @@
 
 import { createWorldInfoEntry, loadWorldInfo, reloadEditor, saveWorldInfo } from '@sillytavern/scripts/world-info';
 import type { WorldInfoEntryHost } from '@sillytavern/scripts/world-info';
-import { chat_metadata, characters, this_chid } from './settings';
+import { currentCharacterData } from './characters';
+import { currentChatMetadata } from './settings';
 import { createTtlog } from './ttlog';
-
 const log = createTtlog('host/worldinfo');
 
 /** 世界书条目的消费视图（原生命令口径：key 是数组、disable 是反向布尔）。 */
@@ -67,16 +67,6 @@ export async function getWorldBookEntries(bookName: string): Promise<WorldBookEn
     }
 }
 
-/** 当前角色数据（v2 char.data / v1 char 统一口径；未选角色返回 null）。 */
-function currentCharacterData(): Record<string, unknown> | null {
-    const chid = Number(this_chid);
-    if (!Number.isInteger(chid) || chid < 0) return null;
-    const char = characters[chid] as Record<string, unknown> | undefined;
-    if (!char || typeof char !== 'object') return null;
-    const data = char.data;
-    return data && typeof data === 'object' ? (data as Record<string, unknown>) : char;
-}
-
 /** 读取对象上的字符串字段。 */
 function strField(obj: Record<string, unknown> | undefined, key: string): string {
     const v = obj?.[key];
@@ -96,7 +86,7 @@ export function getContextWorldBooks(): string[] {
             if (name) books.add(name);
         }
     }
-    const chatBook = (chat_metadata as Record<string, unknown>).world_info;
+    const chatBook = currentChatMetadata().world_info;
     if (typeof chatBook === 'string' && chatBook) books.add(chatBook);
     return Array.from(books).filter(Boolean);
 }

@@ -15,7 +15,7 @@
  * 组件与模块一律通过本服务读写，不直接碰 extension_settings/chat_metadata。
  */
 
-import { chat_metadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
+import { currentChatMetadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
 
 /** 全局域存储键（extension_settings 下本扩展命名空间）。 */
 export const GLOBAL_KEY = 'ttToolkit';
@@ -72,7 +72,7 @@ export function readGlobalDomain(): GlobalDomain {
 
 /** 读聊天域原始单例（不快照——storage 内部面与调试 dump 用）。 */
 export function readChatDomain(): ChatDomain {
-    const raw = chat_metadata[CHAT_KEY];
+    const raw = currentChatMetadata()[CHAT_KEY];
     return (raw ?? {}) as ChatDomain;
 }
 

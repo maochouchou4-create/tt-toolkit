@@ -7,9 +7,9 @@
  * 断言确定性；与浏览器真实数据共用同一条 storage/generation 代码路径
  * （dist 加载即覆盖）。
  */
-import { event_types, extension_settings } from '@/host';
+import { event_types, extension_settings, getCurrentCharacter } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
-import { getGlobal, setGlobal } from '@/storage/service';
+import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS, clampTimeout, defaultLocalConfig } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
@@ -713,6 +713,53 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     check('storage：写域单通道清理污染键（normalize 落盘）', !('junkField' in after));
 }
 
+// ---------------------------------------------------------------------------
+// 8) 宿主可变绑定活取用回归（stub 活绑定 setter，快照转出回归红线）
+// ---------------------------------------------------------------------------
+
+interface SmokeStubs {
+    characters: Record<string, unknown>[];
+    chat_metadata: Record<string, unknown>;
+    setCharacters(v: Record<string, unknown>[]): void;
+    setChatMetadata(v: Record<string, unknown>): void;
+    setThisChid(v: string): void;
+}
+
+function smokeStubs(): SmokeStubs {
+    return (globalThis as unknown as { __TT_SMOKE_STUBS__: SmokeStubs }).__TT_SMOKE_STUBS__;
+}
+
+function runHostLiveBindingChecks(): void {
+    const stubs = smokeStubs();
+
+    // 1. 读通道活取用：this_chid 运行中变更即跟随
+    const backupChars = stubs.characters;
+    try {
+        stubs.setCharacters([{ name: '卡A' }, { name: '卡B' }]);
+        stubs.setThisChid('1');
+        check('host 活取用：this_chid 运行中变更即跟随——stub 置新角色索引后 getCurrentCharacter 读到新卡（快照转出回归红线）',
+            getCurrentCharacter()?.name === '卡B',
+            `name=${String(getCurrentCharacter()?.name)}`);
+    } finally {
+        stubs.setCharacters(backupChars);
+        stubs.setThisChid('0');
+    }
+
+    // 2. 写通道活目标：chat_metadata 换引用后写落当前对象、读回当前对象
+    const originalChat = stubs.chat_metadata;
+    try {
+        stubs.setChatMetadata({});
+        setChat('livenessProbe', { v: 1 });
+        const domain = stubs.chat_metadata.ttToolkit as Record<string, unknown> | undefined;
+        const probe = domain?.livenessProbe as { v?: number } | undefined;
+        check('host 活取用：chat_metadata 换引用后 setChat 写落当前对象、getChat 读当前对象（写通道目标=现取，脱挂写丢失回归红线）',
+            (getChat<{ v: number }>('livenessProbe'))?.v === 1 && probe?.v === 1,
+            `getChat=${JSON.stringify(getChat('livenessProbe'))} 宿主当前对象=${JSON.stringify(probe)}`);
+    } finally {
+        stubs.setChatMetadata(originalChat);
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
     console.info('=== persona 迁移/统一端点收编/三任务引擎/纯函数/api 形状/端到端/互斥机判 ===');
@@ -724,6 +771,7 @@ export async function runPersonaSmoke(): Promise<void> {
     await runApiChecks();
     await runPersonaE2EChecks();
     await runWorldbookAndStoreChecks();
+    runHostLiveBindingChecks();
     if (failures.length > 0) {
         console.error(`[persona-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;

@@ -52,6 +52,17 @@ const STUB_EXPORTS = {
 // 已对级数做精确断言，这里只做「拦截重定向」）
 const EXTERNAL_PREFIX_RE = /^(?:\.\.\/)+(script\.js|scripts\/.+)$/;
 
+// 宿主三者均 export let（script.js:670/675/775）——存根同走活绑定＋
+// setter 闭包（测试环境与宿主 let 语义同构）；setter 同步写回全局字段
+// ——只改模块绑定会让直读 __TT_SMOKE_STUBS__ 字段的既有断言读到陈旧值
+// ＝双真相源。其余名字（对象单例/函数）维持 const 引用快照（对原地改
+// 单例无害）。
+const LIVE_LET_NAMES = new Set(['this_chid', 'chat_metadata', 'characters']);
+
+function setterName(name) {
+    return 'set' + name.split('_').map(part => part[0].toUpperCase() + part.slice(1)).join('');
+}
+
 export async function resolve(specifier, context, nextResolve) {
     const match = specifier.match(EXTERNAL_PREFIX_RE);
     if (match) {
@@ -71,7 +82,12 @@ export async function load(url, context, nextLoad) {
         }
         const lines = [`// smoke stub: ${tail}`];
         for (const name of names) {
-            lines.push(`export const ${name} = globalThis.__TT_SMOKE_STUBS__.${name};`);
+            if (LIVE_LET_NAMES.has(name)) {
+                lines.push(`export let ${name} = globalThis.__TT_SMOKE_STUBS__.${name};`);
+                lines.push(`globalThis.__TT_SMOKE_STUBS__.${setterName(name)} = v => { ${name} = v; globalThis.__TT_SMOKE_STUBS__.${name} = v; };`);
+            } else {
+                lines.push(`export const ${name} = globalThis.__TT_SMOKE_STUBS__.${name};`);
+            }
         }
         return { format: 'module', shortCircuit: true, source: lines.join('\n') };
     }
