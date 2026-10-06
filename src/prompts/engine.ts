@@ -156,22 +156,8 @@ function resolvePersonaInjectContent(
             return sources.wiText.trim()
                 ? { content: sources.wiText, note: '世界书参考' }
                 : { content: '', note: '世界书参考为空' };
-        case 'char_info':
-            return sources.charInfo.trim()
-                ? { content: sources.charInfo, note: '角色卡信息' }
-                : { content: '', note: '角色卡信息为空' };
-        case 'greetings':
-            return sources.greetings.trim()
-                ? { content: sources.greetings, note: '开场白参考' }
-                : { content: '', note: '开场白参考为空' };
-        case 'user_request':
-            return sources.userRequest.trim()
-                ? { content: sources.userRequest, note: '用户请求' }
-                : { content: '', note: '无用户请求' };
-        case 'curated_schema':
-            return sources.curatedSchema.trim()
-                ? { content: sources.curatedSchema, note: '策展 schema' }
-                : { content: '', note: '无策展 schema（策展回退）' };
+        // 角色卡信息/开场白/用户请求/策展 schema 四件不走注入源：
+        // 数据面字段在 PersonaAssemblySources、占位符填充链独立存活。
         default:
             return { content: '', note: `未知 persona 注入源 ${source}` };
     }

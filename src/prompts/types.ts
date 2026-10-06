@@ -44,15 +44,10 @@ export type InjectionSource =
     /** 生成用预设的 system 段（「纯净模式」＝空，模块跳过） */
     | 'persona_preset'
     /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装） */
-    | 'persona_wi'
-    /** 角色卡全量信息文本（{{charInfo}} 占位符同源） */
-    | 'char_info'
-    /** 开场白参考（{{greetings}} 占位符同源） */
-    | 'greetings'
-    /** 用户请求（{{input}}/{{userRequirements}} 占位符同源） */
-    | 'user_request'
-    /** 策展产出的 schema（{{template}} 占位符同源） */
-    | 'curated_schema';
+    | 'persona_wi';
+    // 角色卡信息/开场白/用户请求/策展 schema 四件不再走注入源：数据面字段
+    // 在 PersonaAssemblySources、占位符填充链（fillPersonaPlaceholders）
+    // 独立存活。
 
 /**
  * persona 任务的注入源集合（判别/分流用）。as const 数组＝单一真相源：
@@ -61,10 +56,6 @@ export type InjectionSource =
 export const PERSONA_INJECTION_SOURCES = [
     'persona_preset',
     'persona_wi',
-    'char_info',
-    'greetings',
-    'user_request',
-    'curated_schema',
 ] as const;
 
 export type PersonaInjectionSource = (typeof PERSONA_INJECTION_SOURCES)[number];
