@@ -6,6 +6,7 @@
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
+import { useApisStore } from '@/modules/apis/store';
 import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';
@@ -20,6 +21,11 @@ export function createApiTab(): ShellTab {
             const app = createApp(ApiTab);
             app.use(pinia);
             app.mount(container);
+        },
+        // tab 容器只挂载一次、激活只切可见——宿主侧增删 openai 预设后，
+        // 破限注入卡的清单与悬空提醒靠这里每次激活刷新
+        onActivate() {
+            useApisStore(pinia).refreshPresetNames();
         },
     };
 }

@@ -1,6 +1,6 @@
 <template>
   <!--
-    「API」tab：统一端点表维护（列表/增删改/测连/拉模型清单）。
+    「API」tab：统一端点表维护（列表/增删改/测连/拉模型清单）＋生成注入（破限预设）。
     choice 与 persona 共用这张表，端点身份（地址/密钥/模型）只在这里管。
     视觉照 .tt-card 体系；类名前缀 tt-api-。
   -->
@@ -32,6 +32,25 @@
       </div>
 
       <button type="button" class="tt-api-btn" @click="apis.startDraft()">新增端点</button>
+    </div>
+
+    <div class="tt-card">
+      <div class="tt-card-title">生成注入</div>
+      <div class="tt-card-sub">
+        破限预设：选中宿主预设的「启用文本条目」会按原角色（assistant 开场就还是 assistant）插到选项生成与人设两任务每次请求的最前，人设两段链每段都带。
+        预设的采样参数不生效——任务参数已固化为内置最优档。
+        与人设页的「预设」各自独立（同选一份时其 system 段会分别进入文风与注入）；预设不存在或无启用文本条目时生成将不带注入（运行日志有记录）。
+      </div>
+      <label class="tt-api-field">
+        <span>破限预设</span>
+        <select :value="apis.jailbreakPreset" @change="onJbPresetChange">
+          <option value="">不启用</option>
+          <option v-for="name in apis.presetNames" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
+      <div v-if="jbMissing" class="tt-api-status" data-ok="false">
+        选中预设「{{ apis.jailbreakPreset }}」已不存在——生成将不带注入，请重选或切回「不启用」
+      </div>
     </div>
 
     <div v-if="apis.draft" class="tt-card">
@@ -74,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useApisStore } from '@/modules/apis/store';
 import type { ApiEndpoint } from '@/modules/apis/types';
 
@@ -83,6 +102,17 @@ const apis = useApisStore();
 const testing = ref(false);
 const modelsLoading = ref(false);
 const testError = ref('');
+
+// 破限注入：清单存 apis store（tab 的 onActivate 钩子刷新——本页容器只
+// 挂载一次，宿主侧增删预设后回本页即新鲜）；挂载兜底刷一次
+onMounted(() => {
+    apis.refreshPresetNames();
+});
+const jbMissing = computed(() => apis.jailbreakPreset !== '' && !apis.presetNames.includes(apis.jailbreakPreset));
+
+function onJbPresetChange(event: Event): void {
+    apis.selectJailbreakPreset((event.target as HTMLSelectElement).value);
+}
 
 const isEdit = computed(() => apis.endpoints.some(e => e.id === apis.draft?.id));
 

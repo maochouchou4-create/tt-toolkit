@@ -77,6 +77,27 @@ const stubContext = {
     saveMetadata: async () => {
         globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls++;
     },
+    // openai 预设管理器存根：破限注入机判用——「冒烟破限」＝assistant 开场
+    // ＋user 接话两条启用文本条目，附 marker 占位与停用条目各一（启用过滤/
+    // 角色保真/marker 剔除的判据材料）；无 system 角色启用条目——persona
+    // 预设文风通道（extractSystemParts）不受此桩影响仍归空
+    getPresetManager: () => ({
+        getPresetList: () => ({ preset_names: { '冒烟破限': 0 } }),
+        getCompletionPresetByName: (name) => (name === '冒烟破限' ? {
+            prompts: [
+                { identifier: 'jb-open', role: 'assistant', content: '破限开场白' },
+                { identifier: 'jb-marker', marker: true, content: '占位' },
+                { identifier: 'jb-user', role: 'user', content: '破限接话' },
+                { identifier: 'jb-off', role: 'system', content: '停用条目', enabled: false },
+            ],
+            prompt_order: [{ character_id: 100001, order: [
+                { identifier: 'jb-open', enabled: true },
+                { identifier: 'jb-marker', enabled: true },
+                { identifier: 'jb-user', enabled: true },
+                { identifier: 'jb-off', enabled: false },
+            ] }],
+        } : undefined),
+    }),
     extensionPrompts: {
         // 插入序故意与 depth 序不同（memory 先插入但 depth 更深）——
         // 排序断言只有真的实现了 depth 排序才绿
@@ -407,18 +428,19 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) 
 // persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成 62 条：迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/
+// 期望构成 66 条：迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/
 // 退休键/legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃
 // 含 v1.3 endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重
 // 映射/choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动
 // 清空 1＋prompts 6（三任务键齐备/choice 18 模块红线/persona 两任务默认形状/
 // 旧数组一次写迁移/任务隔离开关/按任务恢复默认）＋persona 组装 3＋persona
-// dump 观测口 2＋纯函数 5＋api 12（含 finish_reason=length 截断显式报错回归）
-// ＋e2e 5（含取消通道 1：请求已发出后取消归类＋复位不误写）＋worldbook·store 9
-// ＋会话感知 3
+// dump 观测口 2＋纯函数 5＋api 14（含 finish_reason=length 截断显式报错回归
+// ＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null）＋e2e 7（含取消
+// 通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段前缀在场＋
+// 悬空 fail-soft 不注入）＋worldbook·store 9＋会话感知 3
 // （CHAT_CHANGED 重置开场白默认档＋emit 接线全链＋无开场白卡回落不注入）＋
 // host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）。
-const PERSONA_PASS_EXPECTED = 62;
+const PERSONA_PASS_EXPECTED = 66;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -511,4 +533,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

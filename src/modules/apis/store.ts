@@ -6,9 +6,10 @@
  */
 
 import { defineStore } from 'pinia';
-import { createEndpoint, deleteEndpoint, readActiveEndpointId, readApiDomain, resolveEndpointById, setActiveEndpointId, upsertEndpoint } from './storage';
+import { createEndpoint, deleteEndpoint, readActiveEndpointId, readApiDomain, readJailbreakPreset, resolveEndpointById, setActiveEndpointId, upsertEndpoint, writeJailbreakPreset } from './storage';
 import type { ApiEndpoint } from './types';
 import { fetchModels, testConnection } from './client';
+import { listOpenAIPresetNames } from '@/host';
 
 export interface ConnectionStatus {
     ok: boolean;
@@ -24,6 +25,8 @@ export const useApisStore = defineStore('tt-apis', {
         modelOptions: [] as string[],
         /** 测连结果（成功/失败均落这里供 UI 显示）。 */
         connectionStatus: null as ConnectionStatus | null,
+        /** 宿主 openai 预设名清单（破限注入卡下拉源；onActivate 刷新——tab 容器只挂载一次）。 */
+        presetNames: [] as string[],
     }),
     getters: {
         endpoints(): ApiEndpoint[] {
@@ -41,6 +44,11 @@ export const useApisStore = defineStore('tt-apis', {
             const id = this.activeEndpointId;
             return id === '' ? null : resolveEndpointById(id);
         },
+        /** 选中破限预设名（''＝不启用；API 页「生成注入」卡读写）。 */
+        jailbreakPreset(): string {
+            void this.revision;
+            return readJailbreakPreset();
+        },
     },
     actions: {
         /** 增改单条端点（按 id 整体替换；新增即追加）。 */
@@ -57,6 +65,15 @@ export const useApisStore = defineStore('tt-apis', {
         useEndpoint(id: string) {
             setActiveEndpointId(id);
             this.revision += 1;
+        },
+        /** 选择破限预设（''＝关闭；两任务下次请求即生效）。 */
+        selectJailbreakPreset(name: string) {
+            writeJailbreakPreset(name);
+            this.revision += 1;
+        },
+        /** 刷新宿主预设名清单（tab onActivate 与挂载时调用——宿主侧增删预设后回本页即新鲜）。 */
+        refreshPresetNames() {
+            this.presetNames = listOpenAIPresetNames();
         },
         /** 新建或复制端点骨架进编辑区。 */
         startDraft(base?: ApiEndpoint) {

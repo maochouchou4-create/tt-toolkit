@@ -16,6 +16,9 @@ export const APIS_DOMAIN_KEY = 'apis';
 /** 全局活动端点键（extension_settings.ttToolkit 顶层；类型在 GlobalDomain）。 */
 export const ACTIVE_ENDPOINT_KEY = 'activeEndpointId';
 
+/** 破限预设名键（extension_settings.ttToolkit 顶层；''＝不启用）。 */
+export const JAILBREAK_PRESET_KEY = 'jailbreakPreset';
+
 /**
  * 读全局活动端点 id（''＝未选态：键缺席/非字符串皆归 ''）。
  * choice 与 persona 的端点解析共用此单通道，不再各持任务域选中键。
@@ -28,6 +31,17 @@ export function readActiveEndpointId(): string {
 /** 写全局活动端点 id（API 页「使用」按钮通道；''＝清回未选态）。 */
 export function setActiveEndpointId(id: string): void {
     setGlobal(ACTIVE_ENDPOINT_KEY, id);
+}
+
+/** 读选中破限预设名（''＝不启用：键缺席/非字符串皆归 ''）。 */
+export function readJailbreakPreset(): string {
+    const raw = getGlobal<unknown>(JAILBREAK_PRESET_KEY);
+    return typeof raw === 'string' ? raw : '';
+}
+
+/** 写选中破限预设名（API 页「生成注入」卡通道；''＝关）。 */
+export function writeJailbreakPreset(name: string): void {
+    setGlobal(JAILBREAK_PRESET_KEY, name);
 }
 
 function normalizeString(value: unknown, fallback: string): string {

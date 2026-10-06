@@ -8,6 +8,7 @@
 import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
 import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
+import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -36,8 +37,10 @@ export function isGenerating(): boolean {
 }
 
 /**
- * 组装当前上下文的消息数组（dump 口与生成管线共用一条路径——dump 显示
- * 的就是实际发送的内容，不存在「展示与发送两套组装」）。
+ * 组装当前上下文的消息数组（dump 口与生成管线共用一条路径）。
+ * 观测面口径：本函数的 dump＝提示词引擎模块观测（不含传输层破限前缀）；
+ * 实发全文（含破限前缀）以运行日志页的请求记录为准——两个观测面各说
+ * 各话，前缀进引擎观测口属挂账立项（transportPrelude 重构）。
  *
  * 池供给在这里现场抽取（每次组装重抽、pinned 恒在）——抽一次快照
  * 传给 sources/engine，prompts 层不回读 choice 域（单向供给）。
@@ -86,7 +89,11 @@ export async function generateOptions(): Promise<void> {
         let rawText: string;
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
-        requestDump = serializeMessages(assembly.messages);
+        // 破限注入前缀（选中预设的启用文本条目，原角色插最前）——runlog
+        // 与实发同源（同一 outbound 数组）：日志页看到的请求即模型收到的请求
+        const jb = resolveJailbreakMessages();
+        const outbound = jb.length > 0 ? [...jb, ...assembly.messages] : assembly.messages;
+        requestDump = serializeMessages(outbound);
 
         if (gen.debugForceRaw) {
             rawText = DEBUG_MALFORMED_RAW;
@@ -119,7 +126,7 @@ export async function generateOptions(): Promise<void> {
                 reasoningEffort: TASK_DEFAULTS.reasoningEffort,
             };
             handedToClient = true;
-            const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
+            const result = await callGenerateEndpoint(outbound, requestConfig, controller.signal);
             rawText = result.content;
             runId = result.runId;
         }
