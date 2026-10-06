@@ -193,6 +193,7 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
 
         const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
             const result = await callGenerateEndpoint(messages, {
+                task: 'persona',
                 baseUrl: config.endpoint.url,
                 apiKey: config.endpoint.key,
                 model: config.endpoint.model,

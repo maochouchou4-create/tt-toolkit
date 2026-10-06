@@ -7,7 +7,8 @@
  * scripts/smoke.mjs 收口断言。
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
-import { buildGenerateBody } from '@/modules/apis/client';
+import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
+import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
@@ -451,6 +452,7 @@ function runParseChecks(): void {
 function runReasoningEffortChecks(): void {
     const messages = [{ role: 'user' as const, content: 'x' }];
     const base = {
+        task: 'choice' as const,
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk-test',
         model: 'test-model',
@@ -483,6 +485,99 @@ async function runDebugForceRawChecks(): Promise<void> {
     }
 }
 
+/** 解析守门机判：JSON 骸骨三臂判据的拒收面＋取舍锁定。 */
+function runParseGuardChecks(): void {
+    // 现场实锤形态：值内未转义引号的坏 JSON——主路径 JSON.parse 失败，
+    // 旧实现会落括号回退把整坨 JSON 合成一条废选项
+    const badArrayJson = '[{"title":"A","content":"她说"你好"然后离开"}]';
+    const badReport = parseOptions(badArrayJson, 4);
+    check('解析防御：坏 JSON（数组形态＋值内未转义引号）不进括号回退——json_reject 路径 0 条（fail fast，不再合成废选项）',
+        badReport.path === 'json_reject' && badReport.options.length === 0, `path=${badReport.path} count=${badReport.options.length}`);
+
+    // 两臂各有样本：截断对象走「对象开头」臂；散文前缀＋键字面量走「契约键」臂
+    const truncated = '{"options":[{"';
+    const prosePrefix = '好的，以下是选项：\n{"options": [{"title":"A","content":"甲"';
+    const truncatedReport = parseOptions(truncated, 4);
+    const proseReport = parseOptions(prosePrefix, 4);
+    check('解析防御：截断对象（{"options":[{" 早断）与散文前缀＋键字面量两臂各有样本拒收',
+        truncatedReport.path === 'json_reject' && proseReport.path === 'json_reject'
+        && truncatedReport.options.length === 0 && proseReport.options.length === 0,
+        `path=${truncatedReport.path}/${proseReport.path}`);
+
+    // 取舍锁定：合法括号形态但正文含键字面量的纯文本被拒收——fail fast
+    // 可见，优于静默废选项（判据选择文档化的取舍，见 parse.ts 守门注释）
+    const bracketWithLiteral = '[回忆片段] 这段正文里带 "title" 字面量';
+    const literalReport = parseOptions(bracketWithLiteral, 4);
+    check('守门取舍：括号正文含 "title" 字面量的纯文本按 JSON 骸骨拒收（fail fast 可见，优于静默废选项——取舍锁定）',
+        literalReport.path === 'json_reject' && literalReport.options.length === 0, `path=${literalReport.path}`);
+}
+
+/**
+ * runlog 接线机判：生成管线的记录落点（成功/失败/环形上限/密钥金丝雀）。
+ * stub fetch 形态仿 persona smoke（全局 fetch 替换＋finally 还原）。
+ */
+async function runRunlogChecks(): Promise<void> {
+    const runlog = useRunlogStore();
+    runlog.clear();
+
+    // 成功面：debugForceRaw 走完整管线（无网络依赖），记录带解析结论
+    choiceStorage.updateGenParams({ debugForceRaw: true });
+    try {
+        await generateOptions();
+        const record = runlog.records[runlog.records.length - 1];
+        check('runlog：debugForceRaw 生成成功落记录（ok=true、responseText 非空、parsePath/条数进记录）',
+            !!record && record.ok && record.responseText === DEBUG_MALFORMED_RAW
+            && record.parsePath === 'bracket_fallback' && record.optionCount === 4
+            && record.endpointUrl === '(debugForceRaw)',
+            `ok=${String(record?.ok)} parsePath=${record?.parsePath ?? '无'} count=${String(record?.optionCount)}`);
+    } finally {
+        choiceStorage.updateGenParams({ debugForceRaw: false });
+    }
+
+    // 失败面：端点缺失（请求未发出）由 generator 哨兵补记 ok:false
+    const savedActiveEndpointId = readActiveEndpointId();
+    setActiveEndpointId('no-such-endpoint');
+    await generateOptions();
+    const failRecord = runlog.records[runlog.records.length - 1];
+    check('runlog：端点缺失失败落记录（ok=false、error 含「未选择生成端点」、requestText 在场）',
+        !!failRecord && failRecord.ok === false && (failRecord.error ?? '').includes('未选择生成端点') && failRecord.requestText.length > 0,
+        `ok=${String(failRecord?.ok)} error=${failRecord?.error ?? '无'}`);
+    setActiveEndpointId(savedActiveEndpointId);
+    // 端点缺失用例把会话态留在 error 相位——复位，免污染后续守卫链断言基准
+    useChoiceStore().$reset();
+
+    // 环形上限：连 commit 25 条只留末 20（最旧被裁剪）
+    runlog.clear();
+    for (let i = 0; i < 25; i++) {
+        runlog.commit({
+            at: new Date().toISOString(), task: 'choice', endpointUrl: '(test)', model: `m${i}`,
+            contract: 'prompt_only', stream: false, durationMs: 0, ok: true, requestText: '', responseText: '',
+        });
+    }
+    check('runlog：环形上限 20（连 commit 25 条只留末 20）',
+        runlog.records.length === 20 && runlog.records[0]?.model === 'm5' && runlog.records[19]?.model === 'm24',
+        `len=${runlog.records.length} first=${runlog.records[0]?.model} last=${runlog.records[19]?.model}`);
+
+    // 密钥金丝雀：传输层记录全量序列化后不得含 apiKey（端点身份只存 url/model）
+    runlog.clear();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+        ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'canary-ok' } }] }),
+    })) as unknown as typeof fetch;
+    try {
+        const result = await callGenerateEndpoint(
+            [{ role: 'user', content: 'hi' }],
+            { task: 'choice', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-leak-canary', model: 'm1', stream: false, outputContract: 'prompt_only' },
+        );
+        const allRecords = JSON.stringify(runlog.records);
+        check('runlog：密钥金丝雀——stub fetch 走一次 callGenerateEndpoint（apiKey=\'sk-leak-canary\'，stub 形态仿 persona smoke），全记录序列化不含该值',
+            result.runId > 0 && runlog.records.length === 1 && !allRecords.includes('sk-leak-canary'),
+            `records=${runlog.records.length} leak=${String(allRecords.includes('sk-leak-canary'))}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用；返回失败清单长度供收口）。 */
 export async function runChoiceSmoke(): Promise<void> {
     console.info('=== choice 组装/解析机判 ===');
@@ -490,8 +585,10 @@ export async function runChoiceSmoke(): Promise<void> {
     console.info('=== 组装 dump 全文 ===');
     console.info(dumpText);
     runParseChecks();
+    runParseGuardChecks();
     runReasoningEffortChecks();
     await runDebugForceRawChecks();
+    await runRunlogChecks();
     console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');
     runPoolChecks();
     runAssetPoolChecks();
