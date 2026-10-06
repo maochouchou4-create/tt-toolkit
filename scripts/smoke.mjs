@@ -159,6 +159,8 @@ globalThis.__TT_SMOKE_STUBS__ = {
     sendTextareaMessage: async () => {},
     // 宏替换（恒等——冒烟下 {{user}} 等走引擎兜底值）
     substituteParams: text => text,
+    // i18n 翻译（模拟 zh-cn 环境：让宿主错误标签的同源计算路径可测）
+    translate: text => (text === 'API Error' ? 'API 错误' : text),
     // 请求头（node 下无 CSRF）
     getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
     // 宿主通用注入槽位表（script.js 直导入面——空表；自动注入读取走
@@ -374,8 +376,8 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
 // 期望构成：组装注入/解析回退＋解析守门＋常量请求形状＋runlog 接线＋池抽取
-// 分布/池注入/自动生成守卫链，共 84。
-const CHOICE_PASS_EXPECTED = 84;
+// 分布/池注入/自动生成守卫链，共 86。
+const CHOICE_PASS_EXPECTED = 86;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

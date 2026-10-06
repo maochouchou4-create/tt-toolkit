@@ -3,7 +3,7 @@
  * 只实现 tt-toolkit 实际消费的最小面（消费面清单见 README.md），
  * 全部内存态——刷新即重置，可反复折腾布局而不污染真实酒馆。
  *
- * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（11 条）
+ * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（12 条）
  * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
  * SillyTavern.getContext / quickReplyApi / toastr / STBaiBaiBook）按
  * 宿主挂载形态放到 globalThis 上。
@@ -348,6 +348,9 @@
         return list.find(p => !name || (allowAvatar && p.avatar === name) || p.name === name) ?? null;
     }
 
+    // i18n.js stub：返回原文（harness 模拟 en 环境——locale 未翻译形态）
+    const translate = text => text;
+
     // fetch 拦截（personas 写回链的 /api/avatars/upload）：命中走内存，
     // 其余原样透传（choice 等模块的真实 fetch 不受影响）
     const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
@@ -437,6 +440,7 @@
         world_info: { getWorldInfoPrompt, loadWorldInfo, createWorldInfoEntry, saveWorldInfo, reloadEditor },
         personas: { getUserAvatars, initPersona, setUserAvatar, user_avatar: userAvatar },
         utils: { findPersona },
+        i18n: { translate },
     };
 
     // --------------------------------------------------------

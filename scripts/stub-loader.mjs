@@ -46,6 +46,7 @@ const STUB_EXPORTS = {
     'scripts/slash-commands/SlashCommandParser.js': ['SlashCommandParser'],
     'scripts/slash-commands/SlashCommand.js': ['SlashCommand'],
     'scripts/st-context.js': ['getContext'],
+    'scripts/i18n.js': ['translate'],
 };
 
 // 相对上溯形态的 @sillytavern 外置说明符（级数不限——check-imports.mjs

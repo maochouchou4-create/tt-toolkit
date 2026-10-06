@@ -2,8 +2,8 @@
  * 自动生成：MESSAGE_RECEIVED 监听守卫链。
  *
  * 守卫顺序（越早越便宜）：quiet 静默生成跳过 → 消息文本空跳过 →
- * messageId===0 跳过 → autoGenerate 关跳过 → 生成中跳过 → 未选端点
- * console.warn 跳过。全部通过后 fire-and-forget 触发生成。
+ * 错误正文跳过 → messageId===0 跳过 → autoGenerate 关跳过 → 生成中
+ * 跳过 → 未选端点 console.warn 跳过。全部通过后 fire-and-forget 触发生成。
  *
  * 监听器内不得 await（重活脱钩）：宿主 eventSource.emit 串行 await 每个
  * 监听器，emit 后紧接 finalizeMessageContent→CHARACTER_MESSAGE_RENDERED
@@ -14,7 +14,7 @@
  * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差。
  */
 
-import { eventBus, event_types, getChatMessages } from '@/host';
+import { eventBus, event_types, getChatMessages, getHostApiErrorLabel } from '@/host';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { generateOptions, isGenerating } from './generator';
 
@@ -50,6 +50,11 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
     const message = idx < messages.length ? messages[idx] : undefined;
     const mes = message?.mes;
     if (typeof mes !== 'string' || mes.trim() === '') return false;
+    // 错误正文跳过：宿主把生成失败伪装成带 API Error 标签的正常回复
+    // 落地（无结构化标志，只能前缀判别；同源标签＋硬编码兜底的 why
+    // 见 host/i18n.ts 头注）——错误正文上不出选项
+    const text = mes.trimStart();
+    if (text.startsWith(getHostApiErrorLabel()) || text.startsWith('[API Error]')) return false;
     // messageId===0：首楼欢迎消息（角色卡开场白），不是 AI 对玩家的回复
     if (idx === 0) return false;
 

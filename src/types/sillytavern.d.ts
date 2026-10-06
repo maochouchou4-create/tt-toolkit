@@ -316,3 +316,12 @@ declare module '@sillytavern/scripts/utils' {
         quiet?: boolean;
     }): unknown;
 }
+
+declare module '@sillytavern/scripts/i18n' {
+    /**
+     * 前端同源翻译（与 Tauri 侧同一张 locale 表——错误标签须与宿主
+     * 落地正文同源，见 host/i18n.ts 头注）。
+     * @hostAnchor scripts/i18n.js:122 export function translate(text, key = null) {
+     */
+    export function translate(text: string, key?: string): string;
+}

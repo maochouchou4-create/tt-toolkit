@@ -285,6 +285,15 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：quiet 跳过', store.phase === 'idle' && store.options.length === 0);
     emitReceived(1, 'normal');
     check('自动生成：空文本跳过', store.phase === 'idle' && store.options.length === 0);
+    // 错误正文跳过：宿主伪装成正常回复的失败正文（前缀判别）
+    chat.push(
+        { mes: '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。', is_user: false },
+        { mes: '[API Error]\nCould not connect to the target service.', is_user: false },
+    );
+    emitReceived(3, 'normal');
+    check('自动生成：错误正文跳过（zh-cn 同源标签命中）', store.phase === 'idle' && store.options.length === 0);
+    emitReceived(4, 'normal');
+    check('自动生成：错误正文跳过（英文硬编码兜底命中）', store.phase === 'idle' && store.options.length === 0);
     emitReceived(0, 'normal');
     check('自动生成：首楼（messageId===0）跳过', store.phase === 'idle' && store.options.length === 0);
     // 双复核 P3 回归：分组消息 (chat_id, type) 形态的纯数字串不当楼层索引
