@@ -114,10 +114,10 @@
 
       <div class="tt-card">
         <div class="tt-card-title">开场白</div>
-        <div class="tt-card-sub">注入哪一条开场白作为生成参考</div>
+        <div class="tt-card-sub">注入哪一条开场白作为生成参考（默认第一条；「不注入」仅本聊天内保留）</div>
         <select v-if="store.greetings.length > 0" :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-persona-select" @change="onGreetingChange">
-          <option value="">不注入开场白</option>
           <option v-for="(g, i) in store.greetings" :key="i" :value="String(i)">{{ g.label }}</option>
+          <option value="">不注入开场白</option>
         </select>
         <div v-else class="tt-persona-empty">进入角色会话后可选择开场白</div>
       </div>

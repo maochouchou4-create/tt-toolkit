@@ -8,10 +8,11 @@
  *
  * 互斥纪律：isProcessing 对生成/重 roll 全局互斥（旧模块私有
  * isProcessing 同语义）；lastRun 记忆最近一次请求（重 roll 语义）。
- * 会话感知：CHAT_CHANGED 到达时 selectedGreetingIndex/lastRun 无条件
- * 清空（开场白选择不跨会话携带；旧会话 wiText 快照不得被新会话
- * reroll 消费），宿主快照无条件重拉（读取廉价且 loadCandidates 依赖
- * userName 不在指纹内，门控会漏刷；会话身份指纹仅用于日志观测）。
+ * 会话感知：CHAT_CHANGED 到达时 lastRun 无条件清空（旧会话 wiText
+ * 快照不得被新会话 reroll 消费）、开场白选择重置为默认档（greetings
+ * 在场＝注入 #0；显式「不注入」仅本聊天内保留，不跨会话携带），宿主
+ * 快照无条件重拉（读取廉价且 loadCandidates
+ * 依赖 userName 不在指纹内，门控会漏刷；会话身份指纹仅用于日志观测）。
  * 世界书：全量注入（无勾选/钉选面），参考分区只读展示绑定书单。
  */
 
@@ -147,6 +148,7 @@ export const usePersonaStore = defineStore('tt-persona', {
         init() {
             this.loadFromDomain();
             this.refreshHostData();
+            this.selectedGreetingIndex = this.greetings.length > 0 ? 0 : null;
         },
 
         /** 从全局域读快照进内存态（显式保存点之外的唯一读时机）。 */
@@ -172,15 +174,17 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         /**
          * CHAT_CHANGED 处理（订阅在 persona/index.ts init 挂载）：
-         * selectedGreetingIndex 与 lastRun 无条件清空（不跨会话携带——
-         * lastRun 里的 wiText 是旧会话快照，reroll 禁用直到新生成）；
-         * 宿主派生快照无条件重拉（门控会漏刷 userName 派生面，见头注）。
+         * lastRun 无条件清空（不跨会话携带——lastRun 里的 wiText 是旧会话
+         * 快照，reroll 禁用直到新生成）；开场白重置为默认档（在场＝#0，
+         * 显式「不注入」只保留到本聊天）；宿主派生快照无条件重拉
+         * （门控会漏刷 userName 派生面，见头注）。
          */
         handleChatChanged() {
             const fingerprintBefore = this.sessionFingerprint;
-            this.selectedGreetingIndex = null;
             this.lastRun = null;
             this.refreshHostData();
+            // 重置须在快照重拉之后——默认档取决于新会话的 greetings
+            this.selectedGreetingIndex = this.greetings.length > 0 ? 0 : null;
             if (this.sessionFingerprint !== fingerprintBefore) {
                 log.info(`会话切换：指纹 ${fingerprintBefore} → ${this.sessionFingerprint}，宿主快照已重拉`);
             }

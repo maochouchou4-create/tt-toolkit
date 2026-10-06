@@ -397,16 +397,16 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) 
 // persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成 60 条：迁移 14（空启动/3 键搬入/形状/退休键/legacy 快照/
+// 期望构成 61 条：迁移 14（空启动/3 键搬入/形状/退休键/legacy 快照/
 // 二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含 v1.3 endpointId，
 // 过渡透传 v2 形状＋收编 4 条：统一表形状/去重＋id 重映射/choice 域 v2
 // 重写＋全局活动键提升/persona localConfig v2）＋端点删除联动清空 1＋
 // prompts 6（三任务键齐备/choice 18 模块红线/persona 两任务默认形状/旧数组
 // 一次写迁移/任务隔离开关/按任务恢复默认）＋persona 组装 3＋persona dump
-// 观测口 2＋纯函数 5＋api 11＋e2e 4＋worldbook·store 10＋会话感知 2
-// （CHAT_CHANGED 无条件清空开场白选择与 lastRun＋宿主 emit 接线全链）＋
+// 观测口 2＋纯函数 5＋api 11＋e2e 4＋worldbook·store 10＋会话感知 3
+// （CHAT_CHANGED 重置开场白默认档＋emit 接线全链＋无开场白卡回落不注入）＋
 // host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）。
-const PERSONA_PASS_EXPECTED = 60;
+const PERSONA_PASS_EXPECTED = 61;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
