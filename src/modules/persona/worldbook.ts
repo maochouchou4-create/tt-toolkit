@@ -1,5 +1,5 @@
 /**
- * PersonaWeaver fork 世界书写侧编排（批D 平移，模块层）。
+ * PersonaWeaver fork 世界书写侧编排（模块层）。
  *
  * 宿主读写通道在 host/worldinfo.ts（upsertWorldInfoPersonaEntry：读全量
  * → 定位/新建条目 → saveWorldInfo(immediately=true) 整本回写 →

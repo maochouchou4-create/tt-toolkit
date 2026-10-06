@@ -1,5 +1,5 @@
 /**
- * node 冒烟的整合轮II 机判部分：persona 迁移幂等＋统一端点收编＋三任务
+ * node 冒烟的 persona 机判部分：迁移幂等＋统一端点收编＋三任务
  * 提示词引擎＋api 客户端形状＋store 互斥。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
@@ -8,6 +8,7 @@
  * （dist 加载即覆盖）。
  */
 import { event_types, extension_settings } from '@/host';
+import { toolkitGlobalPort } from '@/global-port';
 import { getGlobal, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS, clampTimeout, defaultLocalConfig } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
@@ -15,7 +16,7 @@ import { parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { migrateApiDomain } from '@/modules/apis/migration';
 import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
-import { TASK_KEYS, usePromptsStore, assembleMessages, type PersonaAssemblySources } from '@/prompts';
+import { TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { generateSmartKeywords, syncPersonaToWorldInfo } from './worldbook';
 import { usePersonaStore } from './store';
@@ -157,7 +158,7 @@ function runMigrationChecks(): void {
         ls.get(LEGACY_KEYS.state) !== null && ls.get(LEGACY_KEYS.dataUser) !== null);
 
     // 1e. 统一端点收编场景（choice 旧 apis[]＋persona 配置档撞 id/去重）
-    // —— 三域全部从零起步，模拟「批D 存档升级到整合轮II」的一次性迁移
+    // —— 三域全部从零起步，模拟旧版存档升级到统一端点表的一次性迁移
     for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
     wipeApiScenarioDomains();
     const tt = extension_settings.ttToolkit as Record<string, unknown>;
@@ -253,7 +254,7 @@ function runMigrationChecks(): void {
 
 function runPromptsChecks(): void {
     const prompts = usePromptsStore();
-    const raw = getGlobal('promptConfigs') as unknown;
+    const raw = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
     const record = (raw ?? {}) as Record<string, unknown>;
     const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
     check('prompts：三任务键 Record 齐备（choice 18 模块回归红线）',
@@ -265,18 +266,24 @@ function runPromptsChecks(): void {
         `keys=${Object.keys(record).join('/')}`);
 
     // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺三键。
-    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
-    // revision，否则返回缓存快照看不到外部写（写穿纪律：正常路径写域
-    // 都走 store action 自带 bump，这里模拟的是「旧档在场」的启动读迁移）
+    // 迁移写在启动 init（ensurePromptConfigs——读路径零副作用后的唯一
+    // 落盘口），模拟「旧档在场」的启动即调 init
     const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
-    setGlobal('promptConfigs', [legacySet]);
+    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [legacySet]);
+    ensurePromptConfigs();
+    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
+    // revision，否则返回首次调用的缓存快照看不到外部写
     prompts.$patch({ revision: prompts.revision + 1 });
     const migratedChoice = prompts.configFor('choice');
-    const rawAfter = getGlobal('promptConfigs') as unknown;
+    const rawAfter = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
     check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 两键）',
         migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
         && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
-    prompts.resetToDefault('choice'); // 还原 choice 18 模块红线
+    // 还原 choice 18 模块红线（恢复默认＝smoke 直调写通道，store 无编辑面 action）
+    const restored = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
+    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...restored, choice: createTaskDefaultConfig('choice') });
+    // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）
+    prompts.$patch({ revision: prompts.revision + 1 });
 
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
@@ -317,8 +324,8 @@ const assemblySources: PersonaAssemblySources = {
 function runPersonaAssemblyChecks(): void {
     const prompts = usePromptsStore();
 
-    // curator 管线：preset+wi 两条 system 被引擎合并为一条（整合轮II 偏差：
-    // 旧实现分两条发——语义等价），user 指令占位符清零
+    // curator 管线：preset+wi 两条 system 被引擎合并为一条（与旧 fork
+    // 实现分两条发语义等价），user 指令占位符清零
     const curator = assembleMessages(prompts.configFor('persona_curator')?.modules ?? [], assemblySources);
     check('persona 组装：curator 管线（preset+wi 合并 system＋user 指令、占位符清零）',
         curator.messages.length === 2
@@ -338,7 +345,7 @@ function runPersonaAssemblyChecks(): void {
         && genUser.includes('写个侦探') && !genUser.includes('{{'));
 
     // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复。
-    // 整合轮II 验收修整：toggleModule action 已随提示词编辑面删除——
+    // 提示词编辑面已删（toggleModule action 同删）——
     // 改本地数组改造（choice smoke modulesOff 同款；modules[].enabled
     // 字段保留、引擎照读的实证）
     const genModules = prompts.configFor('persona_gen')?.modules ?? [];
@@ -351,9 +358,9 @@ function runPersonaAssemblyChecks(): void {
         offOk && on.messages.length === 2 && on.messages[1].role === 'user');
 }
 
-/** dump 观测口断言（异步——__TTK_PROMPTS__.dump 按任务返回全文）。 */
+/** dump 观测口断言（异步——__TT_TOOLKIT__.prompts.dump 按任务返回全文）。 */
 async function runPersonaAssemblyDumpChecks(): Promise<void> {
-    const port = (globalThis as { __TTK_PROMPTS__?: { dump: (task?: string) => Promise<string> } }).__TTK_PROMPTS__;
+    const port = (toolkitGlobalPort().prompts as { dump: (task?: string) => Promise<string> } | undefined);
     const dumpText = await (port ? port.dump('persona_gen') : Promise.reject(new Error('口缺席')));
     check('dump 口：按任务 dump 全文（persona_gen：组装 dump 标头＋模块清单＋指令正文）',
         dumpText.includes('=== 消息组装 dump') && dumpText.includes('生成指令')
@@ -487,7 +494,7 @@ async function runApiChecks(): Promise<void> {
         globalThis.fetch = originalFetch;
     }
 
-    // SSE 帧状态机（经 callGenerateEndpoint 公共面——批B 产物只搬移不重写）
+    // SSE 帧状态机（经 callGenerateEndpoint 公共面）
     const sseCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
         sseCalls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
@@ -629,7 +636,7 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     store.isProcessing = false;
     store.processingLabel = '';
 
-    // 端点缺失 fail fast（整合轮II：原「主 API generateRaw 缺席」改统一端点口径）
+    // 端点缺失 fail fast（统一端点口径）
     store.config.endpointId = 'no-such-endpoint';
     store.requestText = '合成需求';
     const resultBefore = store.resultText;
@@ -685,7 +692,7 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/三任务引擎/纯函数/api 形状/端到端/互斥机判（整合轮II）===');
+    console.info('=== persona 迁移/统一端点收编/三任务引擎/纯函数/api 形状/端到端/互斥机判 ===');
     runMigrationChecks();
     runPromptsChecks();
     runPersonaAssemblyChecks();

@@ -1,5 +1,5 @@
 /**
- * node 冒烟的批B 机判部分：组装纯函数路径＋解析回退确定性触发。
+ * node 冒烟的 choice 机判部分：组装纯函数路径＋解析回退确定性触发。
  *
  * 设计：直接驱动引擎纯函数（合成 AssemblySources——不依赖宿主在场
  * 数据，断言确定性），与浏览器真实数据共用同一条 assembleMessages/
@@ -52,7 +52,7 @@ function syntheticSources(): AssemblySources {
 }
 
 // ---------------------------------------------------------------------------
-// 批C 机判：池抽取 / 导入 / 注入 / 绑定 / 自动生成
+// 池机判：抽取 / 注入 / 绑定 / 自动生成
 // ---------------------------------------------------------------------------
 
 /**
@@ -150,7 +150,7 @@ function runAssetPoolChecks(): void {
     check('asset：无停用条目（引用层已删，条目自身 pinned/weight 即真值）', masterPool.every(e => e.weight > 0), `零/负权条目 ${masterPool.filter(e => e.weight <= 0).length}`);
     const ids = new Set(masterPool.map(e => e.id));
     check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
-    // v2（m03158 拍板）条目级 rule 移除；v3（m03359 整合轮）连数据形状都不带
+    // 条目级 rule 字段已弃（v2 起移除，v3 连数据形状都不带）
     check('asset：条目规则字段移除（v3，数据形状不再含 rule）', masterPool.every(e => !('rule' in e)), `带 rule 条目 ${masterPool.filter(e => 'rule' in e).length}`);
 
     // ---- 同步行为（存储态驱动）----
@@ -185,7 +185,7 @@ function runAssetPoolChecks(): void {
     );
 }
 
-/** 3) 注入：pool_entries 模块的分区呈现与空态（m03359：池规则并入模板，独立段已删）。 */
+/** 3) 注入：pool_entries 模块的分区呈现与空态（池规则并入模板，独立段已删）。 */
 function runInjectionChecks(): void {
     const config = createDefaultPromptConfig();
     const supply: PoolInjectionSupply = {
@@ -211,7 +211,7 @@ function runInjectionChecks(): void {
         `含覆盖句=${overText.includes('以固定条目为准')}`,
     );
 
-    // m03359 整合轮：池规则不再独立注入——<pool_rules> 段缺席，反 OOC 要点
+    // 池规则不再独立注入——<pool_rules> 段缺席，反 OOC 要点
     // 整份写进模板 core_rules（<rules> 段），同一约束每请求只出现一份
     check(
         '池规则并入：无 <pool_rules> 独立段，反 OOC 要点在 <rules> 模板段',
@@ -268,7 +268,7 @@ async function runAutoGenerateChecks(): Promise<void> {
         choiceStorage.setActiveEndpoint(smokeEndpoint.id);
     }
     choiceStorage.updateTask({ stream: false });
-    // 清掉批B debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
+    // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
     // phase 停在 idle」（跳过守卫不得触发任何生成）
     store.clearOptions();
     const emitReceived = (...args: unknown[]): unknown => stubs.eventSource.emit('message_received', ...args);
@@ -323,7 +323,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（pinned 条目必发；
     // 条目渲染无规则后缀）
     check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('转场推进：用一两句精炼的叙述完成时间跳跃或地点切换，快速进入下一段剧情') && !store.lastDump.includes('[规则:'));
-    // 整合轮II 验收修整：外部注入全自动链路（stub context 槽位 → sources
+    // 外部注入全自动链路（stub context 槽位 → sources
     // 自动收集 → engine → dump）。stub_memory 先插入但 depth 4、
     // stub_anchor 后插入但 depth 0——排序断言只有真的按 depth 升序排
     // 才绿；stub_blank 空白 value＝「非空即带」的空槽位跳过面
@@ -351,7 +351,7 @@ function runAssemblyChecks(): string {
 
     const allText = result.messages.map(m => m.content).join('\n');
 
-    // dump 断言核心（批B 判据）：各注入逐项可见
+    // dump 断言核心：各注入逐项可见
     check('人设注入可见（<persona> 段含 persona 正文）', allText.includes('<persona>') && allText.includes('王玉，28 岁'));
     check('角色卡描述注入可见（<character> 段）', allText.includes('<character>') && allText.includes('林霜，表面温婉'));
     check('角色卡性格注入可见（<personality> 段）', allText.includes('表面温和，回避直接冲突'));
@@ -360,14 +360,14 @@ function runAssemblyChecks(): string {
     check('世界书深度桶（深组）注入可见', allText.includes('【三年前】'));
     check('聊天历史注入（末条 AI 楼层 <current_scene> 包裹）', allText.includes('<current_scene>') && allText.includes('她垂下眼帘'));
     check('story_direction 注入可见（<direction> 段＝预设正文＋自由文本拼接）', allText.includes('<direction>') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
-    // G4 走向重设计：自由文本为主＋预设拼接；两者皆空＝模块按未启用处理
+    // 走向形态：自由文本为主＋预设拼接；两者皆空＝模块按未启用处理
     const emptyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '' } });
     const emptyDirTrace = emptyDirection.trace.find(t => t.moduleId === 'inject_story_direction');
     check('story_direction 两者皆空＝不注入（trace 留痕）', emptyDirTrace?.injected === false && emptyDirTrace.note.includes('未设置'), `note=${emptyDirTrace?.note ?? '（无 trace）'}`);
     const freeOnlyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '重点描写她的回避态度' } });
     const freeOnlyText = freeOnlyDirection.messages.map(m => m.content).join('\n');
     check('story_direction 仅自由文本也注入（无预设可用）', freeOnlyText.includes('<direction>') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
-    // 自动口径（整合轮II 验收修整——无开关无勾选）：baibai 合成源传 null
+    // 自动口径（无开关无勾选）：baibai 合成源传 null
     // （插件缺席/接口异常形态）→ trace 记录未注入原因（缺席的可观测性）
     const baibaiTrace = result.trace.find(t => t.moduleId === 'inject_baibai');
     check('柏宝书摘要缺席＝不注入且 trace 留痕', baibaiTrace?.injected === false && baibaiTrace.note.includes('不可用'), `note=${baibaiTrace?.note ?? '（无 trace）'}`);
@@ -388,7 +388,7 @@ function runAssemblyChecks(): string {
     check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
     check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
     check('few-shot 旧三条仍在（反客为主/骤然断电）', allText.includes('反客为主') && allText.includes('骤然断电'));
-    // m03359 整合轮：few-shot 3→7 条（真人反应类型覆盖）
+    // few-shot 7 条（真人反应类型覆盖）
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
     check('few-shot 扩为 7 条真人反应示例（岔开/回避/反将一军/幽默化解等）', fewShotCount === 7, `条数=${fewShotCount}`);
@@ -409,7 +409,7 @@ function runAssemblyChecks(): string {
     return renderDump(result);
 }
 
-/** 解析回退确定性触发机判（批B 判据）。 */
+/** 解析回退确定性触发机判。 */
 function runParseChecks(): void {
     // 调试畸形样本：思维链前缀＋括号格式 → 确定性走括号回退
     const report = parseOptions(DEBUG_MALFORMED_RAW, 4);
@@ -464,7 +464,7 @@ function runReasoningEffortChecks(): void {
 }
 
 /**
- * debugForceRaw 调试开关机判（批B 判据：生成管线接线）。
+ * debugForceRaw 调试开关机判（生成管线接线）。
  *
  * 置开关后走完整 generateOptions 管线（组装→跳过 API→直喂畸形样本→
  * 解析→store 会话态）：该分支构造上不 fetch（无网络依赖），断言产物
@@ -485,7 +485,7 @@ async function runDebugForceRawChecks(): Promise<void> {
 
 /** 冒烟入口（main.ts node 分支调用；返回失败清单长度供收口）。 */
 export async function runChoiceSmoke(): Promise<void> {
-    console.info('=== choice 组装/解析机判（批B）===');
+    console.info('=== choice 组装/解析机判 ===');
     const dumpText = runAssemblyChecks();
     console.info('=== 组装 dump 全文 ===');
     console.info(dumpText);

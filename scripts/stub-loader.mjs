@@ -32,7 +32,7 @@ const STUB_EXPORTS = {
     'scripts/events.js': ['eventSource', 'event_types'],
     'scripts/RossAscends-mods.js': ['dragElement'],
     'scripts/power-user.js': ['power_user'],
-    // 批D：personas 写回通道（host/personas.ts 导入面）＋世界书写侧
+    // personas 写回通道（host/personas.ts 导入面）＋世界书写侧
     // （host/worldinfo.ts）＋findPersona（utils）
     'scripts/world-info.js': [
         'getWorldInfoPrompt',

@@ -1,5 +1,5 @@
 /**
- * TT 宿主用户 persona 读写通道（批D persona 模块的宿主直连面）。
+ * TT 宿主用户 persona 读写通道（persona 模块的宿主直连面）。
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - personas.js:75 `export let user_avatar = ''`（当前选中头像 id 的

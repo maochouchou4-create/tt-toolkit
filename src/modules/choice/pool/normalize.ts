@@ -25,7 +25,7 @@ export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [] };
 /** 池抽取参数缺省值（与 fork 旧数据 generation 块的实测值对齐：oversample 100/send_all/shuffle）。 */
 export const DEFAULT_POOL_GEN_PARAMS: PoolGenParams = {
     oversamplePct: 100,
-    // 批C.2 拍板：按分类轮询默认开（每轮选项尽量来自不同分类，保证多样性）。
+    // 按分类轮询默认开（每轮选项尽量来自不同分类，保证多样性）。
     // 旧用户存了 false 的由 syncAssetPool 首次同步做一次性翻转，之后纯用户域。
     categoriesEnabled: true,
     pinnedOverflow: 'send_all',

@@ -1,7 +1,7 @@
 <template>
   <!--
     选项生成设置：生成通道（统一端点表引用＋choice 任务参数）＋生成参数
-    ＋走向指引（整合轮II 验收修整：提示词 tab 删除后唯一存留的提示词入口）。
+    ＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
     端点实体（增删改/测连/拉模型）在「API」页维护，此处只做选择与参数。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
   -->
@@ -82,7 +82,7 @@
       </label>
     </div>
 
-    <!-- 剧情走向卡（整合轮II 验收修整：提示词 tab 整页删除后，这里是唯一
+    <!-- 剧情走向卡（提示词 tab 整页删除后，这里是唯一
          存留的提示词入口——用户拍板「走向指引」卡保留；数据域（chat 域
          storyDirection）与写入通道零改动，老用户的走向文本/预设不丢） -->
     <div class="tt-card">
@@ -94,7 +94,7 @@
       <label class="tt-prompt-field--block">
         <span>自由文本（主位）</span>
         <textarea
-          :value="prompts.storyDirection.freeText"
+          :value="direction.storyDirection.freeText"
           rows="3"
           placeholder="如：让林霜主动坦白昨夜去向的真相，并暴露她与斗篷人的旧关联"
           @input="onDirectionTextInput"
@@ -103,18 +103,18 @@
       <div class="tt-prompt-presets">
         <div class="tt-prompt-presets-head">
           <span>我的预设</span>
-          <button type="button" :disabled="!prompts.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
+          <button type="button" :disabled="!direction.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
         </div>
-        <div v-if="prompts.directionPresets.length === 0" class="tt-choice-empty">
+        <div v-if="direction.directionPresets.length === 0" class="tt-choice-empty">
           还没有预设——写好走向指引后点「存为预设」，以后一条点击应用
         </div>
         <div v-else class="tt-prompt-tags">
           <button
-            v-for="preset in prompts.directionPresets"
+            v-for="preset in direction.directionPresets"
             :key="preset.id"
             type="button"
             class="tt-prompt-tag"
-            :class="{ 'tt-prompt-tag--active': prompts.storyDirection.presetText === preset.text }"
+            :class="{ 'tt-prompt-tag--active': direction.storyDirection.presetText === preset.text }"
             :title="preset.text"
             @click="togglePreset(preset)"
           >
@@ -122,8 +122,8 @@
             <span class="tt-prompt-tag-del" title="删除该预设（不影响已应用的聊天）" @click.stop="removePreset(preset)">×</span>
           </button>
         </div>
-        <div v-if="prompts.storyDirection.presetText" class="tt-prompt-note">
-          已应用预设：{{ prompts.storyDirection.presetText }}（再点同一预设可取消应用）
+        <div v-if="direction.storyDirection.presetText" class="tt-prompt-note">
+          已应用预设：{{ direction.storyDirection.presetText }}（再点同一预设可取消应用）
         </div>
       </div>
     </div>
@@ -133,16 +133,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
+import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
 import { useApisStore } from '@/modules/apis/store';
 import { useShellStore } from '@/shell/store';
-import { usePromptsStore } from '@/prompts';
-import type { DirectionPreset } from '@/prompts';
 import type { ChoiceGenParams, ChoiceTaskParams } from '@/modules/choice/api';
 
 const settings = useChoiceSettingsStore();
 const apis = useApisStore();
 const shell = useShellStore();
-const prompts = usePromptsStore();
+const direction = useStoryDirectionStore();
 
 function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
@@ -186,7 +185,7 @@ function goApi(): void {
     shell.activate('api');
 }
 
-// ---- 剧情走向卡（整合轮II 验收修整：随提示词 tab 删除从 PromptEditorTab
+// ---- 剧情走向卡（随提示词 tab 删除从 PromptEditorTab
 //      搬回本页；数据域与写入通道零改动） ----
 
 // 自由文本防抖：每击键立即 setStoryDirection＝每击键一次 chat 域立即保存
@@ -200,12 +199,12 @@ function onDirectionTextInput(event: Event): void {
     if (directionTextTimer !== undefined) clearTimeout(directionTextTimer);
     directionTextTimer = setTimeout(() => {
         directionTextTimer = undefined;
-        prompts.setStoryDirection({ freeText: value });
+        direction.setStoryDirection({ freeText: value });
     }, DIRECTION_TEXT_DEBOUNCE_MS);
 }
 
 function presetLabel(preset: DirectionPreset): string {
-    // 预设无独立名字段（G4 最小形态：预设＝文本本体）——标签条显示
+    // 预设无独立名字段（最小形态：预设＝文本本体）——标签条显示
     // 截断文本，完整内容在 title 悬浮
     const text = preset.text.trim();
     return text.length > 12 ? `${text.slice(0, 12)}…` : text;
@@ -213,22 +212,22 @@ function presetLabel(preset: DirectionPreset): string {
 
 /** 点击预设＝应用（写入 presetText 快照）；再点同一预设＝取消应用。 */
 function togglePreset(preset: DirectionPreset): void {
-    if (prompts.storyDirection.presetText === preset.text) {
-        prompts.setStoryDirection({ presetText: '' });
+    if (direction.storyDirection.presetText === preset.text) {
+        direction.setStoryDirection({ presetText: '' });
     } else {
-        prompts.setStoryDirection({ presetText: preset.text });
+        direction.setStoryDirection({ presetText: preset.text });
     }
 }
 
 function saveCurrentTextAsPreset(): void {
-    const text = prompts.storyDirection.freeText.trim();
+    const text = direction.storyDirection.freeText.trim();
     if (!text) return;
-    prompts.addDirectionPreset(text);
+    direction.addDirectionPreset(text);
 }
 
 function removePreset(preset: DirectionPreset): void {
     if (!confirm(`删除预设「${presetLabel(preset)}」？（已应用该预设的聊天不受影响）`)) return;
-    prompts.deleteDirectionPreset(preset.id);
+    direction.deleteDirectionPreset(preset.id);
 }
 
 // 防抖挂起期间离开设置页（含切聊天后卸载）：不落盘半截文本——

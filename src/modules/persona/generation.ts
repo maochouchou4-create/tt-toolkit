@@ -1,14 +1,14 @@
 /**
- * PersonaWeaver fork 生成链（批D 平移）：首次生成两段（curator 策展
- * schema → personaGen 按 schema 填充）。整合轮II 起提示词模板与模块
+ * PersonaWeaver fork 生成链：首次生成两段（curator 策展
+ * schema → personaGen 按 schema 填充）。提示词模板与模块
  * 管线在统一提示词引擎（src/prompts——按任务键取配置，assemble＋占位
  * 符填充＋trace/dump 一致可观测），本文件只承载任务上下文收集与调用链。
  *
  * MODIFICATIONS（相对上游 fork）：
  * - Anthropic 原生分支整体退役（只保留 OpenAI 兼容形态）。
- * - 整合轮II：主 API（宿主 generateRaw）与独立 API（直连 Bearer fetch）
- *   两条通道合一，走统一端点表＋共享请求客户端（宿主生成路由）。
- * - 整合轮II：字符串拼接组装退役——消息组装走引擎管线（persona 两任务
+ * - 主 API（宿主生成路由）与独立 API（直连 Bearer fetch）
+ *   两条通道合一，走统一端点表＋共享请求客户端。
+ * - 字符串拼接组装退役——消息组装走引擎管线（persona 两任务
  *   键的模块与模板在代码默认模板内置）。
  * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：配置由
  *   store 从存储域透传（GenerationApiConfig）。
@@ -24,7 +24,7 @@
  */
 
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt } from '@/host';
-import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
+import { callGenerateEndpoint, type GenerateMessage, type ReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
     assembleMessages,
@@ -38,7 +38,7 @@ import {
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
-import { readPersonaDomain, type ThinkingEffort } from './storage';
+import { readPersonaDomain } from './storage';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -49,8 +49,8 @@ export interface GenerationApiConfig {
     endpoint: ApiEndpoint;
     /** 流式输出（长请求防挂死姿势）。 */
     stream: boolean;
-    /** 思考强度（'off'＝不注入 reasoning_effort）。 */
-    thinkingEffort: ThinkingEffort;
+    /** 思考强度（'off'＝不注入 reasoning_effort；档位守门同 client 单点）。 */
+    thinkingEffort: ReasoningEffort;
     /** 单段超时（秒，段间独立——两段链每段各自计时）。 */
     timeoutSec: number;
 }
@@ -116,6 +116,20 @@ Treat this as a rigid logical constraint for the simulation database.
 `;
 }
 
+/**
+ * 预设 system 段清洗（runGeneration 与 dumpPersonaTask 单点共用）：
+ * {{user}}/{{char}} 就地替换；{{world_info}} 系宏剥除——宿主上下文里
+ * 已由独立消息注入，不剥会重复计费。
+ */
+function sanitizePresetPrompt(prompt: string, userName: string, charName: string): string {
+    return prompt
+        .replace(/{{user}}/g, userName)
+        .replace(/{{char}}/g, charName)
+        .replace(/{{world_info}}/gi, '')
+        .replace(/{{wInfo}}/gi, '')
+        .replace(/{{worldInfo}}/gi, '');
+}
+
 /** 预设提示文案（下拉旁 hint，纯文案平移）。 */
 export function getPresetHintText(val: string): string {
     if (val === 'pure') {
@@ -155,7 +169,7 @@ function assemblePersonaMessages(task: TaskKey, sources: PersonaAssemblySources)
  * 单次模型调用：前置消息序列已由引擎组装，本函数追加 prefill、发起
  * 请求并处理超时/中断/错误分类。生成链每段各调一次（每段超时独立）。
  *
- * 整合轮II：单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
+ * 单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
  * persona 任务参数面：temperature 固定 1、不发送 max_tokens（长 YAML 友
  * 好，依赖宿主 insert_if_present 语义）、输出契约 prompt_only（纯文本）。
  */
@@ -250,16 +264,11 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     const wrappedInput = wrapInputForSafety(config.request || '');
 
     // 预设 system 段解析（host 层通道；空串＝不发 system 消息）
-    let activeSystemPrompt = resolvePresetSystemPrompt(config.generationPreset);
-    if (activeSystemPrompt) {
-        // 预设 system 常含 {{world_info}} 系宏，宿主上下文里已由独立消息注入，不剥会重复计费
-        activeSystemPrompt = activeSystemPrompt
-            .replace(/{{user}}/g, currentName)
-            .replace(/{{char}}/g, charName)
-            .replace(/{{world_info}}/gi, '')
-            .replace(/{{wInfo}}/gi, '')
-            .replace(/{{worldInfo}}/gi, '');
-    }
+    const activeSystemPrompt = sanitizePresetPrompt(
+        resolvePresetSystemPrompt(config.generationPreset),
+        currentName,
+        charName,
+    );
 
     // 策展产出 schema（纯键），起手词只需围栏头；档案段起手词从目标结构
     // 首键派生——schema 由策展动态产出，不保证首块是基本信息，硬编码会
@@ -326,7 +335,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
 }
 
 /**
- * persona 任务的观测 dump（__TTK_PROMPTS__.dump(task) 分派口）：宿主真实
+ * persona 任务的观测 dump（__TT_TOOLKIT__.prompts.dump(task) 分派口）：宿主真实
  * 上下文（角色卡/开场白/世界书/预设）＋空任务态——用户请求与策展 schema
  * 是运行时输入，dump 无从得知，占位符以空串呈现模板形状。与 choice 的
  * dump 同口径（renderDump 全文输出，可整段粘贴给模型/人工核对）。
@@ -336,12 +345,11 @@ export async function dumpPersonaTask(task: TaskKey): Promise<string> {
     const charName = getCharacterName() || '角色';
     const domain = readPersonaDomain();
     const sources: PersonaAssemblySources = {
-        presetSystemPrompt: resolvePresetSystemPrompt(domain.uiState.generationPreset)
-            .replace(/{{user}}/g, getUserDisplayName())
-            .replace(/{{char}}/g, charName)
-            .replace(/{{world_info}}/gi, '')
-            .replace(/{{wInfo}}/gi, '')
-            .replace(/{{worldInfo}}/gi, ''),
+        presetSystemPrompt: sanitizePresetPrompt(
+            resolvePresetSystemPrompt(domain.uiState.generationPreset),
+            getUserDisplayName(),
+            charName,
+        ),
         wiText: wrapAsXiTaReference(
             await collectWorldInfoContext(),
             'Global State Variables',

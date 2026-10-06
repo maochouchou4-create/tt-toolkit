@@ -1,5 +1,5 @@
 /**
- * PersonaWeaver fork 文案注册表（批D 平移）。
+ * PersonaWeaver fork 文案注册表。
  *
  * MODIFICATIONS（相对上游 fork）：
  * - 砍 PANEL_TITLE/BN_TITLE（callPopup 弹窗入口整体退役，入口改工具箱 tab）。

@@ -1,7 +1,7 @@
 <template>
   <!--
     「API」tab：统一端点表维护（列表/增删改/测连/拉模型清单）。
-    整合轮II：choice 与 persona 共用这张表，端点身份（地址/密钥/模型）只在这里管。
+    choice 与 persona 共用这张表，端点身份（地址/密钥/模型）只在这里管。
     视觉照 .tt-card 体系；类名前缀 tt-api-。
   -->
   <div class="tt-api-tab">

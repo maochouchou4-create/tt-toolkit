@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * host 声明锚点门（批A 修复新增防线）。
+ * host 声明锚点门。
  *
  * 职责：src/types/sillytavern.d.ts 的每条 export 声明必须带 hostAnchor
  * 锚点注释（宿主源码 file:line + 片段）；本脚本解析全部锚点、读宿主

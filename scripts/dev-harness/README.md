@@ -5,7 +5,7 @@
 ## 用法
 
 ```powershell
-pnpm run build          # 先重建 dist（G 布局迭代时每次改动后都要跑）
+pnpm run build          # 先重建 dist（改 src 后每次都要跑）
 pnpm run harness        # 生成 scripts/dev-harness/app.js（dist 重写产物）
 # 然后浏览器直接打开（file:// 即可，无服务端）：
 #   D:\code\repos\tt-toolkit\scripts\dev-harness\index.html
@@ -20,7 +20,7 @@ pnpm run harness        # 生成 scripts/dev-harness/app.js（dist 重写产物�
 | --- | --- |
 | `index.html` | 宿主 DOM 骨架（顶栏/#chat/#send_form/#extensionsMenu/#movingDivs）＋加载顺序锚 |
 | `harness.css` | 宿主骨架与皮肤模拟：SmartTheme 变量双主题、.drawer-content/.mes 等 |
-| `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 九键（对应 dist 的 9 条外部 import，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`/`STBaiBaiBook`）＋假聊天数据 |
+| `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 各键（与 dist 的全部外部 import 一一对应，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`/`STBaiBaiBook`）＋假聊天数据 |
 | `app.js` | **生成物**（build.mjs 产出，勿手改） |
 | `build.mjs` | 把 `dist/index.js` 的外部 import 重写为 `const {...} = globalThis.__TT_HARNESS__.<key>` 解构（经典脚本形态，绕开 file:// 下 ESM 相对路径的 CORS 限制） |
 | `serve.mjs` | 仓根静态 HTTP 服务（默认 4173，路径穿越守门）——自动化浏览器（Playwright 等）需走 HTTP，file:// 会被封 |
@@ -41,17 +41,17 @@ build.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更新 
 - `world-info.js`：`getWorldInfoPrompt`（固定桶返回）
 - 窗口全局：`window.$`（最小选择器→数组包装）、`SillyTavern.getContext`、`quickReplyApi`（内存 QR 集，含 deleteQuickReply）、`toastr`（console）、`STBaiBaiBook`（getInjectedHistory 固定摘要）
 
-全部内存态：刷新即重置。ttlog 的 Tauri invoke ABI 在 harness 内缺席，自动熔断降级（只影响持久日志，不影响功能）——DebugTab dump 里显示 `unavailable` 属预期。
+全部内存态：刷新即重置。ttlog 的 Tauri invoke ABI 在 harness 内缺席，自动熔断降级（只影响持久日志，不影响功能）。
 
 ## 已知环境差异（harness ≠ 真宿主）
 
 - FontAwesome 字体缺席：图标按类名补 Unicode 字符（`harness.css` 的 `.fa-toolbox::before` 等）
 - 魔棒菜单常开（真宿主默认收起，hover 唤出）
 - 楼层无虚拟化（真宿主是感知虚拟列表，nav 兜底滚动路径的差异不在 harness 验证范围）
-- ttlog 的 Tauri invoke ABI 缺席（自动熔断降级）——DebugTab 探测里唯一预期「缺席」项
+- ttlog 的 Tauri invoke ABI 缺席（自动熔断降级）——host 探测清单里唯一预期「缺席」项
 - `harness.css` 带 `* { box-sizing: border-box }`：对齐真宿主全局基线（TauriTavern `src/style.css:144`）。缺了它 .tt-shell 的 `width: min(560px, 100vw - 24px)` 会按内容盒计算，窄视口下外盒越界 1px——是仿真误差不是产品 bug
-- `#floatingPrompt`：stubs 挂了个空壳（display:none）只为 DebugTab 探测全绿；tt-toolkit 不依赖其内容
+- `#floatingPrompt`：stubs 挂了个空壳（display:none）——它是 tt-toolkit 壳浮层/探针引用的宿主 drawer-content 浮层先例 DOM，harness 里补上才能让 host 探测清单全绿；tt-toolkit 不依赖其内容
 
 ## 布局自查基线（screenshots/）
 
-批B.1 用 Playwright 程序化审计（getBoundingClientRect 全子树越界＋文本溢出，`.tt-tab-host` 滚动可达豁免）跑过三轮：宽视口 1038×666 明暗两主题、窄视口 420×700 暗主题，四 tab 全零问题；壳拖拽（dragElement→movingUIState 写入）实测通过。截图文件名即轮次：`harness-01` 底页（明）、`harness-02` 壳+选项条（明）、`harness-03` 提示词 tab（明）、`harness-04` 壳（暗）、`harness-05` 窄视口（暗）。
+文字基线（当前五 tab：选项生成／条目池／API／导航／人设）：壳为抽屉浮层（复用宿主 .drawer-content 皮肤），明暗两主题（SmartTheme 变量）、窄视口不越界（`.tt-shell` 宽 `min(560px, 100vw - 24px)`）。历史一轮 Playwright 程序化审计（getBoundingClientRect 全子树越界＋文本溢出，`.tt-tab-host` 滚动可达豁免）：宽视口 1038×666 明暗两主题、窄视口 420×700 暗主题全零问题；壳拖拽（dragElement→movingUIState 写入）实测通过。留存截图：`harness-01` 底页（明）、`harness-02` 壳+选项条（明）、`harness-04` 壳（暗）、`harness-05` 窄视口（暗）——早于当前五 tab 形态，重拍时整体替换。

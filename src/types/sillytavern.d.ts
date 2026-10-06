@@ -79,13 +79,13 @@ declare module '@sillytavern/scripts/events' {
         APP_INITIALIZED: string;
         CHAT_CHANGED: string;
         MESSAGE_UPDATED: string;
-        /** 批C：emit 形态 (messageId: number, type: string)，核实记录见 host/events.ts 头注释 */
+        /** emit 形态 (messageId: number, type: string)，核实记录见 host/events.ts 头注释 */
         MESSAGE_RECEIVED: string;
         CHARACTER_MESSAGE_RENDERED: string;
         SETTINGS_LOADED: string;
-        /** 批D persona：emit 形态 (avatarId: string)，personas.js:866 同款 */
+        /** emit 形态 (avatarId: string)，personas.js:866 同款 */
         PERSONA_CREATED: string;
-        /** 批D persona：emit 形态 (avatarId: string)，personas.js:871 同款（host/personas.ts 写回后触发） */
+        /** emit 形态 (avatarId: string)，personas.js:871 同款（host/personas.ts 写回后触发） */
         PERSONA_UPDATED: string;
         [key: string]: string;
     };
@@ -163,17 +163,17 @@ declare module '@sillytavern/scripts/st-context' {
         };
         /**
          * oai_settings 的转发（当前激活 openai 预设名＝
-         * preset_settings_openai；批D persona 预设解析读取）。
+         * preset_settings_openai；persona 预设解析读取）。
          * @hostAnchor scripts/st-context.js:233 chatCompletionSettings: oai_settings,
          */
         chatCompletionSettings?: Record<string, unknown>;
         /**
-         * 全量世界书名快照（批D persona 书目/勾选分区）。
+         * 全量世界书名快照（persona 书目分区）。
          * @hostAnchor scripts/st-context.js:289 getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
          */
         getWorldInfoNames?: () => unknown;
         /**
-         * 预设管理器转发（批D persona 预设清单/按名取预设）。
+         * 预设管理器转发（persona 预设清单/按名取预设）。
          * @hostAnchor scripts/st-context.js:293 getPresetManager,
          */
         getPresetManager?: (apiId: string) => unknown;
@@ -217,8 +217,8 @@ declare module '@sillytavern/scripts/world-info' {
         globalScanData?: Record<string, unknown>,
     ): Promise<unknown>;
     /**
-     * 按书名装载世界书数据（entries 键是 uid 字符串；批D persona
-     * 的世界书勾选/条目读取通道，返回 null=书不存在）。
+     * 按书名装载世界书数据（entries 键是 uid 字符串；persona
+     * 的世界书条目读取通道，返回 null=书不存在）。
      * @hostAnchor scripts/world-info.js:2241 export async function loadWorldInfo(name) {
      */
     export function loadWorldInfo(name: string): Promise<{ entries: Record<string, WorldInfoEntryHost> } | null>;
@@ -232,7 +232,7 @@ declare module '@sillytavern/scripts/world-info' {
         data: { entries: Record<string, WorldInfoEntryHost> },
     ): WorldInfoEntryHost | null;
     /**
-     * 世界书落盘（immediately 必须 true——批D persona 写回纪律；
+     * 世界书落盘（immediately 必须 true——persona 写回纪律；
      * 漏 true 会「保存后读回为空」）。
      * @hostAnchor scripts/world-info.js:4362 export async function saveWorldInfo(name, data, immediately = false) {
      */
@@ -276,7 +276,7 @@ declare module '@sillytavern/scripts/personas' {
     export let user_avatar: string;
     /**
      * 头像即 persona 键：power_user.personas[avatarId]=名称。initPersona
-     * 建描述符+落盘+非 silent emit PERSONA_CREATED（批D 建档走
+     * 建描述符+落盘+非 silent emit PERSONA_CREATED（建档走
      * silent:true，写回纪律在 host/personas.ts）。
      * @hostAnchor scripts/personas.js:548 export async function initPersona(avatarId, personaName, personaDescription, personaTitle, {
      */

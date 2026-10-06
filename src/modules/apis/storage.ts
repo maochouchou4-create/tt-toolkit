@@ -1,12 +1,13 @@
 /**
  * 统一端点表存储域（extension_settings.ttToolkit.apis）。
  *
- * 整合轮II：choice 与 persona 共用一套 API 端点。域形状＝端点数组
+ * choice 与 persona 共用一套 API 端点。域形状＝端点数组
  * Array<ApiEndpoint>。读写纪律照 persona/choice 存储域：getGlobal/
  * setGlobal 单通道、normalize 未知字段丢弃、缺字段补默认、反复读写幂等。
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
+import { newId } from '@/storage';
 import type { ApiEndpoint } from './types';
 
 /** 统一端点表域键（extension_settings.ttToolkit 下）。 */
@@ -58,7 +59,7 @@ export function resolveEndpointById(id: string): ApiEndpoint | null {
 /** 新建端点骨架（id 冲突域内唯一；字段由调用方填）。 */
 export function createEndpoint(name: string): ApiEndpoint {
     return {
-        id: `endpoint-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        id: newId('endpoint'),
         name,
         url: '',
         key: '',

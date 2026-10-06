@@ -1,5 +1,5 @@
 /**
- * PersonaWeaver fork YAML 人设文本解析（批D 平移，纯函数）。
+ * PersonaWeaver fork YAML 人设文本解析（纯函数）。
  *
  * MODIFICATIONS（相对上游 fork）：log.js 依赖改为静默容错（parse 失败返回
  * 空 Map，调用方按「不可解析」处理）——原 console.error 出口在 tab 内

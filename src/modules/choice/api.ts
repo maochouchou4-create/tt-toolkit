@@ -1,10 +1,10 @@
 /**
  * choice 模块任务参数（全局域 extension_settings.ttToolkit.choice）。
  *
- * 端点身份（url/key/model）自整合轮II起住在统一端点表（modules/apis），
+ * 端点身份（url/key/model）住在统一端点表（modules/apis），
  * 本域只保存 choice 任务自身的生成参数与选中端点引用。
  *
- * response_format 支持度实测结论（批B 开工实测，三家端点）：
+ * response_format 支持度实测结论（三家端点）：
  *   - json_schema：ds 官方端点不支持（400），GG（流式）与 CC 支持；
  *   - json_object：三家全部支持；
  *   - GG（gcli 假流式端点）非流式请求挂死——stream=true 是硬需求。
@@ -13,12 +13,17 @@
  */
 import { getGlobal, setGlobal } from '@/storage';
 import type { OutputContract, ReasoningEffort } from '@/modules/apis/client';
+import { normalizeReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import { readApiDomain } from '@/modules/apis/storage';
 import type { PoolGenParams } from './pool/types';
 import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
-const GLOBAL_CHOICE_KEY = 'choice';
+/**
+ * choice 域键（extension_settings.ttToolkit 下；migration 侧引用此常量，
+ * 字面量单一事实源）。
+ */
+export const GLOBAL_CHOICE_KEY = 'choice';
 
 /** choice 任务参数（挂在统一端点上的生成档位；端点身份不在其列）。 */
 export interface ChoiceTaskParams {
@@ -32,7 +37,7 @@ export interface ChoiceTaskParams {
     maxTokens: number;
 }
 
-/** 生成行为参数（全局域；批C 起含池抽取参数）。 */
+/** 生成行为参数（全局域；含池抽取参数）。 */
 export interface ChoiceGenParams extends PoolGenParams {
     /** 每次生成选项条数（语义＝pinned+drawn 的目标基数） */
     count: number;
@@ -50,10 +55,14 @@ export interface ChoiceGenParams extends PoolGenParams {
 export interface ChoiceDomain {
     /** choice 任务参数（输出契约/思考强度/流式/温度/max_tokens） */
     task: ChoiceTaskParams;
-    /** 选中端点（引用统一端点表条目 id；空＝未配置） */
+    /**
+     * 选中端点（引用统一端点表条目 id；空＝未配置）。字段名即存储键，
+     * 与 persona 侧的 endpointId 不同名是存量数据契约——改名即丢用户
+     * 端点选择，两侧命名差异保留。
+     */
     activeEndpointId: string;
     gen: ChoiceGenParams;
-    /** 条目池数据（批C：两层结构，见 pool/types.ts）。 */
+    /** 条目池数据（两层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
 }
 
@@ -67,7 +76,7 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     ...DEFAULT_POOL_GEN_PARAMS,
 };
 
-/** 任务参数缺省值（与批B 实测默认档一致）。 */
+/** 任务参数缺省值（三家端点实测后的稳妥档）。 */
 export const DEFAULT_TASK_PARAMS: ChoiceTaskParams = {
     outputContract: 'json_object',
     reasoningEffort: 'off',
@@ -80,10 +89,9 @@ function normalizeTaskParams(raw: unknown): ChoiceTaskParams {
     // 存档里的历史值不可信：档位枚举/数值范围逐字段守门
     const r = (raw ?? {}) as Partial<Record<keyof ChoiceTaskParams, unknown>>;
     const contract = r.outputContract === 'json_schema' || r.outputContract === 'prompt_only' ? r.outputContract : 'json_object';
-    const effort = r.reasoningEffort === 'low' || r.reasoningEffort === 'medium' || r.reasoningEffort === 'high' ? r.reasoningEffort : 'off';
     return {
         outputContract: contract,
-        reasoningEffort: effort,
+        reasoningEffort: normalizeReasoningEffort(r.reasoningEffort),
         stream: typeof r.stream === 'boolean' ? r.stream : true,
         temperature: typeof r.temperature === 'number' && Number.isFinite(r.temperature) ? r.temperature : 0.7,
         maxTokens: typeof r.maxTokens === 'number' && Number.isInteger(r.maxTokens) && r.maxTokens > 0 ? r.maxTokens : 2048,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dist 外置说明符断言（方案 §5，每批构建后必跑）。
+ * dist 外置说明符断言（每批构建后必跑）。
  *
  * 职责：
  *   1. 从 vite.config.ts 机读 @sillytavern 说明符的相对上溯级数（单一

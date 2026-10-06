@@ -1,5 +1,5 @@
 /**
- * choice 模块入口：聊天选项条挂载＋全局口（__TTK_PROMPTS__ dump）。
+ * choice 模块入口：聊天选项条挂载＋全局口（__TT_TOOLKIT__.prompts dump）。
  *
  * 选项条停靠：#send_form 之前（输入框上方、不随聊天滚动——#form_sheld
  * 是静态骨架 DOM，宿主先于扩展脚本在场；仍保留轮询兜底防宿主加载流程
@@ -7,7 +7,8 @@
  */
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
-import { eventBus, event_types } from '@/host';
+import { waitForResource } from '@/host';
+import { toolkitGlobalPort } from '@/global-port';
 import { ensurePromptConfigs, TASK_KEYS, type TaskKey } from '@/prompts';
 import { dumpPersonaTask } from '@/modules/persona';
 import { version } from '@/version';
@@ -37,25 +38,25 @@ function tryMountBar(): boolean {
     return true;
 }
 
-function mountBarWithRetry(): void {
-    if (tryMountBar()) return;
-    eventBus.once(event_types.APP_READY, tryMountBar);
-    let tries = 0;
-    const timer = setInterval(() => {
-        tries++;
-        if (tryMountBar() || tries >= POLL_MAX_TRIES) {
-            clearInterval(timer);
-            if (!barMounted) {
-                console.warn(`[tt-toolkit][choice] #send_form 等待超时（${version}），聊天选项条未挂载`);
-            }
-        }
-    }, POLL_INTERVAL_MS);
+/**
+ * 选项条挂载三段等待（host 单点：立查 → APP_READY 重放复测 → 轮询兜底）。
+ * tryMountBar 幂等可重入（barMounted 旗标守门）；超时＝宿主骨架缺席，
+ * 留痕供排障（fail fast 不静默）。
+ */
+async function mountBarWithRetry(): Promise<void> {
+    const mounted = await waitForResource(() => (tryMountBar() ? true : null), {
+        intervalMs: POLL_INTERVAL_MS,
+        maxTries: POLL_MAX_TRIES,
+    });
+    if (!mounted) {
+        console.warn(`[tt-toolkit][choice] #send_form 等待超时（${version}），聊天选项条未挂载`);
+    }
 }
 
 /**
- * 全局口 __TTK_PROMPTS__：dump / assemble / parseOptions。
- * 用户浏览器验收与排障共用（与编辑器 tab 的 dump 展示同一条组装路径）。
- * 整合轮II 起 dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
+ * 全局口 __TT_TOOLKIT__.prompts：dump / assemble / parseOptions。
+ * 用户浏览器验收与排障共用（与生成管线同一条组装路径）。
+ * dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
  */
 function installGlobalPort(): void {
     const port = {
@@ -85,7 +86,7 @@ function installGlobalPort(): void {
         DEBUG_MALFORMED_RAW,
     };
     Object.freeze(port);
-    (globalThis as Record<string, unknown>).__TTK_PROMPTS__ = port;
+    toolkitGlobalPort().prompts = port;
 }
 
 /**
@@ -97,8 +98,8 @@ export function initChoice(): void {
     syncAssetPool();
     installGlobalPort();
     installAutoGenerate();
-    mountBarWithRetry();
-    console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TTK_PROMPTS__）`);
+    void mountBarWithRetry();
+    console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TT_TOOLKIT__.prompts）`);
 }
 
 /** node 冒烟最小初始化：默认配置落盘＋asset 池同步＋全局口在场（dump 走存根数据机判），不挂 DOM。 */

@@ -6,17 +6,14 @@
 export {
     CHAT_KEY,
     GLOBAL_KEY,
-    dumpStorage,
     getChat,
     getGlobal,
-    getNavState,
     initStorage,
     onChatChanged,
-    runStorageRoundtrip,
     setChat,
     setGlobal,
-    setNavState,
 } from './service';
-export type { ChatDomain, GlobalDomain, NavStorageState, RoundtripReport } from './service';
+export type { ChatDomain, GlobalDomain, NavStorageState } from './service';
+export { newId } from './id';
 export { LEGACY_WIPE_KEYS, runLegacyWipeSmoke, wipeLegacyKeysOnce } from './legacy-wipe';
 export type { LegacyWipeReport } from './legacy-wipe';

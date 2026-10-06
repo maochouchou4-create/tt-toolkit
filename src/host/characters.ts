@@ -1,5 +1,5 @@
 /**
- * TT 宿主当前角色读取通道（批D persona 的生成上下文供给）。
+ * TT 宿主当前角色读取通道（persona 的生成上下文供给）。
  *
  * 角色数据真源判型：v2 卡的描述性字段在 char.data，v1 卡直接在顶层——
  * 消费 data.* 前必经 currentCharacterData 统一。

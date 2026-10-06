@@ -8,7 +8,7 @@
  * 的全部写方（/ttnav-auto 命令与设置 tab）都走该 action，覆盖完整。
  */
 import { defineStore } from 'pinia';
-import { getNavState, setNavState } from '@/storage';
+import { getNavState, setNavState } from './storage';
 
 export const useNavStore = defineStore('tt-nav', {
     state: () => ({

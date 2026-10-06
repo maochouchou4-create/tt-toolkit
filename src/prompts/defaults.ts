@@ -1,8 +1,7 @@
 /**
- * 任务默认模板（整合轮II 起三任务：choice 选项生成＋persona 两段——
- * 策展/填充）。choice 部分＝m03359 拍板砍配置集后的唯一模板
- * （方案 §0 病因判定：fork 出厂模板是上游猫娘 RP 特化演化，文本不搬
- * 不抄，按 §2.3 制版原则为「通用 RP + flash 级模型」重写）；persona
+ * 任务默认模板（三任务：choice 选项生成＋persona 两段——策展/填充）。
+ * choice 部分＝唯一的任务模板（fork 出厂模板是上游猫娘 RP 特化演化，
+ * 文本不搬不抄，按「通用 RP + flash 级模型」制版原则重写）；persona
  * 部分＝PersonaWeaver fork 默认提示词原样平移（见文末分节注释）。
  *
  * 制版原则落点：
@@ -13,7 +12,7 @@
  *     示例（可关），各规则写「要做什么」而非「不许做什么」；
  *   - 负向禁令最少化：仅保留第三人称叙述口径这一条结构性约束（选项
  *     视角失控会导致输出系统性跑偏，属结构约束而非风格禁令）；
- *   - 池规则并入（m03359 整合轮）：旧「池级反 OOC 规则」不再独立注入，
+ *   - 池规则并入：旧「池级反 OOC 规则」不再独立注入，
  *     要点去重后写进 core_rules 第 2 条——同一约束每请求只出现一份；
  *   - 占位符：{{count}}/{{min_chars}}/{{max_chars}}/{{user}}/{{char}}。
  */
@@ -148,9 +147,9 @@ export function createDefaultPromptConfig(): PromptConfig {
                 source: 'story_direction',
             },
             {
-                // 批C：池条目注入。默认参与管线——空池/无绑定自然跳过（trace
+                // 池条目注入。默认参与管线——空池/无绑定自然跳过（trace
                 // 留痕说明原因），不是「默认关」：有池数据就该在场。
-                // 池规则模块已删（m03359）：反 OOC 要点并入 core_rules
+                // 池规则模块已删：反 OOC 要点并入 core_rules
                 kind: 'inject',
                 id: 'inject_pool_entries',
                 name: '池条目',
@@ -231,7 +230,7 @@ export function createDefaultPromptConfig(): PromptConfig {
 }
 
 // ---------------------------------------------------------------------------
-// persona 任务默认模板（整合轮II：人设三段管线进统一提示词引擎）。
+// persona 任务默认模板（人设三段管线进统一提示词引擎）。
 //
 // 正文＝PersonaWeaver fork 默认提示词原样平移（零改动，含占位符键名——
 // {{charInfo}}/{{greetings}}/{{template}}/{{input}}/{{userRequirements}} 是

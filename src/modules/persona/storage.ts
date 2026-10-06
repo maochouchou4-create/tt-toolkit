@@ -5,7 +5,7 @@
  * getGlobal/setGlobal 单通道）。域形状 normalize 纪律照 choice/pool：
  * 未知字段丢弃（显式保真注释），缺字段补默认，反复读写幂等。
  *
- * 整合轮II：端点身份（url/key/model）移入统一端点表（modules/apis），
+ * 端点身份（url/key/model）移入统一端点表（modules/apis），
  * localConfig 只保留 persona 任务参数＋选中端点引用 endpointId。旧字段
  * （apiSource、indepApi 前缀三键、apiProfiles、activeApiProfileId）由 migrateApiDomain
  * 一次性收编，此后在 normalize 的未知字段丢弃面自然退休。
@@ -13,12 +13,13 @@
  * 迁移纪律（nav 同款幂等）：域不存在→读 3 个旧键搬入新域→保留旧键
  * 作 legacy 快照（回滚旧版本不丢存量；新版本不再写旧键）→退休键
  * removeItem；域已存在→跳过迁移（二次启动零重写）。
- * 收敛批：世界书勾选/钉选域退役（全量注入拍板），wiSelection/pinnedBooks
+ * 世界书勾选/钉选域已退役（全量注入拍板），wiSelection/pinnedBooks
  * 域字段与 localConfig.extraBooks 随域形状删除——v1.1.0 存量域读入时由
  * normalize 的未知字段丢弃面出局，旧 localStorage 两键已随 v1.0.0 清理离场。
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
+import { normalizeReasoningEffort, type ReasoningEffort } from '@/modules/apis/client';
 
 /** persona 域键（extension_settings.ttToolkit 下）。 */
 export const PERSONA_DOMAIN_KEY = 'persona';
@@ -45,16 +46,14 @@ export const RETIRED_KEYS = [
     'pw_pinned_books_v1',
 ] as const;
 
-/** 思考强度档位（'off'＝不注入 reasoning_effort 字段）。 */
-export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high';
-
 /** persona 任务配置（localConfig v2：端点引用＋任务参数，无端点身份）。 */
 export interface LocalConfig {
-    /** 选中统一端点表条目 id（空＝未配置端点）。 */
+    /** 选中统一端点表条目 id（空＝未配置端点）。字段名即存储键。 */
     endpointId: string;
     /** 流式请求（长请求防挂死姿势；旧 indepStream）。 */
     stream: boolean;
-    thinkingEffort: ThinkingEffort;
+    /** 思考强度（档位与守门同 apis/client 单点；字段名是存量存储键）。 */
+    thinkingEffort: ReasoningEffort;
     /** 请求超时秒数（钳制 30..1800；旧 indepTimeout）。 */
     timeoutSec: number;
 }
@@ -97,8 +96,6 @@ export function defaultPersonaDomain(): PersonaDomain {
 // normalize（域形状保真：未知字段丢弃，缺字段补默认）
 // ============================================================================
 
-const THINKING_EFFORTS: readonly string[] = ['off', 'low', 'medium', 'high'];
-
 /** 超时钳制（旧 clampTimeout 同语义：30..1800 秒）。 */
 export function clampTimeout(sec: number): number {
     return Math.min(1800, Math.max(30, sec));
@@ -111,11 +108,10 @@ function normalizeString(value: unknown, fallback: string): string {
 function normalizeLocalConfig(value: unknown): LocalConfig {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
     const timeout = Number(raw.timeoutSec);
-    const effort = normalizeString(raw.thinkingEffort, 'off');
     return {
         endpointId: normalizeString(raw.endpointId, ''),
         stream: typeof raw.stream === 'boolean' ? raw.stream : true,
-        thinkingEffort: (THINKING_EFFORTS.includes(effort) ? effort : 'off') as ThinkingEffort,
+        thinkingEffort: normalizeReasoningEffort(raw.thinkingEffort),
         timeoutSec: clampTimeout(Number.isFinite(timeout) && timeout > 0 ? timeout : 300),
     };
 }

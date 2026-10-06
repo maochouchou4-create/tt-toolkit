@@ -23,7 +23,7 @@ export { executeSlashCommand, getChatMessages, getTavernContext } from './contex
 export type { ChatMessage, TavernContextLike } from './context';
 export { appendWandMenuEntry, attachHostDrag, getSavedMovingUIState, hostWindow } from './dom';
 export type { MovingUIStateEntry, WandMenuEntry } from './dom';
-// 生成请求客户端已移至 src/modules/apis/client.ts（整合轮II 统一 API 层）；
+// 生成请求客户端在 src/modules/apis/client.ts（统一 API 层）；
 // host 层保留请求头装配（@sillytavern 导入面不变）
 export { getTavernRequestHeaders } from './headers';
 export {
@@ -39,8 +39,12 @@ export {
     type WorldInfoBuckets,
     type WorldInfoScanInput,
 } from './chat';
-export { createTtlog } from './ttlog';
+export { createTtlog, safeText } from './ttlog';
 export type { Ttlog, TtlogEntry } from './ttlog';
+export { showToast } from './toast';
+export type { ToastLevel } from './toast';
+export { waitForResource } from './wait';
+export type { WaitResourceOptions } from './wait';
 export { formatProbeResults, probeHost } from './probe';
 export type { ProbeResult } from './probe';
 export {

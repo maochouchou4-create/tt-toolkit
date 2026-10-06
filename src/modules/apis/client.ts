@@ -1,5 +1,5 @@
 /**
- * 统一请求客户端（整合轮II）：choice 直连请求与 persona OpenAI 兼容请求
+ * 统一请求客户端：choice 直连请求与 persona OpenAI 兼容请求
  * 合一。两个任务只差传参——任务参数（输出契约/思考强度/流式/超时/
  * max_tokens/信号）留在各自任务域，端点身份（url/key/model）从统一
  * 端点表取。
@@ -44,7 +44,7 @@ export interface GenerateMessage {
     content: string;
 }
 
-/** 输出契约档位（方案 §1 P-JSON：服务商结构化输出优先＋客户端解析兜底）。 */
+/** 输出契约档位（服务商结构化输出优先＋客户端解析兜底）。 */
 export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
 
 /**
@@ -52,6 +52,18 @@ export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
  * 说明文案）；'low'|'medium'|'high' 映射为 OpenAI reasoning_effort 值。
  */
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+
+const REASONING_EFFORTS: readonly string[] = ['off', 'low', 'medium', 'high'];
+
+/**
+ * 思考强度档位守门（choice/persona 两活域共用单点）：存档里的历史值
+ * 不可信，枚举外回退 fallback（活域语义＝'off' 不发送字段）。
+ * legacy 迁移侧的流式缺省特例见 apis/migration.ts（与本函数无关——
+ * 那是 stream 字段的旧用户行为保真，不是思考强度档位问题）。
+ */
+export function normalizeReasoningEffort(raw: unknown, fallback: ReasoningEffort = 'off'): ReasoningEffort {
+    return (typeof raw === 'string' && REASONING_EFFORTS.includes(raw) ? raw : fallback) as ReasoningEffort;
+}
 
 export interface GenerateRequestConfig {
     /** API base（宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径） */

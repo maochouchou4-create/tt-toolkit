@@ -1,7 +1,7 @@
 /**
- * PersonaWeaver fork 默认模版（批D 平移，纯数据，只读真源）。
+ * PersonaWeaver fork 默认模版（纯数据，只读真源）。
  *
- * MODIFICATIONS（相对上游 fork）：整合轮II 起策展/生成提示词正文
+ * MODIFICATIONS（相对上游 fork）：策展/生成提示词正文
  * （DEFAULT_PROMPTS.curator / personaGen）迁入统一提示词引擎默认模板
  * （src/prompts/defaults.ts 的 PERSONA_CURATOR_PROMPT / PERSONA_GEN_PROMPT，
  * 正文零改动平移）；本文件只保留人设 YAML 模版（策展失败回退的
