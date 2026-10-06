@@ -6,9 +6,8 @@
  * 各注入模块逐项可见。
  */
 import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
-import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
+import { callGenerateEndpoint, serializeOutbound, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
-import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -17,7 +16,7 @@ import {
     type PoolInjectionSupply,
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
-import { serializeMessages, useRunlogStore } from '@/modules/runlog/store';
+import { useRunlogStore } from '@/modules/runlog/store';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
@@ -89,11 +88,8 @@ export async function generateOptions(): Promise<void> {
         let rawText: string;
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
-        // 破限注入前缀（选中预设的启用文本条目，原角色插最前）——runlog
-        // 与实发同源（同一 outbound 数组）：日志页看到的请求即模型收到的请求
-        const jb = resolveJailbreakMessages();
-        const outbound = jb.length > 0 ? [...jb, ...assembly.messages] : assembly.messages;
-        requestDump = serializeMessages(outbound);
+        // 哨兵预览与实发同源（client 传输层自动前置破限前缀）
+        requestDump = serializeOutbound(assembly.messages);
 
         if (gen.debugForceRaw) {
             rawText = DEBUG_MALFORMED_RAW;
@@ -126,7 +122,7 @@ export async function generateOptions(): Promise<void> {
                 reasoningEffort: TASK_DEFAULTS.reasoningEffort,
             };
             handedToClient = true;
-            const result = await callGenerateEndpoint(outbound, requestConfig, controller.signal);
+            const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
             rawText = result.content;
             runId = result.runId;
         }
