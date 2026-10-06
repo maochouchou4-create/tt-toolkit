@@ -668,24 +668,39 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
         store.isProcessing === false && store.processingLabel === '' && store.resultText === resultBefore);
     setActiveEndpointId('');
 
-    // 会话感知：CHAT_CHANGED 处理（开场白选择与 lastRun 无条件清空、
-    // 宿主快照无条件重拉——读取廉价且 loadCandidates 依赖 userName，
-    // 指纹门控反而会漏刷；指纹仅用于日志观测）
-    store.selectedGreetingIndex = 1;
+    // 会话感知：CHAT_CHANGED 处理（lastRun 无条件清空、开场白重置为默认档
+    // ＝greetings 在场注入 #0、宿主快照无条件重拉
+    // ——读取廉价且 loadCandidates 依赖 userName，指纹门控反而会漏刷；指纹
+    // 仅用于日志观测）
+    const liveStubs = (globalThis as unknown as {
+        __TT_SMOKE_STUBS__: {
+            characters: unknown[];
+            setCharacters(v: unknown[]): void;
+            eventSource: { emit(type: string, ...args: unknown[]): unknown };
+        };
+    }).__TT_SMOKE_STUBS__;
+    const backupChars = liveStubs.characters;
+    liveStubs.setCharacters([{ data: { first_mes: '你好，旅行者' } }]);
+    store.refreshHostData();
     store.lastRun = { request: '旧会话需求', wiText: '旧会话 wiText 快照', greetingsText: '' };
+    store.selectGreeting(null);
     store.handleChatChanged();
-    check('store：CHAT_CHANGED 无条件清空开场白选择与 lastRun（旧会话快照不跨会话消费）',
-        store.selectedGreetingIndex === null && store.lastRun === null);
+    check('store：CHAT_CHANGED 重置开场白为默认档（有开场白卡＝注入 #0，显式「不注入」不跨会话）＋清 lastRun',
+        store.greetings.length > 0 && store.selectedGreetingIndex === 0 && store.lastRun === null);
 
     // 接线全链（stub 宿主 emit→eventBus.on 订阅→handleChatChanged）：
     // 直调断言只测 handler 逻辑，此条证订阅真实在位（防接线被误删）
-    store.selectedGreetingIndex = 1;
-    const smokeStubs = (globalThis as unknown as {
-        __TT_SMOKE_STUBS__: { eventSource: { emit(type: string, ...args: unknown[]): unknown } };
-    }).__TT_SMOKE_STUBS__;
-    smokeStubs.eventSource.emit(event_types.CHAT_CHANGED);
-    check('store：CHAT_CHANGED 接线全链（宿主 emit→订阅→清空）',
-        store.selectedGreetingIndex === null);
+    store.selectGreeting(null);
+    liveStubs.eventSource.emit(event_types.CHAT_CHANGED);
+    check('store：CHAT_CHANGED 接线全链（宿主 emit→订阅→重置默认档）',
+        store.selectedGreetingIndex === 0);
+
+    // 无开场白卡：默认回落「不注入」（null）；验毕恢复空卡基线
+    liveStubs.setCharacters([]);
+    store.handleChatChanged();
+    check('store：无开场白卡默认不注入（greetings 空时重置为 null）',
+        store.greetings.length === 0 && store.selectedGreetingIndex === null);
+    liveStubs.setCharacters(backupChars);
 
     // charKey 兜底（stubContext.characterId=null → 'global_no_char'）
     check('store：charKey 兜底 global_no_char（|| 兜底、字符串口径）', store.charKey === 'global_no_char');
@@ -777,5 +792,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/3 旧键搬入＋过渡透传/域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知清空全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/3 旧键搬入＋过渡透传/域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }
