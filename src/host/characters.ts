@@ -7,13 +7,13 @@
  * 数组扫描索引非事件驱动快照，两来源会失配——与 choice 模块同口径消费）。
  */
 
-import { characters, this_chid } from './settings';
+import { currentCharacters, currentThisChid } from './settings';
 
 /** 当前角色卡（未选角色返回 null）。 */
 export function getCurrentCharacter(): Record<string, unknown> | null {
-    const chid = Number(this_chid);
+    const chid = Number(currentThisChid());
     if (!Number.isInteger(chid) || chid < 0) return null;
-    const char = characters[chid] as Record<string, unknown> | undefined;
+    const char = currentCharacters()[chid] as Record<string, unknown> | undefined;
     return char && typeof char === 'object' ? char : null;
 }
 

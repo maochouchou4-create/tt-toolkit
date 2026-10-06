@@ -22,6 +22,14 @@
  *      允许的白名单＝根皮肤（drawer-content/flexGap5/scrollY）与
  *      宿主契约类（drag-grabber）。src/host/ 不扫（宿主上下文里造宿主
  *      DOM 是合法的）。注释先剥离再匹配（源码注释常引用这些类名）。
+ *   6. 宿主可变绑定活绑定纪律（settings 取用器化配套防复发）：src/host/
+ *      内禁止快照转出形态（`export const X = <裸标识符>;`——含 TS 注解、
+ *      as 断言；`export const {…}`/`export const […]` 解构快照从严全禁）
+ *      与三个宿主 let 名（this_chid/chat_metadata/characters）的 re-export
+ *      ——ES 活绑定经 const 转手即取值瞬间冻结。唯一白名单＝
+ *      extension_settings（宿主侧 const 单例，只原地改从不换引用）。
+ *      残余绕过面（多行 const 中转＋`export { x }` 间接导出）不设防
+ *      ——属刻意规避且评审可见。
  *
  * 注：块注释内不得出现「斜杠+星」闭合序列，涉及 @sillytavern 与
  * glob 的措辞一律加空格隔开。
@@ -215,9 +223,59 @@ function collectClassTokens(text) {
     }
 }
 
+// ---- 6. 宿主可变绑定快照转出黑名单（活绑定纪律） --------------------------
+
+// 快照转出形态：初始化器为裸标识符（含 TS 注解与 as 断言链、分号可缺省）
+const SNAPSHOT_CONST_RE = /^\s*export\s+const\s+(\w+)(?:\s*:[^=]+)?\s*=\s*[A-Za-z_$][\w$]*(?:\s+as\s+[\w$.<>[\]]+)*\s*;?\s*$/;
+// 解构快照：从严全禁（现 host/ 无此形态；撞到合法形态停下上报）
+const SNAPSHOT_DESTRUCTURE_RE = /^\s*export\s+const\s+[([{]/;
+// 宿主可变名 re-export 黑名单（re-export 转发活绑定但光学上与常量导出
+// 无差别，天然引诱消费方快照误用——与快照形态一并禁止）
+const LIVE_NAME_REEXPORT_RE = /export\s*\{([^}]*)\}\s*from\s*['"]@sillytavern\/[^'"]+['"]/g;
+const LIVE_LET_NAMES = new Set(['this_chid', 'chat_metadata', 'characters']);
+// 白名单（逐项依据，扩项须附核实证据）：
+// - extension_settings：宿主侧 export const 单例（extensions.js:172），只原地改从不换引用；
+// - hostWindow：globalThis 的恒定引用转发（进程内不变，非宿主可变绑定）。
+const SNAPSHOT_WHITELIST = new Set(['extension_settings', 'hostWindow']);
+
+function collectSnapshotViolations() {
+    const hostFiles = walkFiles(join(SRC_DIR, 'host'), ['.ts']);
+    for (const file of hostFiles) {
+        const rel = relative(ROOT, file).replaceAll('\\', '/');
+        const text = stripComments(readFileSync(file, 'utf8'));
+        for (const line of text.split('\n')) {
+            const constMatch = line.match(SNAPSHOT_CONST_RE);
+            if (constMatch && !SNAPSHOT_WHITELIST.has(constMatch[1])) {
+                problems.push(
+                    `快照转出黑名单：${rel} 的「export const ${constMatch[1]} = …」——宿主可变绑定须经取用器函数出口（见 host/settings.ts 头注），const 快照转出/re-export 已被活绑定纪律禁止`,
+                );
+            }
+            if (SNAPSHOT_DESTRUCTURE_RE.test(line)) {
+                problems.push(
+                    `快照转出黑名单：${rel} 出现 export const 解构形态（解构快照从严全禁）——宿主可变绑定须经取用器函数出口`,
+                );
+            }
+        }
+        for (const match of text.matchAll(LIVE_NAME_REEXPORT_RE)) {
+            // as 两侧都查：本名命中＝按原名走私，别名命中＝换名转出——都是
+            // 可变绑定经 re-export 通道离开 host 层的形态
+            const names = match[1].split(',').flatMap(s => s.trim().split(/\s+as\s+/).map(p => p.trim()));
+            for (const name of names) {
+                if (LIVE_LET_NAMES.has(name)) {
+                    problems.push(
+                        `快照转出黑名单：${rel} re-export 宿主可变名「${name}」——宿主可变绑定须经取用器函数出口（见 host/settings.ts 头注），const 快照转出/re-export 已被活绑定纪律禁止`,
+                    );
+                }
+            }
+        }
+    }
+}
+
+collectSnapshotViolations();
+
 if (problems.length > 0) {
     for (const p of problems) console.error(`[check-imports] FAIL: ${p}`);
     process.exit(1);
 }
 
-console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物逐条一致。`);
+console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中。`);

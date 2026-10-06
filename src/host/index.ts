@@ -10,10 +10,10 @@
 export { event_types, eventBus } from './events';
 export type { EventTypeName } from './events';
 export {
-    characters,
-    chat_metadata,
+    currentCharacters,
+    currentChatMetadata,
+    currentThisChid,
     extension_settings,
-    this_chid,
     writeChatMetadata,
     writeExtensionSettings,
 } from './settings';

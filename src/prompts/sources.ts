@@ -6,14 +6,14 @@
  * 存根空值，同一收集路径照跑（dump 可机判的前提）。
  */
 import {
-    characters,
+    currentCharacters,
+    currentThisChid,
     getChatHistory,
     getPersonaDescription,
     getTavernContext,
     listExtensionPromptSlots,
     runWorldInfoScan,
     substituteMacros,
-    this_chid,
 } from '@/host';
 import { getBaibaiSummary } from './external';
 import type { AssemblySources, PoolInjectionSupply } from './engine';
@@ -37,9 +37,9 @@ interface CharacterCardLike {
 }
 
 function currentCharacter(): CharacterCardLike | null {
-    const idx = this_chid;
+    const idx = currentThisChid();
     if (typeof idx !== 'string' || idx === '') return null;
-    const ch = characters[Number(idx)] as CharacterCardLike | undefined;
+    const ch = currentCharacters()[Number(idx)] as CharacterCardLike | undefined;
     return ch ?? null;
 }
 
