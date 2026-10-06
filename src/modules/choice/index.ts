@@ -62,7 +62,7 @@ function installGlobalPort(): void {
         version,
         /**
          * 全量组装 dump（宿主真实数据；async——世界书扫描是异步的）。
-         * task＝'choice'（默认）走选项生成组装；persona 三任务走
+         * task＝'choice'（默认）走选项生成组装；persona 任务走
          * dumpPersonaTask（运行时任务态以空呈现，模板与注入全文可见）。
          */
         async dump(task?: string | { task?: string }): Promise<string> {

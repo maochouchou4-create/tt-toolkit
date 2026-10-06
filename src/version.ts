@@ -3,4 +3,4 @@
  * manifest.json / package.json 的版本与这里人工同步，三方对齐收口归
  * 批E（收官发布批的版本链对齐项）。
  */
-export const version = '1.0.0';
+export const version = '1.1.0';

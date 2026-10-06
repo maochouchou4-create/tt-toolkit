@@ -389,32 +389,30 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
 
 // 提示词配置初始化：默认模板落进全局域 storage（m03359 整合轮起 choice
 // 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。整合轮II
-// 起存储升级为 Record<taskKey, PromptConfig> 四任务键：choice 18 模块红线
-// 不变，persona 三任务键在场（各 4 模块：preset/wi/任务指令）
+// 起存储升级为 Record<taskKey, PromptConfig> 三任务键：choice 18 模块红线
+// 不变，persona 两任务键在场（各 4 模块：preset/wi/任务指令；已退休的
+// 第四任务键不在期望清单——存量配置读侧出局，写回自然清除）
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
-const personaKeyOk = ['persona_curator', 'persona_gen', 'persona_refine'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
-if (promptTaskKeys.length !== 4 || promptChoiceModules !== 18 || !personaKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 四任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
+const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
+if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 三任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
 // 批D 机判：persona 迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 批D 41 条 → 整合轮II 重写为 60 条（统一 API 层＋提示词引擎多任务化）：
-// 迁移 12（批D 9 条保留骨架：空启动/5 键搬入/形状/退休键/legacy 快照/
-// 二次零重写/域在场仍清，过渡透传改实际 v2 透传形状＋新增收编 4 条：
-// 统一表形状/去重＋id 重映射/choice 域 v2 重写/persona localConfig v2）＋
-// prompts 7（四任务键齐备/choice 18 模块红线/persona 三任务默认形状/
-// refine-gen 同文/旧数组一次写迁移/任务隔离开关/按任务恢复默认）＋
-// persona 组装 5＋persona dump 观测口 2＋纯函数 8（批D 原样保留）＋
-// api 11（buildGenerateBody 三档/显式参数/effort/SSE——改走统一客户端
-// 公共面）＋e2e 4（store.generate 两段链走统一端点：请求形状/curator 段
-// 标记/personaGen 段标记/结果落框）＋worldbook·store 12（批D 骨架保留；
-// 主 API 缺席检查改端点缺失 fail fast，互斥改 lastRun 不变口径）。
-const PERSONA_PASS_EXPECTED = 60;
+// 批D 41 条 → 整合轮II 重写为 60 条（统一 API 层＋提示词引擎多任务化）
+// → 人设简化批（persona-slim）收敛为 53 条（对比取舍链删除共 −7：
+// 迁移 12（空启动/5 键搬入/形状/退休键/legacy 快照/二次零重写/域在场仍清，
+// 过渡透传 v2 形状＋收编 4 条：统一表形状/去重＋id 重映射/choice 域 v2
+// 重写/persona localConfig v2）＋ prompts 6（三任务键齐备/choice 18 模块
+// 红线/persona 两任务默认形状/旧数组一次写迁移/任务隔离开关/按任务恢复
+// 默认）＋persona 组装 3＋persona dump 观测口 2＋纯函数 5＋api 11＋e2e 4
+// ＋worldbook·store 10。
+const PERSONA_PASS_EXPECTED = 53;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -506,4 +504,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（整合轮II：迁移收编幂等/prompts 四任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点）；wipe 机判 ${wipePassLines.length} 条全 PASS（批E：boot 删 7 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 时序回归（旧关态迁移）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（批B 组装注入/解析回退＋批C 池抽取分布/导入往返/池注入/绑定级联/自动生成守卫链，备份 v2 升格），__TTK_PROMPTS__ 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/prompts 三任务键/统一端点请求形状与 SSE/两段链端到端/store 互斥与显式保存点）；wipe 机判 ${wipePassLines.length} 条全 PASS（批E：boot 删 7 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
