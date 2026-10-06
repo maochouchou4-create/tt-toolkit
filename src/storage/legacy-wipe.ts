@@ -1,5 +1,5 @@
 /**
- * 旧 localStorage 遗留键一次性清理（批E／v1.0.0）。
+ * 旧 localStorage 遗留键一次性清理（v1.0.0 起）。
  *
  * 背景：rewrite 前旧结构把 persona（5 键）与 nav（2 键）状态存
  * localStorage；新结构由幂等迁移搬进 extension_settings.ttToolkit
@@ -129,7 +129,7 @@ function seedAll(): void {
 }
 
 export function runLegacyWipeSmoke(): void {
-    console.info('=== legacy-wipe 一次性清理机判（批E）===');
+    console.info('=== legacy-wipe 一次性清理机判 ===');
     const total = LEGACY_WIPE_KEYS.length;
     const presentAtEntry = LEGACY_WIPE_KEYS.filter(keyPresent);
     const flagAtEntry = getGlobal<boolean>(LEGACY_WIPE_FLAG_KEY) === true;

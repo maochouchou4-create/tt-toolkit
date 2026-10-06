@@ -11,7 +11,7 @@
  *   on/once/makeLast/makeFirst/removeListener/emit/emitAndWait——
  *   没有 off，摘除监听的方法名是 removeListener（eventemitter.js:114）。
  * - 事件名从这里转发导出而不在业务侧写字面量，防止枚举值漂移。
- * - 批C 补核：`scripts/events.js:9` `MESSAGE_RECEIVED: 'message_received'`。
+ * - 补核：`scripts/events.js:9` `MESSAGE_RECEIVED: 'message_received'`。
  *   emit 形态两参 `(messageId: number, type: string)`：主生成路径
  *   `script.js:4748/4780` `await eventSource.emit(event_types.MESSAGE_RECEIVED,
  *   this.messageId, this.type)`；分组消息走 (chat_id, type)

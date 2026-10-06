@@ -1,5 +1,5 @@
 /**
- * PersonaWeaver fork 入口（批D 平移）。
+ * PersonaWeaver fork 入口。
  *
  * 入口只走工具箱 tab（/tt-toolbox 进壳），不挂 .persona_controls_buttons_block
  * 旧按钮、不新增 DOM 锚点（已拍板）。initPersona 负责 localStorage 旧键

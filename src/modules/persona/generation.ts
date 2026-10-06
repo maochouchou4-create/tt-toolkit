@@ -1,14 +1,14 @@
 /**
- * PersonaWeaver fork 生成链（批D 平移）：首次生成两段（curator 策展
- * schema → personaGen 按 schema 填充）。整合轮II 起提示词模板与模块
+ * PersonaWeaver fork 生成链：首次生成两段（curator 策展
+ * schema → personaGen 按 schema 填充）。提示词模板与模块
  * 管线在统一提示词引擎（src/prompts——按任务键取配置，assemble＋占位
  * 符填充＋trace/dump 一致可观测），本文件只承载任务上下文收集与调用链。
  *
  * MODIFICATIONS（相对上游 fork）：
  * - Anthropic 原生分支整体退役（只保留 OpenAI 兼容形态）。
- * - 整合轮II：主 API（宿主 generateRaw）与独立 API（直连 Bearer fetch）
- *   两条通道合一，走统一端点表＋共享请求客户端（宿主生成路由）。
- * - 整合轮II：字符串拼接组装退役——消息组装走引擎管线（persona 两任务
+ * - 主 API（宿主生成路由）与独立 API（直连 Bearer fetch）
+ *   两条通道合一，走统一端点表＋共享请求客户端。
+ * - 字符串拼接组装退役——消息组装走引擎管线（persona 两任务
  *   键的模块与模板在代码默认模板内置）。
  * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：配置由
  *   store 从存储域透传（GenerationApiConfig）。
@@ -169,7 +169,7 @@ function assemblePersonaMessages(task: TaskKey, sources: PersonaAssemblySources)
  * 单次模型调用：前置消息序列已由引擎组装，本函数追加 prefill、发起
  * 请求并处理超时/中断/错误分类。生成链每段各调一次（每段超时独立）。
  *
- * 整合轮II：单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
+ * 单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
  * persona 任务参数面：temperature 固定 1、不发送 max_tokens（长 YAML 友
  * 好，依赖宿主 insert_if_present 语义）、输出契约 prompt_only（纯文本）。
  */

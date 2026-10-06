@@ -1,13 +1,12 @@
 /**
- * 扩展引导：唯一环境分支点（批A 修复：模块不再自行探测环境自启动）。
+ * 扩展引导：唯一环境分支点（模块不自行探测环境自启动）。
  *
  * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
  * （含 API 页）→ initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
  * 全局口＋选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
- * choice/persona 旧 API 字段）→ initPersona() → wipeLegacyKeysOnce()
- * （批E：遗留 localStorage 键一次性清理——顺序硬约束，必须位于全部
- * 幂等迁移之后）。
+ * choice/persona 旧 API 字段）→ initPersona() → wipeLegacyKeysOnce()（遗留
+ * localStorage 键一次性清理——顺序硬约束，必须位于全部幂等迁移之后）。
  * node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：initStorage() → host
  * 探测清单 + storage roundtrip → nav 最小初始化 → nav dump。
  * initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()
@@ -62,13 +61,13 @@ async function runNodeSmoke(): Promise<void> {
         console.warn('=== nav 模块未初始化（__TT_TOOLKIT__.nav 不在场）===');
     }
     initChoiceMinimal();
-    // 批B 机判：组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
+    // 组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
     await runChoiceSmoke();
-    // 整合轮II：统一端点表迁移收编（persona 域先成型再收编；报告断言在 smoke.mjs）
+    // 统一端点表迁移收编（persona 域先成型再收编；报告断言在 smoke.mjs）
     initApis();
-    // 批D 机判：persona 迁移幂等＋纯函数＋store 互斥（断言在 smoke.mjs 收口）
+    // persona 迁移幂等＋纯函数＋store 互斥（断言在 smoke.mjs 收口）
     initPersonaMinimal();
-    // 批E 机判：遗留键一次性清理（全部幂等迁移之后；persona smoke 会回收
+    // 遗留键一次性清理（全部幂等迁移之后；persona smoke 会回收
     // 旧键并重置 persona 域，boot 态断言必须在其前——断言在 smoke.mjs 收口）
     wipeLegacyKeysOnce();
     runLegacyWipeSmoke();
@@ -94,7 +93,7 @@ async function main(): Promise<void> {
     // 再收编 choice/persona 旧 API 字段——顺序敏感，勿调换
     initApis();
     initPersona();
-    // 批E：遗留 localStorage 键一次性清理——位于全部幂等迁移之后
+    // 遗留 localStorage 键一次性清理——位于全部幂等迁移之后
     // （迁移消费在先、删除在后，绝不碰已迁移数据），见 storage/legacy-wipe
     wipeLegacyKeysOnce();
     console.info(`[tt-toolkit] v${version} ready (rewrite)`);

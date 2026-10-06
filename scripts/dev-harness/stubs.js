@@ -3,7 +3,7 @@
  * 只实现 tt-toolkit 实际消费的最小面（消费面清单见 README.md），
  * 全部内存态——刷新即重置，可反复折腾布局而不污染真实酒馆。
  *
- * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（批D 后 11 条）
+ * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（11 条）
  * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
  * SillyTavern.getContext / quickReplyApi / toastr / STBaiBaiBook）按
  * 宿主挂载形态放到 globalThis 上。
@@ -53,7 +53,7 @@
         persona_description: `${USER_NAME}，旧货铺的常客，观察力过人，惯于用细节逼人开口。`,
         movingUI: true,
         movingUIState: {},
-        // personas 域（批D）：personas.js stub 与 upsertPersona 写回链共用
+        // personas 域：personas.js stub 与 upsertPersona 写回链共用
         // power_user 单例（宿主同形——personas 与 persona_descriptions 都挂
         // power_user 上）
         personas: {},
@@ -91,7 +91,7 @@
         MESSAGE_UPDATED: 'message_updated',
         CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
         SETTINGS_LOADED: 'settings_loaded',
-        // 批D personas 写回链 emit 的两个事件（eventSource.emit stub 通用）
+        // personas 写回链 emit 的两个事件（eventSource.emit stub 通用）
         PERSONA_CREATED: 'persona_created',
         PERSONA_UPDATED: 'persona_updated',
     };
@@ -175,7 +175,7 @@
         saveMetadata: async () => console.info('[harness] saveMetadata（stub）'),
         powerUserSettings: { movingUI: power_user.movingUI, movingUIState: power_user.movingUIState },
         getRequestHeaders,
-        // 批D persona 供给面：书目清单 / openai 预设管理器 / 当前预设名
+        // persona 供给面：书目清单 / openai 预设管理器 / 当前预设名
         getWorldInfoNames: () => [...wiBooks.keys()],
         getPresetManager: () => ({
             getPresetList: () => ({ presets: ['存根预设'], preset_names: { '存根预设': 0 }, settings: {} }),
@@ -184,7 +184,7 @@
         chatCompletionSettings: { preset_settings_openai: '存根预设' },
         extensionPrompts: {
             // 假装是一个记忆摘要类插件占用通用注入槽位（外部注入全自动
-            // 搬入——整合轮II 验收修整：非空即带，无需用户配置）
+            // 搬入——非空即带，无需用户配置）
             'stub-memory': {
                 value: '【记忆摘要·stub】王玉已连续三天在子时到访旧货铺；林霜提到过一封没有署名的信。',
                 position: 0,
@@ -268,7 +268,7 @@
 
     // --------------------------------------------------------
     // world-info.js stub：固定桶返回（各 wi_* 注入模块可见真实形态）＋
-    // 批D 的写通道四函数（内存书库，saveWorldInfo 落 Map、reloadEditor 空转）
+    // 的写通道四函数（内存书库，saveWorldInfo 落 Map、reloadEditor 空转）
     // --------------------------------------------------------
     async function getWorldInfoPrompt() {
         return {
@@ -315,7 +315,7 @@
     }
 
     // --------------------------------------------------------
-    // personas.js / utils.js stub（批D）：宿主单例挂 power_user（同形），
+    // personas.js / utils.js stub：宿主单例挂 power_user（同形），
     // 头像文件表内存维护；/api/avatars/upload 走 fetch 拦截
     // --------------------------------------------------------
     const avatarFiles = ['default.png'];

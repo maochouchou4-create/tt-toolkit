@@ -1,5 +1,5 @@
 /**
- * 自动生成（批C）：MESSAGE_RECEIVED 监听守卫链。
+ * 自动生成：MESSAGE_RECEIVED 监听守卫链。
  *
  * 守卫顺序（越早越便宜）：quiet 静默生成跳过 → 消息文本空跳过 →
  * messageId===0 跳过 → autoGenerate 关跳过 → 生成中跳过 → 未选端点

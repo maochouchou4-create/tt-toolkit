@@ -50,7 +50,7 @@ export function buildAssetPool(): Pick<PoolDomainData, 'masterPool'> {
  * 以 asset 覆盖存储内容域。幂等：assetVersion 已是当前版本时直接返回（零写入）。
  *
  * 首次同步（assetVersion 非 number，含旧用户/全新安装）额外做一次性 gen 翻转：
- * categoriesEnabled false→true——批C.2 拍板「按分类轮询默认开」，旧档的 false
+ * categoriesEnabled false→true——「按分类轮询默认开」，旧档的 false
  * 是旧默认值而非用户选择。此后 gen 纯用户域，用户关掉不会被任何同步回翻。
  */
 export function syncAssetPool(): void {

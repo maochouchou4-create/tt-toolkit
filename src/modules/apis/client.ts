@@ -1,5 +1,5 @@
 /**
- * 统一请求客户端（整合轮II）：choice 直连请求与 persona OpenAI 兼容请求
+ * 统一请求客户端：choice 直连请求与 persona OpenAI 兼容请求
  * 合一。两个任务只差传参——任务参数（输出契约/思考强度/流式/超时/
  * max_tokens/信号）留在各自任务域，端点身份（url/key/model）从统一
  * 端点表取。
@@ -44,7 +44,7 @@ export interface GenerateMessage {
     content: string;
 }
 
-/** 输出契约档位（方案 §1 P-JSON：服务商结构化输出优先＋客户端解析兜底）。 */
+/** 输出契约档位（服务商结构化输出优先＋客户端解析兜底）。 */
 export type OutputContract = 'json_schema' | 'json_object' | 'prompt_only';
 
 /**

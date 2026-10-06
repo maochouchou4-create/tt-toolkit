@@ -15,7 +15,8 @@ import { createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
 import { TASK_KEYS } from './types';
 import type { PromptConfig, TaskKey } from './types';
 
-const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
+/** 全局域提示词配置集键（冒烟机判直接按此键构造/恢复域，禁第二份字面量）。 */
+export const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
 const GLOBAL_PROMPT_ACTIVE_KEY = 'promptActiveId';
 
 /** 配置形状守门（Record 形态下逐键校验——外部写坏的键回退默认，不抛错）。 */
@@ -43,7 +44,7 @@ function backfillPoolModules(choice: PromptConfig | undefined): boolean {
     return true;
 }
 
-/** 旧档里的 inject_pool_rules 模块剔除（m03359：池规则并入 core_rules；choice 任务专属）。 */
+/** 旧档里的 inject_pool_rules 模块剔除（池规则已并入 core_rules；choice 任务专属）。 */
 function stripRetiredPoolRules(choice: PromptConfig | undefined): boolean {
     if (!choice || !Array.isArray(choice.modules)) return false;
     const filtered = choice.modules.filter(m => !(m.kind === 'inject' && (m as { source?: unknown }).source === 'pool_rules'));

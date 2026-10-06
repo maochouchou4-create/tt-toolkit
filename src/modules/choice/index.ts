@@ -55,8 +55,8 @@ async function mountBarWithRetry(): Promise<void> {
 
 /**
  * 全局口 __TT_TOOLKIT__.prompts：dump / assemble / parseOptions。
- * 用户浏览器验收与排障共用（与编辑器 tab 的 dump 展示同一条组装路径）。
- * 整合轮II 起 dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
+ * 用户浏览器验收与排障共用（与生成管线同一条组装路径）。
+ * dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
  */
 function installGlobalPort(): void {
     const port = {

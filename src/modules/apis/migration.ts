@@ -1,5 +1,5 @@
 /**
- * 统一端点表一次性迁移（整合轮II）：收编 choice 旧 apis[] 与 persona 旧
+ * 统一端点表一次性迁移：收编 choice 旧 apis[] 与 persona 旧
  * localConfig 端点字段进统一表，并把两侧「选中端点」重映射到统一表 id。
  *
  * 幂等口径：统一表在场且两侧旧字段已清＝skip（二次启动零重写）。统一表
@@ -86,7 +86,7 @@ function readLegacyChoiceApis(raw: unknown): LegacyChoiceApi[] {
     });
 }
 
-/** persona 侧收编原料（旧 localConfig 端点字段；过渡形状或批D 存量形状）。 */
+/** persona 侧收编原料（旧 localConfig 端点字段；过渡形状或旧版存量形状）。 */
 interface PersonaLegacyApi {
     profiles: Array<{ id: string; name: string; url: string; key: string; model: string }>;
     custom: { id: string; name: string; url: string; key: string; model: string } | null;
@@ -153,7 +153,7 @@ function readPersonaLegacyApi(): PersonaLegacyApi | null {
 }
 
 function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
-    // 旧档任务参数同居在 ApiConfig 上；缺字段回批B 默认档
+    // 旧档任务参数同居在 ApiConfig 上；缺字段回默认档
     const contract = api.outputContract === 'json_schema' || api.outputContract === 'prompt_only'
         ? api.outputContract
         : 'json_object';

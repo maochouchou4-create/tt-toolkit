@@ -18,7 +18,9 @@ export interface WaitResourceOptions {
 
 /**
  * 等待 probe 命中（非 null/undefined 即命中）：立查命中直接返回；否则
- * 订阅 APP_READY（同步重放立即复测）＋轮询到 deadline。超时返回 null。
+ * 订阅 APP_READY（同步重放立即复测）＋轮询到 deadline。超时即放弃——
+ * deadline 后不再等晚到 APP_READY（旧实现超时仍挂监听属泄漏，本实现
+ * 随 finish 摘除）。返回 null。
  * 单一出口 finish 自清 APP_READY 订阅与轮询——APP_READY 晚订阅的同步
  * 重放可能先于 setInterval 创建而 settle，此时不再起轮询（防 detached
  * 计时器空转到 deadline）。

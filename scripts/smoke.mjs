@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * 批A 判据机判：node 驱动 dist（storage 写读 roundtrip + host 适配层
+ * 冒烟机判：node 驱动 dist（storage 写读 roundtrip + host 适配层
  * API 探测清单逐项打印 + P1 时序回归）。
  *
  * 机制：module.register 挂 stub-loader（@sillytavern 外置说明符 → 内存
  * 存根），globalThis.__TT_SMOKE_STUBS__ 提供可变单例与函数桩；随后
  * import dist/index.js——其入口为唯一环境分支点，无 document 走冒烟
  * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
- * 批E 起追加：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
+ * 另含：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
  * 预种 7 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（cache-buster
  * URL 整图重求值 dist，验标记短路 no-op 不炸）。
  * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
@@ -28,19 +28,21 @@ if (!existsSync(fileURLToPath(DIST_ENTRY))) {
 }
 
 // ---------------------------------------------------------------------------
-// localStorage 存根：node 无 localStorage。批E 起预种全部旧遗留键
+// localStorage 存根：node 无 localStorage。预种全部旧遗留键
 // （迁移源键，带内容）——P1 时序回归（tt_msg_nav_auto_top='0' 关态 →
 // initStorage 迁移 → store 读到 false）＋ legacy-wipe 启动链路供给（boot
-// 迁移先消费、boot 清理后删键）。收敛批起 persona 侧迁移键收缩为 3 个
-// （世界书勾选/钉选域退役）。键名/形状与 src/storage/legacy-wipe.ts
+// 迁移先消费、boot 清理后删键）。persona 侧迁移键为 3 个
+// （世界书勾选/钉选域已退役）。键名与 src/storage/legacy-wipe.ts
 // 的常量表同源；此处字面量属测试夹具（机判断言在 dist 侧用常量做）。
+// 种子形状含历史字段（如 pw_data_user_v1 的 hasResult）＝v1.0.0 时代的
+// 真实输入形状，normalize 丢弃面验证所需，勿按现域形状「修正」。
 // ---------------------------------------------------------------------------
 const LEGACY_SEEDS = new Map([
     ['tt_msg_nav_auto_top', '0'],
     ['tt_nav_qr_activated', '1'],
     ['pw_state_v20', JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } })],
     ['pw_ui_state_v4_preset', JSON.stringify({ generationPreset: 'pure' })],
-    ['pw_data_user_v1', JSON.stringify({ request: '批E启动链路种子', result: '批E启动链路种子·结果', hasResult: true })],
+    ['pw_data_user_v1', JSON.stringify({ request: '启动链路种子', result: '启动链路种子·结果', hasResult: true })],
 ]);
 const localStorageData = new Map(LEGACY_SEEDS);
 globalThis.localStorage = {
@@ -54,14 +56,14 @@ globalThis.localStorage = {
 // 宿主存根：与 src/host 导入面对齐（stub-loader.mjs 的 STUB_EXPORTS 表）
 // ---------------------------------------------------------------------------
 
-// 事件总线（批C 升级为可触发式）：on/once 记录监听器，emit 同步派发并
+// 事件总线（可触发式）：on/once 记录监听器，emit 同步派发并
 // 返回首个监听器的返回值——冒烟断言 MESSAGE_RECEIVED 守卫链/同步返回
 // 语义靠它驱动（宿主真实 emit 串行 await 每个监听器，同步派发同构）
 const eventHandlers = new Map();
 
-// getContext 存根（批C 起稳定单例）：守卫链读楼层正文（chat 数组）需要
+// getContext 存根（稳定单例）：守卫链读楼层正文（chat 数组）需要
 // 跨调用持久——每次新对象会让「往 chat 里放消息」这一动作失效
-// 整合轮II 验收修整：externalPrompts 给自动注入面三个槽位——stub_anchor
+// externalPrompts 给自动注入面三个槽位——stub_anchor
 // （depth 0 非空）、stub_blank（空白 value＝应被跳过）、stub_memory
 // （depth 4 非空）——断言 depth 升序排序与「非空即带、空槽位跳过」
 const stubContext = {
@@ -84,7 +86,7 @@ const stubContext = {
     },
 };
 
-// 柏宝书 stub（整合轮II 验收修整）：在场即带口径的机判供给——
+// 柏宝书 stub：在场即带口径的机判供给——
 // getInjectedHistory 优先口径返回 relativeText（getHistory 降级路径
 // 不触发；缺席路径由 choice-smoke 合成源传 null 覆盖）
 globalThis.STBaiBaiBook = {
@@ -92,8 +94,9 @@ globalThis.STBaiBaiBook = {
     getInjectedHistory: () => ({ relativeText: '【柏宝书·stub】王玉与林霜曾在旧货铺发生过一场争执，此后两人各自回避提起。' }),
 };
 
-// 生成端点 fetch 桩（批C happy path）：固定回 4 条选项 JSON（非流式
-// choices[0].message.content 形态——与 host/generate.ts 消费契约对齐）
+// 生成端点 fetch 桩（happy path）：固定回 4 条选项 JSON（非流式
+// choices[0].message.content 形态——与 src/modules/apis/client.ts 的
+// callGenerateEndpoint 消费契约对齐）
 const FIXED_OPTIONS_JSON = JSON.stringify({
     options: [
         { title: '检查酒馆', content: '仔细检查酒馆的每个角落。' },
@@ -111,7 +114,7 @@ globalThis.fetch = async () => ({
 const noop = () => {};
 
 globalThis.__TT_SMOKE_STUBS__ = {
-    // settings 可变单例（roundtrip 载体；批C 导入断言往 .choice 里放 fixture）
+    // settings 可变单例（roundtrip 载体；choice 导入断言往 .choice 里放 fixture）
     extension_settings: {},
     chat_metadata: {},
     characters: [],
@@ -128,7 +131,7 @@ globalThis.__TT_SMOKE_STUBS__ = {
     // context 转发的 stubContext.extensionPrompts，见上）
     extension_prompts: {},
     // power_user（人设空——persona 注入模块按「未设置」路径走；
-    // 批D 起 personas/persona_descriptions 桶在场：host/personas.ts 写回通道
+    // personas/persona_descriptions 桶在场：host/personas.ts 写回通道
     // 的防御性初始化走真实空桶路径）
     power_user: {
         persona_description: '',
@@ -190,7 +193,7 @@ globalThis.__TT_SMOKE_STUBS__ = {
     getContext: () => stubContext,
     saveMetadataCalls: 0,
     // ------------------------------------------------------------------
-    // 批D persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
+    // persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
     // ------------------------------------------------------------------
     // script.js:680 default_user_avatar（createAvatarPersona 的素材头像）
     default_user_avatar: 'img/user-default.png',
@@ -250,7 +253,7 @@ const tap = (prefix) => (...args) => {
 };
 console.log = tap('log');
 console.info = tap('info');
-// 批D：console.error 同样收口——persona/choice 冒烟的 FAIL 收尾行走
+// console.error 同样收口——persona/choice 冒烟的 FAIL 收尾行走
 // console.error（不打扰 stdout 的 PASS 流），收尾判据须能看到它
 console.error = tap('error');
 
@@ -265,10 +268,9 @@ try {
 
 // ---------------------------------------------------------------------------
 // 等 node 冒烟分支收尾再断言：入口 `void main()` 是 fire-and-forget，动态
-// import 的解析先于后台异步链完成。批B 时整条链是纯微任务（先于本脚本
-// 断言排空，恰好全绿）；批C 自动生成断言含 setTimeout 轮询（宏任务），
-// 断言会抢在轮询前执行——截断输出。改为显式等收尾行（OK/FAIL）或超时。
-// 批D 起 persona 冒烟排在 choice 之后——收尾判据改盯末段 [persona-smoke]
+// import 的解析先于后台异步链完成。自动生成断言含 setTimeout 轮询（宏任务），
+// 断言会抢在轮询前执行——截断输出。改为显式等收尾行（OK/FAIL）或超时；
+// persona 冒烟排在 choice 之后——收尾判据盯末段 [persona-smoke]
 // OK 行（choice 的 FAIL 行同样提前触发收口）。
 // ---------------------------------------------------------------------------
 const SMOKE_DONE_RE = l => l.startsWith('[persona-smoke] OK：') || l.includes('项 FAIL：');
@@ -330,15 +332,11 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 }
 
 // ---------------------------------------------------------------------------
-// 批B 机判：choice 组装/解析（[choice-smoke] 输出行收口）＋全局口在场
+// choice 机判：组装/解析（[choice-smoke] 输出行收口）＋全局口在场
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
-// 历史构成见 git（批B 37→批C/C.2/整合轮/整合轮II 逐步累加至 95）。
-// 批2 池用户写面全删：导入往返（旧档/备份/幂等/畸形拒）、绑定级联、
-// asset 引用层镜像三区断言随功能删除；safeWeight 断言移入抽取区、
-// asset 新增「无停用条目」断言；自动生成区前置落 stub 端点（非流式档）
-// 补上原由导入链提供的端点前置——实跑计数 78 写死。
+// 期望构成：组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链，共 78。
 const CHOICE_PASS_EXPECTED = 78;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
@@ -346,15 +344,15 @@ if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 
     failures.push(`choice 机判异常：期望恰好 ${CHOICE_PASS_EXPECTED} 条 PASS，实际 ${choicePassLines.length} 条 / FAIL ${choiceFailLines.length} 条${choiceFailLines.length ? `（首条：${choiceFailLines[0]}）` : ''}`);
 }
 
-// 批B 判据的 dump 断言：组装 dump 全文出现在输出中，且关键注入段逐项可见
+// dump 断言：组装 dump 全文出现在输出中，且关键注入段逐项可见
 const dumpStart = outputLines.findIndex(l => l.startsWith('=== 组装 dump 全文 ==='));
 if (dumpStart < 0) {
     failures.push('未见「组装 dump 全文」输出');
 } else {
     const dumpBody = outputLines.slice(dumpStart).join('\n');
-    // 批C 起池注入 dump 打印在批B dump 之后（「池注入 dump」段），标记
+    // 池注入 dump 打印在组装 dump 之后（「池注入 dump」段），标记
     // 断言对「dumpStart 之后」的全量输出收口——两份 dump 都算数；
-    // m03359：<pool_rules> 标记删除（池规则并入模板 <rules> 段）
+    // <pool_rules> 标记已删（池规则并入模板 <rules> 段）
     for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<direction>', '<external_memory>', '<pool_entries>', '<rules>']) {
         if (!dumpBody.includes(marker)) {
             failures.push(`组装 dump 缺少注入段标记 ${marker}`);
@@ -374,18 +372,18 @@ if (!outputLines.some(l => l.includes('畸形样本走回退路径') && l.includ
     failures.push('畸形样本回退路径断言未见 PASS 输出');
 }
 
-// debugForceRaw 生成管线接线（批B 判据）：置开关跑完整 generateOptions、
+// debugForceRaw 生成管线接线：置开关跑完整 generateOptions、
 // 断言跳过 API 直喂畸形样本且走回退解析——该分支构造上不 fetch，node
 // 冒烟无网络依赖；开关与生成管线脱钩在此翻红
 if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('debugForceRaw'))) {
     failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
-// 提示词配置初始化：默认模板落进全局域 storage（m03359 整合轮起 choice
-// 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。整合轮II
-// 起存储升级为 Record<taskKey, PromptConfig> 三任务键：choice 18 模块红线
+// 提示词配置初始化：默认模板落进全局域 storage（choice
+// 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。
+// 存储形态 Record<taskKey, PromptConfig> 三任务键：choice 18 模块红线
 // 不变，persona 两任务键在场（各 4 模块：preset/wi/任务指令；已退休的
-// 第四任务键不在期望清单——存量配置读侧出局，写回自然清除）
+// persona_refine 任务键不在期望清单——存量配置读侧出局，写回自然清除）
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
@@ -395,19 +393,17 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) 
 }
 
 // ---------------------------------------------------------------------------
-// 批D 机判：persona 迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
+// persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 批D 41 条 → 整合轮II 重写为 60 条（统一 API 层＋提示词引擎多任务化）
-// → 人设简化批（persona-slim）收敛为 53 条（对比取舍链删除共 −7：
-// 迁移 12（空启动/5 键搬入/形状/退休键/legacy 快照/二次零重写/域在场仍清，
-// 过渡透传 v2 形状＋收编 4 条：统一表形状/去重＋id 重映射/choice 域 v2
-// 重写/persona localConfig v2）＋ prompts 6（三任务键齐备/choice 18 模块
+// 期望构成 57 条：迁移 14（空启动/3 键搬入/形状/退休键/legacy 快照/
+// 二次零重写/域在场仍清/域形状收缩/v1.1.0 存量域退役字段丢弃，过渡透传
+// v2 形状＋收编 4 条：统一表形状/去重＋id 重映射/choice 域 v2 重写/
+// persona localConfig v2）＋ prompts 6（三任务键齐备/choice 18 模块
 // 红线/persona 两任务默认形状/旧数组一次写迁移/任务隔离开关/按任务恢复
 // 默认）＋persona 组装 3＋persona dump 观测口 2＋纯函数 5＋api 11＋e2e 4
-// ＋worldbook·store 10。收敛批：迁移区改写净 +2（域形状收缩断言＋
-// v1.1.0 存量域退役字段丢弃断言；5 键搬入改 3 键）＋会话感知 +2
-// （CHAT_CHANGED 无条件清空开场白选择与 lastRun＋宿主 emit 接线全链）＝57。
+// ＋worldbook·store 10＋会话感知 2（CHAT_CHANGED 无条件清空开场白选择
+// 与 lastRun＋宿主 emit 接线全链）。
 const PERSONA_PASS_EXPECTED = 57;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
@@ -416,7 +412,7 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 }
 
 // ---------------------------------------------------------------------------
-// 批E 机判：legacy-wipe 一次性清理（[wipe-smoke] 行收口，先于 persona
+// legacy-wipe 机判：一次性清理（[wipe-smoke] 行收口，先于 persona
 // smoke 跑——见 src/main.ts runNodeSmoke 接线）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同上纪律）。run1＝一次启动签名共 10 条：boot 5（键
@@ -437,7 +433,7 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 }
 
 // ---------------------------------------------------------------------------
-// 整合轮II 退休符号清零：generateRaw（宿主主 API 通道）整体删除——dist
+// 退休符号清零：generateRaw（宿主主 API 通道）整体删除——dist
 // 产物出现任何一处都说明退休不彻底。apiSource/apiProfiles 不做字符串计
 // 数：迁移收编必须按旧键名读旧档（「旧字段只读不写」纪律的读侧合法残
 // 留），其退休由结构性断言保证（persona/choice smoke 断言迁移后域内无
@@ -448,7 +444,7 @@ const generateRawCount = (distSource.match(/generateRaw/g) ?? []).length;
 if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateRaw（计数 ${generateRawCount}，期望 0）`);
 
 // ---------------------------------------------------------------------------
-// 批E 二次启动（boot2）：cache-buster URL 对 dist 整图重求值（vite 单
+// 二次启动（boot2）：cache-buster URL 对 dist 整图重求值（vite 单
 // chunk 无代码分割）——同浏览器二次启动语义：extension_settings 存根与
 // localStorage 跨 import 持久。标记已置位＋遗留键重种 → boot 清理须短路
 // （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 6 条 PASS。

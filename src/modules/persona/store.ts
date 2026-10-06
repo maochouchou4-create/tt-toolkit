@@ -1,5 +1,5 @@
 /**
- * PersonaWeaver fork 状态层（批D 平移，Pinia）。
+ * PersonaWeaver fork 状态层（Pinia）。
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
  * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）、

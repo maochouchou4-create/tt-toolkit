@@ -1,5 +1,5 @@
 /**
- * TT 宿主世界书通道（批D persona 的参考/勾选/写回数据面）。
+ * TT 宿主世界书通道（persona 的参考/写回数据面＋绑定书读取）。
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - world-info.js:2241 `export async function loadWorldInfo(name)`：按书名

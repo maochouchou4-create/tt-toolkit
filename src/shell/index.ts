@@ -43,8 +43,8 @@ const WAND_ENTRY: WandMenuEntry = {
     onClick: () => toggleShell(),
 };
 
-// 壳的斜令通道：QR「工具箱」按钮（nav 集末位）与魔棒入口共用，命令名经
-// TOOLBOX_COMMAND 常量导出给 nav（单一事实源）。**注册在模块求值期执行
+// 壳的斜令通道：QR「工具箱」按钮（nav 集末位）与魔棒入口共用，命令名取
+// src/constants 的 TOOLBOX_COMMAND 常量（单一事实源）。**注册在模块求值期执行
 // （不进 installWandEntry）**：宿主把 QR 栏渲染成可点状态先于第三方扩展
 // 加载约 2 秒（结构性时序），命令能早一毫秒注册就早一毫秒——刷新后立刻
 // 点 QR「工具箱」落在窗口期会报一次 Unknown command（宿主侧无法拦截）。

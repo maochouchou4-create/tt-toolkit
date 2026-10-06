@@ -1,10 +1,10 @@
 /**
- * 提示词子系统类型（方案 §2.3）。
+ * 提示词子系统类型。
  *
  * 统一单条模块管线：文本模块（规则/任务/格式）与注入模块（人设/角色卡/
  * 世界书/历史/外部搬运）同一条 order 排序——单一排序契约，不分两套列表。
  * 提示词单一真相源＝configs[] 每套自带 modules[]，无工作副本无快照
- * 双份。整合轮II 验收修整：编辑面已删——模板内置在代码（defaults），
+ * 双份。编辑面已删——模板内置在代码（defaults），
  * 引擎照常读 modules；enabled 字段保留（引擎行为面）。
  */
 
@@ -12,13 +12,13 @@
 export type PromptRole = 'system' | 'user' | 'assistant';
 
 /**
- * 提示词任务键（整合轮II：引擎多任务化）。各生成管线各自持一套
+ * 提示词任务键（引擎多任务化）。各生成管线各自持一套
  * PromptConfig——choice（选项生成）与 persona 两段（策展 schema、按
  * schema 填充人设）。存储形态 Record<taskKey, PromptConfig>。
  */
 export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen';
 
-/** 全部任务键（读侧补缺/迁移遍历用；顺序＝编辑器任务条的呈现顺序）。 */
+/** 全部任务键（读侧补缺/迁移遍历用）。 */
 export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen'];
 
 /**
@@ -40,7 +40,7 @@ export type InjectionSource =
     | 'external_slot'
     | 'baibai'
     | 'pool_entries'
-    // ---- persona 任务注入源（整合轮II）——内容在 PersonaAssemblySources ----
+    // ---- persona 任务注入源——内容在 PersonaAssemblySources ----
     /** 生成用预设的 system 段（「纯净模式」＝空，模块跳过） */
     | 'persona_preset'
     /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装） */
@@ -85,7 +85,7 @@ export interface TextModule {
 
 /**
  * 注入模块：内容来自运行时上下文，不可编辑文本。模块的启停与排序仅
- * 引擎行为面消费（默认模板内置；整合轮II 验收修整起无编辑 UI）。
+ * 引擎行为面消费（默认模板内置；无编辑 UI）。
  * external_slot 源带哪些槽位由全自动收集决定（sources 层枚举宿主
  * extension_prompts 非空槽位），与模块定义解耦。
  */

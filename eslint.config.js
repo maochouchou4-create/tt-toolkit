@@ -1,6 +1,5 @@
 // 新应用 lint 门（eslint v9 flat config）。
-// 监听面＝src/（Vue SFC + TS）与 scripts/（node 侧 .mjs）。批E 已删除
-// rewrite 前的旧结构（modules/、i18n/、根 loader 桩、prompts/、shared/）。
+// 监听面＝src/（Vue SFC + TS）与 scripts/（node 侧 .mjs）。
 // scripts/check-imports.mjs 与 smoke 相关脚本由本门做基础正确性检查
 // （no-undef / 未用变量），语义断言归脚本自身 exit code。
 import globals from 'globals';

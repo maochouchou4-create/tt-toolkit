@@ -5,7 +5,7 @@
  * getGlobal/setGlobal 单通道）。域形状 normalize 纪律照 choice/pool：
  * 未知字段丢弃（显式保真注释），缺字段补默认，反复读写幂等。
  *
- * 整合轮II：端点身份（url/key/model）移入统一端点表（modules/apis），
+ * 端点身份（url/key/model）移入统一端点表（modules/apis），
  * localConfig 只保留 persona 任务参数＋选中端点引用 endpointId。旧字段
  * （apiSource、indepApi 前缀三键、apiProfiles、activeApiProfileId）由 migrateApiDomain
  * 一次性收编，此后在 normalize 的未知字段丢弃面自然退休。
@@ -13,7 +13,7 @@
  * 迁移纪律（nav 同款幂等）：域不存在→读 3 个旧键搬入新域→保留旧键
  * 作 legacy 快照（回滚旧版本不丢存量；新版本不再写旧键）→退休键
  * removeItem；域已存在→跳过迁移（二次启动零重写）。
- * 收敛批：世界书勾选/钉选域退役（全量注入拍板），wiSelection/pinnedBooks
+ * 世界书勾选/钉选域已退役（全量注入拍板），wiSelection/pinnedBooks
  * 域字段与 localConfig.extraBooks 随域形状删除——v1.1.0 存量域读入时由
  * normalize 的未知字段丢弃面出局，旧 localStorage 两键已随 v1.0.0 清理离场。
  */

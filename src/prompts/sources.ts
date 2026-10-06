@@ -95,7 +95,7 @@ export async function collectAssemblySources(params: {
     const depthBefore = depthEntries.filter(e => e.depth > WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
     const depthAfter = depthEntries.filter(e => e.depth <= WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
 
-    // 外部注入搬运（整合轮II 验收修整：全自动——无开关无勾选）。槽位
+    // 外部注入搬运（全自动——无开关无勾选）。槽位
     // 枚举口径（宿主源码核实锚点，D:\code\repos\TauriTavern\src）：
     //   - openai.js:1484 populationInjectionPrompts：depth 升序循环
     //     （i=0..maxDepth，depth 0 最贴近生成点）——自动搬入的排序对齐

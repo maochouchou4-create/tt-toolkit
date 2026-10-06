@@ -1,5 +1,5 @@
 /**
- * 组装引擎（纯函数核心，方案 §2.3 统一单条模块管线）。
+ * 组装引擎（纯函数核心，统一单条模块管线）。
  *
  * 纯函数设计：宿主数据由 sources 层收集成 AssemblySources（普通数据
  * 对象）后传入——engine 不碰宿主 API，node 冒烟与浏览器共用同一条
@@ -50,7 +50,7 @@ export interface AssemblySources {
     /** 柏宝书摘要文本（插件缺席/接口异常传 null） */
     baibaiSummary: string | null;
     /**
-     * 池注入供给（批C）。null＝池整体未启用（pool_entries 模块按未启用
+     * 池注入供给。null＝池整体未启用（pool_entries 模块按未启用
      * 处理）；条目由 generator 现场抽取后传入——prompts 层不回读
      * choice 域（单向供给，引擎保持纯函数）。
      */
@@ -62,7 +62,7 @@ export interface AssemblySources {
 }
 
 /**
- * 池注入供给形状（批C）。字段取 PoolEntry 的子集（结构兼容：PoolEntry
+ * 池注入供给形状。字段取 PoolEntry 的子集（结构兼容：PoolEntry
  * 可直接赋进来）——prompts 层只关心渲染所需的两个文本字段，不知道池的
  * id/weight/绑定概念，保持两层解耦。
  */
@@ -84,7 +84,7 @@ export interface AssemblyResult {
 }
 
 /**
- * persona 两任务（策展＋填充）的组装供给（整合轮II）。与 AssemblySources
+ * persona 两任务（策展＋填充）的组装供给。与 AssemblySources
  * 平行的独立接口：persona 管线的注入面与 choice 完全不同（角色卡全量
  * 文本/世界书参考/用户请求/schema——不是 choice 的分段标签注入），共用
  * 一个接口会让两边互相背对方不需要的字段。收集由 persona 调用方完成
@@ -254,7 +254,7 @@ function resolveInjectContent(
             // （本函数返回单串表达不了多消息）——此分支只为 switch 穷尽性
             return { content: '', note: '聊天历史为空' };
         case 'story_direction': {
-            // G4 拍板：<direction> 段＝已应用预设正文＋自由文本拼接
+            // <direction> 段＝已应用预设正文＋自由文本拼接
             // （预设文本与自由文本同为走向指令，不做二级标注）；两者
             // 皆空＝模块按未启用处理（不注入、trace 留痕）
             const preset = sources.storyDirection?.presetText.trim() ?? '';
@@ -264,7 +264,7 @@ function resolveInjectContent(
             return { content: wrapTag('direction', [preset, free].filter(Boolean).join('\n'), sources), note };
         }
         case 'external_slot': {
-            // 自动口径（整合轮II 验收修整）：sources 枚举宿主非空槽位全带，
+            // 自动口径：sources 枚举宿主非空槽位全带，
             // 无配置门——空列表＝没有插件写入，段缺席不报错
             if (sources.externalSlots.length === 0) return { content: '', note: '无可用槽位（没有插件写入公共注入区）' };
             const filled = sources.externalSlots.filter(s => s.value.trim());

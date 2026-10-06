@@ -1,5 +1,5 @@
 /**
- * TT 宿主 openai 预设读取通道（批D persona 的预设选择/提示词对照供给）。
+ * TT 宿主 openai 预设读取通道（persona 的预设选择/提示词对照供给）。
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - st-context.js:293 `getPresetManager`（转发 preset-manager.js:97

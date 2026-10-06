@@ -3,7 +3,7 @@
  *
  * 池是单层结构：masterPool 即全部内容（type/content/category/pinned/weight
  * 都在条目自身），唯一样式随 default-pool.json 资产发布、用户只读。
- * m03359 整合轮：规则概念整体删除（条目级 v2 弃、池级 v3 弃）——反 OOC
+ * 规则概念已整体删除（条目级 v2 弃、池级 v3 弃）——反 OOC
  * 约束并入提示词模板 core_rules，池数据不再携带任何规则字段。
  */
 

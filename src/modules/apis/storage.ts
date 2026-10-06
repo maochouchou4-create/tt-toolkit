@@ -1,7 +1,7 @@
 /**
  * 统一端点表存储域（extension_settings.ttToolkit.apis）。
  *
- * 整合轮II：choice 与 persona 共用一套 API 端点。域形状＝端点数组
+ * choice 与 persona 共用一套 API 端点。域形状＝端点数组
  * Array<ApiEndpoint>。读写纪律照 persona/choice 存储域：getGlobal/
  * setGlobal 单通道、normalize 未知字段丢弃、缺字段补默认、反复读写幂等。
  */

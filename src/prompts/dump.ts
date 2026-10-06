@@ -1,5 +1,5 @@
 /**
- * 消息组装 dump（方案 §2.3——批B 验收断言的依赖设施）。
+ * 消息组装 dump。
  *
  * 渲染 AssemblyResult（messages＋trace）为可读文本：各模块注入与否
  * 逐项可见＋消息数组逐条全文。消费面：全局口 __TT_TOOLKIT__.prompts.dump()

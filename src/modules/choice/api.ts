@@ -1,10 +1,10 @@
 /**
  * choice 模块任务参数（全局域 extension_settings.ttToolkit.choice）。
  *
- * 端点身份（url/key/model）自整合轮II起住在统一端点表（modules/apis），
+ * 端点身份（url/key/model）住在统一端点表（modules/apis），
  * 本域只保存 choice 任务自身的生成参数与选中端点引用。
  *
- * response_format 支持度实测结论（批B 开工实测，三家端点）：
+ * response_format 支持度实测结论（三家端点）：
  *   - json_schema：ds 官方端点不支持（400），GG（流式）与 CC 支持；
  *   - json_object：三家全部支持；
  *   - GG（gcli 假流式端点）非流式请求挂死——stream=true 是硬需求。
@@ -37,7 +37,7 @@ export interface ChoiceTaskParams {
     maxTokens: number;
 }
 
-/** 生成行为参数（全局域；批C 起含池抽取参数）。 */
+/** 生成行为参数（全局域；含池抽取参数）。 */
 export interface ChoiceGenParams extends PoolGenParams {
     /** 每次生成选项条数（语义＝pinned+drawn 的目标基数） */
     count: number;
@@ -62,7 +62,7 @@ export interface ChoiceDomain {
      */
     activeEndpointId: string;
     gen: ChoiceGenParams;
-    /** 条目池数据（批C：两层结构，见 pool/types.ts）。 */
+    /** 条目池数据（两层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
 }
 
@@ -76,7 +76,7 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     ...DEFAULT_POOL_GEN_PARAMS,
 };
 
-/** 任务参数缺省值（与批B 实测默认档一致）。 */
+/** 任务参数缺省值（三家端点实测后的稳妥档）。 */
 export const DEFAULT_TASK_PARAMS: ChoiceTaskParams = {
     outputContract: 'json_object',
     reasoningEffort: 'off',

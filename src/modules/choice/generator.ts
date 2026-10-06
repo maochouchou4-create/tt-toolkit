@@ -1,9 +1,9 @@
 /**
- * 选项生成管线（方案 §2.4）：组装（引擎）→ 请求（统一端点表＋共享客户端）
+ * 选项生成管线：组装（引擎）→ 请求（统一端点表＋共享客户端）
  * → 解析（response_format 主路径＋客户端兜底）→ 渲染（store 会话态）。
  *
- * 组装结果（消息数组＋trace）每次生成后进 dump 设施（批B 验收断言的
- * 依赖设施——用户靠它核对各注入模块逐项可见）。
+ * 组装结果（消息数组＋trace）每次生成后进 dump 设施——用户靠它核对
+ * 各注入模块逐项可见。
  */
 import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
 import { callGenerateEndpoint, type GenerateRequestConfig } from '@/modules/apis/client';
@@ -67,7 +67,7 @@ export function isGenerating(): boolean {
  * 组装当前上下文的消息数组（dump 口与生成管线共用一条路径——dump 显示
  * 的就是实际发送的内容，不存在「展示与发送两套组装」）。
  *
- * 批C：池供给在这里现场抽取（每次组装重抽、pinned 恒在）——抽一次快照
+ * 池供给在这里现场抽取（每次组装重抽、pinned 恒在）——抽一次快照
  * 传给 sources/engine，prompts 层不回读 choice 域（单向供给）。
  */
 export async function assembleCurrent(): Promise<{ dumpText: string; messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; trace: ModuleTrace[] }> {
@@ -91,7 +91,7 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
 /**
  * 生成一次行动选项（全流程）。生成中重复调用拒绝（防并发重入）。
  * 调试开关 debugForceRaw 开启时跳过 API，用固定畸形样本走解析路径
- * （回退路径可确定性触发——批B 判据载体）。
+ * （回退路径可确定性触发——debugForceRaw 判据载体）。
  */
 export async function generateOptions(): Promise<void> {
     const store = useChoiceStore();
@@ -138,7 +138,7 @@ export async function generateOptions(): Promise<void> {
             throw new Error(`解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 200)}`);
         }
         store.succeed(report.options, report.path, assembly.dumpText);
-        // dump 落 console 一份：控制台即排障口（与 __TTK_PROMPTS__.dump 同源）
+        // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {
         if (controller.signal.aborted) {

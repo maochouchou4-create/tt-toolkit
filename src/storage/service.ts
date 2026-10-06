@@ -1,16 +1,16 @@
 /**
- * 统一设置存储（方案 §2.2 三域一层服务的批A 落地面）。
+ * 统一设置存储（三域一层服务）。
  *
  * 域划分：
  *   - 全局域 extension_settings.ttToolkit：提示词配置集、条目池、API 配置、
- *     UI 偏好、nav 迁移数据（批B/C 扩展内容域）。各内容子域自带版本机制
+ *     UI 偏好、nav 迁移数据。各内容子域自带版本机制
  *     （如 choice 域 assetVersion），顶层不再持 schema version 概念。
- *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置（批B 落）。
+ *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置。
  *     写入纪律：同步变更当前 chat_metadata + 立即 getContext().saveMetadata
  *     显式保存（host/settings.ts，无防抖无排队、目标即当前活跃聊天）。
- *   - 角色域 character.data.extensions.ttToolkit：配置绑定，归批C（配置
- *     绑定功能落地时一并实现 /api/characters/edit 全量合并通道——该通道
- *     契约届时按 TT 源码核实，严禁 saveCharacterDebounced，方案 §2.2）。
+ *   - 角色域 character.data.extensions.ttToolkit：预留域，本仓暂无写面；
+ *     若落地配置绑定须经 /api/characters/edit 全量合并通道（契约按 TT
+ *     源码核实，严禁 saveCharacterDebounced）。
  *
  * 组件与模块一律通过本服务读写，不直接碰 extension_settings/chat_metadata。
  */
@@ -46,7 +46,7 @@ export interface NavStorageState {
 export interface GlobalDomain {
     nav: NavStorageState;
     /**
-     * 旧 localStorage 遗留键一次性清理标记（批E/v1.0.0，见 legacy-wipe）：
+     * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
      * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
      */
     legacyWipeDone?: boolean;
