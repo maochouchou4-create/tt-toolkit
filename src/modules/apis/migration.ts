@@ -64,7 +64,6 @@ interface LegacyChoiceApi {
     reasoningEffort?: unknown;
     stream?: unknown;
     temperature?: unknown;
-    maxTokens?: unknown;
 }
 
 function readLegacyChoiceApis(raw: unknown): LegacyChoiceApi[] {
@@ -86,8 +85,6 @@ function readLegacyChoiceApis(raw: unknown): LegacyChoiceApi[] {
             reasoningEffort: r.reasoningEffort,
             stream: r.stream,
             temperature: r.temperature,
-            // 旧档键名是 snake_case（max_tokens）——smoke 收编断言抓出的键名错位
-            maxTokens: r.max_tokens,
         }];
     });
 }
@@ -162,16 +159,12 @@ function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
     const temperature = typeof api.temperature === 'number' && Number.isFinite(api.temperature)
         ? api.temperature
         : DEFAULT_TASK_PARAMS.temperature;
-    const maxTokens = typeof api.maxTokens === 'number' && Number.isInteger(api.maxTokens) && api.maxTokens > 0
-        ? api.maxTokens
-        : DEFAULT_TASK_PARAMS.maxTokens;
     return {
         outputContract: contract,
         reasoningEffort: effort,
         // 缺省 false 特例同 persona 侧：旧档无 stream 字段＝从不流式，缺省 true 是行为翻转
         stream: api.stream === true,
         temperature,
-        maxTokens,
     };
 }
 

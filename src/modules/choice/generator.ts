@@ -143,7 +143,6 @@ export async function generateOptions(): Promise<void> {
                 apiKey: endpoint.key,
                 model: endpoint.model,
                 temperature: task.temperature,
-                maxTokens: task.maxTokens,
                 stream: task.stream,
                 outputContract: task.outputContract,
                 reasoningEffort: task.reasoningEffort,
