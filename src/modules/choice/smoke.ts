@@ -8,7 +8,7 @@
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody } from '@/modules/apis/client';
-import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
+import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
@@ -257,15 +257,15 @@ async function runAutoGenerateChecks(): Promise<void> {
     // 池态对齐真实启动：asset 同步在场（前序 asset 区结尾池=asset 全量）
     syncAssetPool();
     // 端点在场（池写面删除后无导入链落端点；stub fetch 在 smoke.mjs 注入）——
-    // 记录原态（activeEndpointId 必须在前置之前记录），收尾统一还原
+    // 记录原态（全局活动键必须在前置之前记录），收尾统一还原
     const savedEndpoints = readApiDomain();
-    const savedActiveEndpointId = choiceStorage.readDomain().activeEndpointId;
+    const savedActiveEndpointId = readActiveEndpointId();
     const smokeEndpoint = savedEndpoints[0] ?? createEndpoint('冒烟端点');
     // stub fetch 回非流式 JSON（流式帧状态机不认）——任务档临时切非流式，收尾还原
     const savedTaskStream = choiceStorage.readDomain().task.stream;
     if (savedEndpoints.length === 0) {
         writeApiDomain([smokeEndpoint]);
-        choiceStorage.setActiveEndpoint(smokeEndpoint.id);
+        setActiveEndpointId(smokeEndpoint.id);
     }
     choiceStorage.updateTask({ stream: false });
     // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
@@ -296,8 +296,8 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);
     choiceStorage.updateGenParams({ autoGenerate: true });
 
-    // 无端点：悬空 activeEndpointId → resolveChoiceEndpoint null → console.warn（不弹 UI）
-    choiceStorage.setActiveEndpoint('no-such-endpoint');
+    // 无端点：全局活动键悬空 → resolveChoiceEndpoint null → console.warn（不弹 UI）
+    setActiveEndpointId('no-such-endpoint');
     const warns: string[] = [];
     const origWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -306,7 +306,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     emitReceived(2, 'normal');
     console.warn = origWarn;
     check('自动生成：端点未选 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('未选择生成端点')), `warns=${warns.length}`);
-    choiceStorage.setActiveEndpoint(smokeEndpoint.id);
+    setActiveEndpointId(smokeEndpoint.id);
 
     // happy path：同步返回（emit 返回时生成已启动但远未完成——fire-and-forget 实证）
     const returned = emitReceived(2, 'normal');
@@ -334,10 +334,10 @@ async function runAutoGenerateChecks(): Promise<void> {
     // globalThis）→ getBaibaiSummary 优先注入口径 → <past_events> 段可见
     check('自动生成：柏宝书在场即带（摘要注入 <past_events> 段）', store.lastDump.includes('<past_events>') && store.lastDump.includes('【柏宝书·stub】'), 'stub getInjectedHistory 链路');
 
-    // 还原端点原态（activeEndpointId 还原前置前记录的原值——含「未选」空串；
+    // 还原端点原态（全局活动键还原前置前记录的原值——含「未选」空串；
     // 本区自落的冒烟端点与选中态不留残）
     choiceStorage.updateTask({ stream: savedTaskStream });
-    choiceStorage.setActiveEndpoint(savedActiveEndpointId);
+    setActiveEndpointId(savedActiveEndpointId);
     if (savedEndpoints.length === 0) {
         writeApiDomain([]);
     }

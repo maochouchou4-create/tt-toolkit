@@ -13,6 +13,23 @@ import type { ApiEndpoint } from './types';
 /** 统一端点表域键（extension_settings.ttToolkit 下）。 */
 export const APIS_DOMAIN_KEY = 'apis';
 
+/** 全局活动端点键（extension_settings.ttToolkit 顶层；类型在 GlobalDomain）。 */
+export const ACTIVE_ENDPOINT_KEY = 'activeEndpointId';
+
+/**
+ * 读全局活动端点 id（''＝未选态：键缺席/非字符串皆归 ''）。
+ * choice 与 persona 的端点解析共用此单通道，不再各持任务域选中键。
+ */
+export function readActiveEndpointId(): string {
+    const raw = getGlobal<unknown>(ACTIVE_ENDPOINT_KEY);
+    return typeof raw === 'string' ? raw : '';
+}
+
+/** 写全局活动端点 id（API 页「使用」按钮通道；''＝清回未选态）。 */
+export function setActiveEndpointId(id: string): void {
+    setGlobal(ACTIVE_ENDPOINT_KEY, id);
+}
+
 function normalizeString(value: unknown, fallback: string): string {
     return typeof value === 'string' ? value : fallback;
 }
@@ -83,10 +100,14 @@ export function upsertEndpoint(endpoint: ApiEndpoint): void {
     });
 }
 
-/** 删除端点（choice/persona 侧的选中引用由各域 UI 自行处理）。 */
+/**
+ * 删除端点。删除的是当前活动端点时全局选中键同步清空——悬空引用没有
+ * 「上次选择」可回退，直接回「未选择」态（两任务的生成入口各自 fail fast）。
+ */
 export function deleteEndpoint(id: string): void {
     mutateApiDomain(list => {
         const idx = list.findIndex(e => e.id === id);
         if (idx >= 0) list.splice(idx, 1);
     });
+    if (readActiveEndpointId() === id) setActiveEndpointId('');
 }

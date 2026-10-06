@@ -1,8 +1,9 @@
 /**
  * choice 模块任务参数（全局域 extension_settings.ttToolkit.choice）。
  *
- * 端点身份（url/key/model）住在统一端点表（modules/apis），
- * 本域只保存 choice 任务自身的生成参数与选中端点引用。
+ * 端点身份（url/key/model）住在统一端点表（modules/apis），选中的端点
+ * 收归全局活动键（v1.4.0 起，见 apis/storage readActiveEndpointId）——
+ * 本域只保存 choice 任务自身的生成参数。
  *
  * response_format 支持度实测结论（三家端点）：
  *   - json_schema：ds 官方端点不支持（400），GG（流式）与 CC 支持；
@@ -15,7 +16,7 @@ import { getGlobal, setGlobal } from '@/storage';
 import type { OutputContract, ReasoningEffort } from '@/modules/apis/client';
 import { normalizeReasoningEffort } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
-import { readApiDomain } from '@/modules/apis/storage';
+import { readActiveEndpointId, readApiDomain } from '@/modules/apis/storage';
 import type { PoolGenParams } from './pool/types';
 import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
@@ -55,12 +56,6 @@ export interface ChoiceGenParams extends PoolGenParams {
 export interface ChoiceDomain {
     /** choice 任务参数（输出契约/思考强度/流式/温度/max_tokens） */
     task: ChoiceTaskParams;
-    /**
-     * 选中端点（引用统一端点表条目 id；空＝未配置）。字段名即存储键，
-     * 与 persona 侧的 endpointId 不同名是存量数据契约——改名即丢用户
-     * 端点选择，两侧命名差异保留。
-     */
-    activeEndpointId: string;
     gen: ChoiceGenParams;
     /** 条目池数据（两层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
@@ -102,7 +97,6 @@ function readDomain(): ChoiceDomain {
     const raw = getGlobal<Partial<ChoiceDomain>>(GLOBAL_CHOICE_KEY);
     return {
         task: normalizeTaskParams(raw?.task),
-        activeEndpointId: typeof raw?.activeEndpointId === 'string' ? raw.activeEndpointId : '',
         // 池参数同样缺省合并＋值域钳制（raw 里的历史值不可信：oversample 越界/
         // overflow 拼错都钳回合法域，旧存档无字段不崩）
         gen: normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) }),
@@ -121,10 +115,9 @@ function writeDomain(mutate: (domain: ChoiceDomain) => void): void {
     setGlobal(GLOBAL_CHOICE_KEY, domain);
 }
 
-/** 读当前生效端点（activeEndpointId 命中统一端点表；缺席返回 null＝未配置）。 */
+/** 读当前生效端点（全局活动键命中统一端点表；缺席返回 null＝未选态）。 */
 export function resolveChoiceEndpoint(): ApiEndpoint | null {
-    const d = readDomain();
-    return readApiDomain().find(e => e.id === d.activeEndpointId) ?? null;
+    return readApiDomain().find(e => e.id === readActiveEndpointId()) ?? null;
 }
 
 export const choiceStorage = {
@@ -135,12 +128,6 @@ export const choiceStorage = {
     updateTask(patch: Partial<ChoiceTaskParams>): void {
         writeDomain(d => {
             d.task = normalizeTaskParams({ ...d.task, ...patch });
-        });
-    },
-    /** 选中统一端点表中的某条端点 */
-    setActiveEndpoint(id: string): void {
-        writeDomain(d => {
-            d.activeEndpointId = id;
         });
     },
     updateGenParams(patch: Partial<ChoiceGenParams>): void {

@@ -113,7 +113,7 @@ export async function generateOptions(): Promise<void> {
             const endpoint = resolveChoiceEndpoint();
             const task = choiceStorage.readDomain().task;
             if (!endpoint) {
-                throw new Error('未选择生成端点——在「API」页添加端点后，到「选项生成」设置页选择');
+                throw new Error('未选择生成端点——到「API」页点端点条目上的「使用」按钮');
             }
             outputContract = task.outputContract;
             const requestConfig: GenerateRequestConfig = {

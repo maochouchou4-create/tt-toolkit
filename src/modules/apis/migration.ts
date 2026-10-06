@@ -1,10 +1,14 @@
 /**
  * 统一端点表一次性迁移：收编 choice 旧 apis[] 与 persona 旧
- * localConfig 端点字段进统一表，并把两侧「选中端点」重映射到统一表 id。
+ * localConfig 端点字段进统一表，并把选中端点重映射到全局活动键
+ * （extension_settings.ttToolkit.activeEndpointId——v1.4.0 起端点选择
+ * 收归全局单键，choice/persona 任务域选中字段全部退役）。
  *
- * 幂等口径：统一表在场且两侧旧字段已清＝skip（二次启动零重写）。统一表
- * 在场但旧字段仍在（上一轮写途中断的自愈场景）＝继续收编，去重后并入
- * 既有表，不重复不丢失。
+ * 幂等口径：统一表在场、两侧旧字段已清且全局活动键已落位＝skip（二次
+ * 启动零重写）。统一表在场但旧字段仍在（上一轮写途中断的自愈场景）＝
+ * 继续收编，去重后并入既有表，不重复不丢失。全局活动键提升独立幂等：
+ * 键缺席才写（值取 choice 侧旧选中——choice 是主功能，persona
+ * localConfig.endpointId 不参与提升），键已落位后旧任务域字段不再回读。
  *
  * 去重规则：normalizeApiUrl(url).toLowerCase() + model 为同一端点；choice
  * 侧优先（先收），persona 侧命中同键＝并入既有条目（mergedDuplicates）。
@@ -15,7 +19,7 @@
 import { getGlobal, setGlobal } from '@/storage/service';
 import { newId } from '@/storage';
 import { normalizeApiUrl, normalizeReasoningEffort, type ReasoningEffort } from './client';
-import { APIS_DOMAIN_KEY, readApiDomain, writeApiDomain } from './storage';
+import { ACTIVE_ENDPOINT_KEY, APIS_DOMAIN_KEY, readApiDomain, setActiveEndpointId, writeApiDomain } from './storage';
 import type { ApiEndpoint } from './types';
 import { GLOBAL_CHOICE_KEY, type ChoiceTaskParams } from '@/modules/choice/api';
 import { DEFAULT_TASK_PARAMS } from '@/modules/choice/api';
@@ -36,6 +40,8 @@ export interface ApiMigrationReport {
     mergedDuplicates: number;
     /** 收编后统一端点表条数。 */
     endpointCount: number;
+    /** 全局活动端点键本次提升落位（键缺席才发生——一次性）。 */
+    activeEndpointPromoted: boolean;
 }
 
 /** 去重键（同一 url+model 视为同一端点；url 归一后比较，模型 id 区分大小写）。 */
@@ -90,8 +96,6 @@ function readLegacyChoiceApis(raw: unknown): LegacyChoiceApi[] {
 interface PersonaLegacyApi {
     profiles: Array<{ id: string; name: string; url: string; key: string; model: string }>;
     custom: { id: string; name: string; url: string; key: string; model: string } | null;
-    activeProfileId: string;
-    apiSource: string;
     stream: boolean;
     thinkingEffort: ReasoningEffort;
     timeoutSec: number;
@@ -120,7 +124,6 @@ function readPersonaLegacyApi(): PersonaLegacyApi | null {
         })
         : [];
     const activeProfileId = typeof local.activeApiProfileId === 'string' ? local.activeApiProfileId : 'custom';
-    const apiSource = typeof local.apiSource === 'string' ? local.apiSource : 'main';
     const customUrl = typeof local.indepApiUrl === 'string' ? local.indepApiUrl : '';
     const customKey = typeof local.indepApiKey === 'string' ? local.indepApiKey : '';
     const customModel = typeof local.indepApiModel === 'string' ? local.indepApiModel : '';
@@ -142,8 +145,6 @@ function readPersonaLegacyApi(): PersonaLegacyApi | null {
         custom: meaningfulCustom
             ? { id: newEndpointId(), name: '当前独立 API', url: customUrl, key: customKey, model: customModel }
             : null,
-        activeProfileId,
-        apiSource,
         // 缺省 false 特例（不并入活域 normalize 的缺省 true）：旧档无流式
         // 字段＝用户从不流式，收编成 true 是升级行为翻转——旧用户行为保真
         stream: typeof local.stream === 'boolean' ? local.stream : (local.indepStream === true),
@@ -175,15 +176,16 @@ function legacyTaskParams(api: LegacyChoiceApi): ChoiceTaskParams {
 }
 
 export function migrateApiDomain(): ApiMigrationReport {
-    const report: ApiMigrationReport = { skipped: false, collectedFrom: [], idRemaps: [], mergedDuplicates: 0, endpointCount: 0 };
+    const report: ApiMigrationReport = { skipped: false, collectedFrom: [], idRemaps: [], mergedDuplicates: 0, endpointCount: 0, activeEndpointPromoted: false };
 
     const rawChoice = getGlobal(GLOBAL_CHOICE_KEY);
     const choiceDomain = (rawChoice && typeof rawChoice === 'object' ? rawChoice : null) as Record<string, unknown> | null;
     const legacyChoiceApis = readLegacyChoiceApis(rawChoice);
     const personaLegacy = readPersonaLegacyApi();
     const unifiedPresent = getGlobal(APIS_DOMAIN_KEY) !== undefined;
+    const globalActivePresent = getGlobal(ACTIVE_ENDPOINT_KEY) !== undefined;
 
-    if (unifiedPresent && legacyChoiceApis.length === 0 && !personaLegacy && !choiceDomain?.apis) {
+    if (unifiedPresent && globalActivePresent && legacyChoiceApis.length === 0 && !personaLegacy && !choiceDomain?.apis) {
         report.skipped = true;
         report.endpointCount = readApiDomain().length;
         return report;
@@ -225,14 +227,13 @@ export function migrateApiDomain(): ApiMigrationReport {
     }
     if (legacyChoiceApis.length > 0) report.collectedFrom.push('choice');
 
-    // persona 侧
-    const personaIdMap = new Map<string, string>();
+    // persona 侧（只收编进表；选中不再重映射——端点选择归全局键）
     if (personaLegacy) {
         for (const profile of personaLegacy.profiles) {
-            personaIdMap.set(profile.id, ingest(profile, true));
+            ingest(profile, true);
         }
         if (personaLegacy.custom) {
-            personaIdMap.set(personaLegacy.custom.id, ingest(personaLegacy.custom, true));
+            ingest(personaLegacy.custom, true);
         }
         report.collectedFrom.push('persona');
     }
@@ -241,33 +242,39 @@ export function migrateApiDomain(): ApiMigrationReport {
     writeApiDomain(endpoints);
     report.endpointCount = endpoints.length;
 
-    // ---- choice 域 v2 重写（旧 apis/activeApiId 自然退休） ----
-    if (choiceDomain) {
+    // ---- 全局活动端点提升（键缺席才写，choice 侧优先） ----
+    let resolvedActiveId = '';
+    if (legacyChoiceApis.length > 0) {
+        // v1 存档：activeApiId 重映射进统一表（缺省取首条，与旧口径一致）
+        const activeRaw = typeof choiceDomain?.activeApiId === 'string' ? choiceDomain.activeApiId.trim() : '';
+        const active = legacyChoiceApis.find(a => a.id === activeRaw) ?? legacyChoiceApis[0] ?? null;
+        resolvedActiveId = active ? choiceIdMap.get(active.id) ?? '' : '';
+    } else if (typeof choiceDomain?.activeEndpointId === 'string') {
+        // v1.3 存量：choice 任务域旧选中键直接提升（persona 旧 endpointId 不参与）
+        resolvedActiveId = choiceDomain.activeEndpointId;
+    }
+    if (!globalActivePresent) {
+        setActiveEndpointId(resolvedActiveId);
+        report.activeEndpointPromoted = true;
+    }
+
+    // ---- choice 域 v2 重写（仅 v1 存档：旧 apis/activeApiId 收编落定后
+    // 整键重写退休旧字段；v1.3 存量的 choice 域已是 v2 形状，任务参数不
+    // 经此路径覆盖——其 activeEndpointId 旧键由读侧 normalize 丢弃面退休） ----
+    if (choiceDomain && legacyChoiceApis.length > 0) {
         const activeRaw = typeof choiceDomain.activeApiId === 'string' ? choiceDomain.activeApiId.trim() : '';
         const active = legacyChoiceApis.find(a => a.id === activeRaw) ?? legacyChoiceApis[0] ?? null;
-        const activeEndpointId = active ? (choiceIdMap.get(active.id) ?? '') : '';
         const task = active ? legacyTaskParams(active) : DEFAULT_TASK_PARAMS;
         setGlobal(GLOBAL_CHOICE_KEY, {
             task,
-            activeEndpointId,
             gen: choiceDomain.gen ?? undefined,
             pool: choiceDomain.pool ?? undefined,
         });
     }
 
-    // ---- persona localConfig v2 重写（endpointId 重映射＋任务参数收编） ----
+    // ---- persona localConfig v2 重写（任务参数收编；端点选中归全局键） ----
     if (personaLegacy) {
-        // persona 选中端点：主 API＝无端点；配置档＝映射后 id；custom＝现值端点
-        let endpointId = '';
-        if (personaLegacy.apiSource !== 'main') {
-            if (personaLegacy.activeProfileId === 'custom') {
-                endpointId = personaLegacy.custom ? personaIdMap.get(personaLegacy.custom.id) ?? '' : '';
-            } else {
-                endpointId = personaIdMap.get(personaLegacy.activeProfileId) ?? '';
-            }
-        }
         writePersonaDomain(domain => {
-            domain.localConfig.endpointId = endpointId;
             domain.localConfig.stream = personaLegacy.stream;
             domain.localConfig.thinkingEffort = personaLegacy.thinkingEffort;
             domain.localConfig.timeoutSec = personaLegacy.timeoutSec;

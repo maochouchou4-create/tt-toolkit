@@ -6,7 +6,7 @@
  */
 
 import { defineStore } from 'pinia';
-import { createEndpoint, deleteEndpoint, readApiDomain, upsertEndpoint } from './storage';
+import { createEndpoint, deleteEndpoint, readActiveEndpointId, readApiDomain, resolveEndpointById, setActiveEndpointId, upsertEndpoint } from './storage';
 import type { ApiEndpoint } from './types';
 import { fetchModels, testConnection } from './client';
 
@@ -30,6 +30,17 @@ export const useApisStore = defineStore('tt-apis', {
             void this.revision;
             return readApiDomain();
         },
+        /** 全局活动端点 id（''＝未选态；写穿「使用」/删除联动经 revision 失效）。 */
+        activeEndpointId(): string {
+            void this.revision;
+            return readActiveEndpointId();
+        },
+        /** 全局活动端点实体（未选/指向已删端点＝null）。 */
+        activeEndpoint(): ApiEndpoint | null {
+            void this.revision;
+            const id = this.activeEndpointId;
+            return id === '' ? null : resolveEndpointById(id);
+        },
     },
     actions: {
         /** 增改单条端点（按 id 整体替换；新增即追加）。 */
@@ -37,9 +48,14 @@ export const useApisStore = defineStore('tt-apis', {
             upsertEndpoint(endpoint);
             this.revision += 1;
         },
-        /** 删除端点（UI 层已 confirm；两侧域的选中引用悬空＝未配置引导兜底）。 */
+        /** 删除端点（UI 层已 confirm；删活动端点时全局选中键由存储层联动清空）。 */
         removeEndpoint(id: string) {
             deleteEndpoint(id);
+            this.revision += 1;
+        },
+        /** 「使用」该端点：写全局活动键（两任务即时生效）。 */
+        useEndpoint(id: string) {
+            setActiveEndpointId(id);
             this.revision += 1;
         },
         /** 新建或复制端点骨架进编辑区。 */

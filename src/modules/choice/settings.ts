@@ -1,8 +1,9 @@
 /**
- * choice 设置 store（Pinia）：任务参数＋选中端点引用＋生成参数。
+ * choice 设置 store（Pinia）：任务参数＋生成参数。
  * 真相源＝storage 全局域（choice 键）；读透传＋写穿＋revision 失效信号
  * （nav/prompts store 同款纪律，store 不落值快照）。
- * 端点实体（增删改查/测连/拉模型）归统一 apis 域与 apis store。
+ * 端点实体（增删改查/测连/拉模型）与端点选择（全局活动键）归 apis 域与
+ * apis store，本 store 不持端点状态。
  */
 import { defineStore } from 'pinia';
 import { choiceStorage, type ChoiceTaskParams, type ChoiceGenParams } from './api';
@@ -18,11 +19,6 @@ export const useChoiceSettingsStore = defineStore('tt-choice-settings', {
             void this.revision;
             return choiceStorage.readDomain().task;
         },
-        /** 选中统一端点 id（引用 apis 全局域；实体解析在 generator）。 */
-        activeEndpointId(): string {
-            void this.revision;
-            return choiceStorage.readDomain().activeEndpointId;
-        },
         gen(): ChoiceGenParams {
             void this.revision;
             return choiceStorage.readDomain().gen;
@@ -31,11 +27,6 @@ export const useChoiceSettingsStore = defineStore('tt-choice-settings', {
     actions: {
         updateTask(patch: Partial<ChoiceTaskParams>) {
             choiceStorage.updateTask(patch);
-            this.revision++;
-        },
-        /** 切换生成通道（引用统一端点表 id）。 */
-        setActiveEndpoint(id: string) {
-            choiceStorage.setActiveEndpoint(id);
             this.revision++;
         },
         updateGen(patch: Partial<ChoiceGenParams>) {

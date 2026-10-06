@@ -29,7 +29,7 @@ import {
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { testConnection } from '@/modules/apis/client';
-import { resolveEndpointById } from '@/modules/apis/storage';
+import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
@@ -45,11 +45,11 @@ interface LastRunDescriptor {
 }
 
 /**
- * 生成调用面配置解析：endpointId → 统一端点表实体。端点缺失（未配置或
+ * 生成调用面配置解析：全局活动键 → 统一端点表实体。端点缺失（未选择或
  * 已被删除）返回 null，由 generate/reroll 统一 fail fast。
  */
 function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
-    const endpoint = resolveEndpointById(config.endpointId);
+    const endpoint = resolveEndpointById(readActiveEndpointId());
     if (!endpoint) return null;
     return {
         endpoint,
@@ -219,20 +219,14 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 生成通道分区交互 ----------------
 
-        /** 保存生成通道配置（端点引用＋任务参数）。 */
+        /** 保存生成通道配置（persona 任务参数；端点选择在「API」页）。 */
         saveConfig() {
             this.persistConfig();
             toast(TEXT.TOAST_CONFIG_SAVED);
         },
 
-        /** 切换统一端点（立即落域；端点实体在 API 页维护）。 */
-        setEndpointId(id: string) {
-            this.config.endpointId = id;
-            this.persistConfig();
-        },
-
         async runTestConnection() {
-            const endpoint = resolveEndpointById(this.config.endpointId);
+            const endpoint = resolveEndpointById(readActiveEndpointId());
             if (!endpoint) {
                 this.connectionStatus = TEXT.TOAST_NO_ENDPOINT;
                 toast(TEXT.TOAST_NO_ENDPOINT, 'warning');

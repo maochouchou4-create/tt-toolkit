@@ -2,7 +2,7 @@
 
 TauriTavern 第三方扩展：为沉浸式角色扮演提供一套开箱即用的创作辅助工具——行动选项生成、条目池抽取注入、统一 API 端点管理、人设编织、消息楼层导航与剧情走向指引。
 
-- 版本：v1.3.0
+- 版本：v1.4.0
 - 主页：<https://github.com/maochouchou4-create/tt-toolkit>
 
 ## 安装与更新

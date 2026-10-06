@@ -2,8 +2,8 @@
   <!--
     「人设」tab（PersonaWeaver 概念的壳内简化形态）。
     单 tab 纵向卡片流：人设编织＋落库与载入两卡；生成通道与生成参考
-    收 <details> 折叠块。生成通道＝统一端点表引用＋persona 任务参数
-    （端点身份在「API」页维护）。
+    收 <details> 折叠块。生成通道＝全局活动端点只读展示＋persona 任务参数
+    （端点身份与选择都在「API」页维护）。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系），类名前缀 tt-persona-。
   -->
   <div class="tt-persona-tab">
@@ -60,23 +60,18 @@
     </div>
 
     <!-- ================= 折叠：生成通道 ================= -->
-    <!-- 初始展开态＝setup 快照（未配端点时展开保证首用引导可见），选中端点后不强制收起 -->
+    <!-- 初始展开态＝setup 快照（未选端点时展开保证首用引导可见），选中端点后不强制收起 -->
     <details :open="channelFoldOpen" class="tt-persona-fold">
       <summary>生成通道</summary>
       <div class="tt-card">
         <div class="tt-card-sub">
-          人设生成使用「API」页统一维护的端点；此处只选端点与调人设任务参数。
+          人设生成使用全局活动端点（在「API」页点「使用」切换）；此处只调人设任务参数。
         </div>
 
-        <label v-if="apis.endpoints.length" class="tt-persona-field">
-          <span>生成端点</span>
-          <select :value="store.config.endpointId" class="tt-persona-select" @change="onEndpointChange">
-            <option value="">（选择端点）</option>
-            <option v-for="e in apis.endpoints" :key="e.id" :value="e.id">{{ e.name || '（未命名）' }} · {{ e.model || '未填模型' }}</option>
-          </select>
-        </label>
-        <div v-else class="tt-persona-empty">
-          未配置端点——<button type="button" class="tt-persona-link" @click="goApi">到「API」页添加</button>
+        <div class="tt-persona-field">
+          <span>当前端点</span>
+          <span class="tt-persona-endpoint-value">{{ apis.activeEndpoint ? `${apis.activeEndpoint.name || '（未命名）'} · ${apis.activeEndpoint.model || '未填模型'}` : '未选择' }}</span>
+          <button type="button" class="tt-persona-link" @click="goApi">到「API」页切换</button>
         </div>
 
         <label class="tt-persona-field">
@@ -99,7 +94,7 @@
         <div class="tt-persona-note">思考强度：仅部分端点支持，发错档会被端点忽略或报错，默认不发</div>
 
         <div class="tt-actions">
-          <button type="button" :disabled="store.config.endpointId === ''" @click="store.runTestConnection()">测试连接</button>
+          <button type="button" :disabled="!apis.activeEndpoint" @click="store.runTestConnection()">测试连接</button>
         </div>
         <div v-if="store.connectionStatus" class="tt-persona-conn">{{ store.connectionStatus }}</div>
       </div>
@@ -149,10 +144,10 @@ const shell = useShellStore();
 /** 载入世界书条目的下拉选择值（索引字符串）。 */
 const loadCandidateKey = ref('');
 
-/** 生成通道折叠的初始展开态：未配端点时展开（首用引导可见）。
+/** 生成通道折叠的初始展开态：未选端点时展开（首用引导可见）。
  *  只做 setup 一次性判定——绑定受控 :open 会在选中端点瞬间强制收起，
  *  把超时/流式/测连在配置流正中藏走；快照后用户开合自由。 */
-const channelFoldOpen = store.config.endpointId === '';
+const channelFoldOpen = apis.activeEndpointId === '';
 
 function confirmClear(): void {
     if (!confirm('清空需求/结果？（已落库的配置不受影响）')) return;
@@ -179,11 +174,6 @@ function onPresetChange(event: Event): void {
 function onGreetingChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
     store.selectGreeting(value === '' ? null : Number(value));
-}
-
-/** 生成通道：端点选择写穿（setEndpointId 内部即时落域）。 */
-function onEndpointChange(event: Event): void {
-    store.setEndpointId((event.target as HTMLSelectElement).value);
 }
 
 function onTimeoutChange(event: Event): void {
@@ -326,6 +316,15 @@ onActivated(() => { store.refreshHostData(); });
     min-width: 9em;
     opacity: 0.8;
     flex-shrink: 0;
+}
+
+/* 全局活动端点只读值：占满中段（选择器带父类限定压过上面的 min-width 基线） */
+.tt-persona-field > .tt-persona-endpoint-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tt-persona-field input,
