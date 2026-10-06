@@ -39,8 +39,12 @@
  *   src/host/headers.ts 三级降级装配）。
  */
 import { getTavernRequestHeaders } from '@/host';
+import { createTtlog } from '@/host/ttlog';
 import { serializeMessages, useRunlogStore } from '@/modules/runlog/store';
 import type { RunTask } from '@/modules/runlog/types';
+import { resolveJailbreakMessages } from './preset-inject';
+
+const log = createTtlog('modules/apis/client');
 
 /** 组装消息（role 三态分离，不拼单段塞单条——架构约束沿 fork 实证形态）。 */
 export interface GenerateMessage {
@@ -296,9 +300,31 @@ async function readStream(response: Response): Promise<{ content: string; finish
 }
 
 /**
+ * 前缀拼装唯一实现：实发数组与哨兵预览同源——「每个出站请求必须带
+ * 破限前缀」在这里结构成立，不靠调用点纪律。空序列原样透传（不复制
+ * 数组），选中预设时前缀按原角色插最前。
+ */
+function composeOutbound(messages: GenerateMessage[]): GenerateMessage[] {
+    const jb = resolveJailbreakMessages();
+    return jb.length > 0 ? [...jb, ...messages] : messages;
+}
+
+/**
+ * 哨兵补记用：与实发同源的出站序列化（传输层在外的任务层记录
+ * requestText 时用它，禁止退化成 serializeMessages——那会丢前缀）。
+ */
+export function serializeOutbound(messages: GenerateMessage[]): string {
+    return serializeMessages(composeOutbound(messages));
+}
+
+/**
  * 调用宿主生成端点。非流式：json.choices[0].message.content；
  * 流式：SSE delta 拼接。HTTP 非 2xx / json.error 均抛错（错误文本
  * 供上层提示与排障，Fail Fast 不吞）。
+ *
+ * 出站自动前置破限前缀（composeOutbound）：传入 messages ≠ 实发内容，
+ * runlog 的 requestText 与 fetch body 序列化同一个 outbound 数组——
+ * 日志看到的即模型收到的。
  *
  * 运行日志观测点（choice/persona 通吃的单一传输层）：成功失败（含
  * abort/流读失败）全量 commit 一条记录后原样抛/返——任务层只凭返回的
@@ -311,7 +337,11 @@ export async function callGenerateEndpoint(
 ): Promise<GenerateResult> {
     const startedAt = performance.now();
     const runlogStore = useRunlogStore();
-    const requestText = serializeMessages(messages);
+    const outbound = composeOutbound(messages);
+    if (outbound.length > messages.length) {
+        log.info(`破限注入 (${config.task}): ${outbound.length - messages.length} 条前缀`);
+    }
+    const requestText = serializeMessages(outbound);
     const commitRun = (ok: boolean, responseText: string, error?: string): number =>
         runlogStore.commit({
             at: new Date().toISOString(),
@@ -332,7 +362,7 @@ export async function callGenerateEndpoint(
         const response = await fetch(GENERATE_URL, {
             method: 'POST',
             headers: getTavernRequestHeaders(),
-            body: JSON.stringify(buildGenerateBody(messages, config)),
+            body: JSON.stringify(buildGenerateBody(outbound, config)),
             cache: 'no-cache',
             signal,
         });

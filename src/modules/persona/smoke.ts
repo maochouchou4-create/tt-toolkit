@@ -651,30 +651,41 @@ async function runPersonaE2EChecks(): Promise<void> {
             `result=${store.resultText}`);
 
         // 破限注入 e2e：选中「冒烟破限」→ 两段请求的首条消息＝assistant 开场
-        // 原文（SSE 桩按调用序回内容，生成正常完成）
+        // 原文（SSE 桩按调用序回内容，生成正常完成）。「恰一次」机判锁双注入：
+        // 前缀在每段全文恰出现一次——调用点漏注与重复注都翻红。key 写入放
+        // try/finally 复位：e2e 中途 FAIL 不把键泄漏给后续用例（同进程共享
+        // extension_settings 单例，键状态非隔离）
+        const countOccurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
         writeJailbreakPreset('冒烟破限');
-        store.requestText = '破限注入试验';
-        await store.generate();
-        const jbFirst = (calls[2].body.messages as Array<{ role: string; content: string }>)[0];
-        const jbSecond = (calls[3].body.messages as Array<{ role: string; content: string }>)[0];
-        check('端到端：破限注入前缀按原角色插两段请求最前',
-            calls.length === 4
-            && jbFirst.role === 'assistant' && jbFirst.content === '破限开场白'
-            && jbSecond.role === 'assistant' && jbSecond.content === '破限开场白'
-            && (calls[2].body.messages as unknown[]).length > 1,
-            `first=${JSON.stringify(jbFirst)} calls=${calls.length}`);
+        try {
+            store.requestText = '破限注入试验';
+            await store.generate();
+            const jbFirstMessages = (calls[2]?.body.messages ?? []) as Array<{ role: string; content: string }>;
+            const jbSecondMessages = (calls[3]?.body.messages ?? []) as Array<{ role: string; content: string }>;
+            const jbFirst = jbFirstMessages[0];
+            const jbSecond = jbSecondMessages[0];
+            check('端到端：破限注入前缀按原角色恰一次插两段请求最前（双注入守门）',
+                calls.length === 4
+                && jbFirst.role === 'assistant' && jbFirst.content === '破限开场白'
+                && jbSecond.role === 'assistant' && jbSecond.content === '破限开场白'
+                && countOccurrences(jbFirstMessages.map(m => m.content).join('\n'), '破限开场白') === 1
+                && countOccurrences(jbSecondMessages.map(m => m.content).join('\n'), '破限开场白') === 1
+                && jbFirstMessages.length > 1,
+                `first=${JSON.stringify(jbFirst)} calls=${calls.length}`);
 
-        // 悬空选中：fail-soft——生成照常、首条回到任务消息（无注入）
-        writeJailbreakPreset('不存在预设');
-        store.requestText = '悬空破限试验';
-        await store.generate();
-        const noJbFirst = (calls[4].body.messages as Array<{ role: string; content: string }>)[0];
-        check('端到端：破限预设悬空时生成照常且不注入',
-            calls.length === 6
-            && noJbFirst.role !== 'assistant' && noJbFirst.content !== '破限开场白'
-            && store.isProcessing === false,
-            `first=${JSON.stringify(noJbFirst)} calls=${calls.length}`);
-        writeJailbreakPreset('');
+            // 悬空选中：fail-soft——生成照常、首条回到任务消息（无注入）
+            writeJailbreakPreset('不存在预设');
+            store.requestText = '悬空破限试验';
+            await store.generate();
+            const noJbFirst = (calls[4]?.body.messages as Array<{ role: string; content: string }> ?? [])[0];
+            check('端到端：破限预设悬空时生成照常且不注入',
+                calls.length === 6
+                && noJbFirst.role !== 'assistant' && noJbFirst.content !== '破限开场白'
+                && store.isProcessing === false,
+                `first=${JSON.stringify(noJbFirst)} calls=${calls.length}`);
+        } finally {
+            writeJailbreakPreset('');
+        }
 
         // 取消通道：挂起不响应的端点（只认 signal）＋「停止」→ 中断传播、
         // 互斥复位、结果不误写、取消不作错误弹报（lastRun.request 换种子

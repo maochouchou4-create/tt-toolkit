@@ -27,7 +27,6 @@
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries } from '@/host';
 import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
-import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
     assembleMessages,
@@ -159,9 +158,6 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
     const { config, messages, trace, prefillContent, label } = params;
     const timeoutSec = TASK_DEFAULTS.personaTimeoutSec;
     log.info(`发送请求 (${label})，超时 ${timeoutSec}s，流式 ${String(TASK_DEFAULTS.stream)}`);
-    // 破限注入前缀：两段各带（定调对每次请求都要在场）；原角色插最前
-    const jbPrefix = resolveJailbreakMessages();
-    if (jbPrefix.length > 0) log.info(`破限注入 (${label}): ${jbPrefix.length} 条前缀`);
     log.info(`模块管线 (${label}): ${renderTraceCompact({ messages, trace })}`);
 
     let responseContent = '';
@@ -179,9 +175,12 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
     }, timeoutSec * 1000);
 
     try {
-        const promptArray: GenerateMessage[] = [...jbPrefix, ...messages].map(m => ({ ...m }));
-        const promptArrayNoPrefill = [...jbPrefix, ...messages].map(m => ({ ...m }));
-        if (prefillContent) promptArray.push({ role: 'assistant', content: prefillContent });
+        // 破限前缀由传输层自动前置（client composeOutbound）；prefill 由
+        // 调用方追加尾部，重试需要无 prefill 的独立数组
+        const promptArray: GenerateMessage[] = prefillContent
+            ? [...messages, { role: 'assistant', content: prefillContent }]
+            : messages;
+        const promptArrayNoPrefill: GenerateMessage[] = messages;
 
         const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
             const result = await callGenerateEndpoint(messages, {
