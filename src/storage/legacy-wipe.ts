@@ -77,8 +77,8 @@ export function wipeLegacyKeysOnce(): LegacyWipeReport {
 // 烟雾机判（node 冒烟里紧随启动管线收口；persona smoke 会中途回收旧键并
 // 重置 persona 域，本机判必须在 runPersonaSmoke 之前跑）。
 // 判别式：迁移数据「未受损」用与缺省值相反的种子态证明——
-//   userContext.hasResult 缺省 false（种子 true 只能来自 smoke.mjs 预种
-//   ＋boot 迁移搬运）；pinnedBooks 缺省 []（种子 length 1）；nav.autoTop
+//   userContext.request 缺省 ''（种子非空只能来自 smoke.mjs 预种＋boot
+//   迁移搬运）；pinnedBooks 缺省 []（种子 length 1）；nav.autoTop
 //   缺省 true（种子关态 false）。跨文件不共享标记字面量。
 // ---------------------------------------------------------------------------
 
@@ -122,7 +122,7 @@ function seedAll(): void {
     seedKey(LEGACY_KEYS.state, JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } }));
     seedKey(LEGACY_KEYS.wiSelection, JSON.stringify({ global: { demo: ['1'] } }));
     seedKey(LEGACY_KEYS.uiState, JSON.stringify({ generationPreset: 'pure' }));
-    seedKey(LEGACY_KEYS.dataUser, JSON.stringify({ request: 'wipe-smoke 场景种子', result: '', hasResult: false }));
+    seedKey(LEGACY_KEYS.dataUser, JSON.stringify({ request: 'wipe-smoke 场景种子', result: '' }));
     seedKey(LEGACY_KEYS.pinnedBooks, JSON.stringify(['wipe-smoke 场景种子']));
 }
 
@@ -140,7 +140,7 @@ export function runLegacyWipeSmoke(): void {
         const persona = readPersonaDomain();
         check(
             'boot：persona 域迁移数据未受损（种子 userContext 存活＝迁移先于清理）',
-            persona.userContext.hasResult === true && persona.userContext.request !== '',
+            persona.userContext.request !== '',
         );
         check('boot：persona 域钉选迁移数据未受损（种子书存活）', persona.pinnedBooks.length === 1);
         check('boot：nav 域迁移数据未受损（种子关态存活）', getNavState().autoTop === false);

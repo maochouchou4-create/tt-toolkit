@@ -1,6 +1,6 @@
 /**
- * 任务默认模板（整合轮II 起四任务：choice 选项生成＋persona 三段——
- * 策展/填充/润色）。choice 部分＝m03359 拍板砍配置集后的唯一模板
+ * 任务默认模板（整合轮II 起三任务：choice 选项生成＋persona 两段——
+ * 策展/填充）。choice 部分＝m03359 拍板砍配置集后的唯一模板
  * （方案 §0 病因判定：fork 出厂模板是上游猫娘 RP 特化演化，文本不搬
  * 不抄，按 §2.3 制版原则为「通用 RP + flash 级模型」重写）；persona
  * 部分＝PersonaWeaver fork 默认提示词原样平移（见文末分节注释）。
@@ -270,8 +270,8 @@ const PERSONA_CURATOR_PROMPT = `[任务：策展人设 schema]
 [行动]：
 现在输出策展好的 YAML schema。`;
 
-/** 人设填充/润色指令（persona_gen 与 persona_refine 共用正文）。 */
-const PERSONA_GEN_PROMPT = `[任务：生成/润色用户人设]
+/** 人设填充指令（persona_gen 任务）。 */
+const PERSONA_GEN_PROMPT = `[任务：生成用户人设]
 [目标对象："{{user}}"]
 [背景：本档案是 {{user}} 的长期人设，供 AI 在整个扮演过程中稳定呈现这个角色——它定义的是不随剧情改变的「他是谁」与「如何扮演」。当前处境、人际关系与剧情进展由对话本身自然演化，档案不追踪这些动态。]
 
@@ -314,7 +314,6 @@ const PERSONA_GEN_PROMPT = `[任务：生成/润色用户人设]
    - 用「有时」「可能」「某种程度上」类含糊词替代具体事实。
 5. 强制完整——绝不留空。每个叶子字段都必须填入具体、非空的值。不得输出空串、null、"-"，也不得输出「未知」「unknown」「N/A」「待定」「TBD」「暂无」之类的偷懒占位。若素材或用户请求无法直接确定某字段，生成与人设、上下文、世界观最相符的合理值——但不得与既有证据矛盾。
 6. 生命周期/时间线例外——仅当字段内容对应角色尚未到达或经历的人生阶段、年龄段或既定事件时（如 24 岁角色的「中年_35至今」「老年」阶段；未出生的后代；既定剧情中尚未发生的情节），叶子字段才可包含有叙事意义的占位。此时必须写出明确说明原因的上下文占位，如「尚未发生（角色现年X岁，未达此阶段）」「未到该阶段」「剧情尚未触及」。此规则通用适用于任何模板的时间锁/未来锁字段，包括自定义模板。原因必须具体——不带解释的裸「未知」「N/A」「TBD」仍然禁止。
-7. 润色/修补模式——若输入中提供了既有目标暂存（Target Buffer），将其视为基线。完整保留未被用户修补指令明确触及的字段，不得清空、留白、缩短或用占位符替换未触及字段。只修改修补指令指向的字段（及其直接牵连的字段）。此前空白的字段现在必须填上（遵循规则 5、6）。文风铁律（规则 4）只约束本次新写或改写的值——未触及字段哪怕文风偏旧也原样保留，不构成重写理由。
 
 [约束]：不得包含任何「小剧场」、成段场景描写、内心独白或 CoT 状态栏——值内「规则 3 上限内的典型情境＋反应」不算场景描写。严格只输出 YAML 数据。schema 中每个叶子键都必须有非空值（按规则 6 带完整解释的时间线占位视为非空）。完成前默默自查，把仍然空着的字段补齐。值保持规则 3 的精炼；任何值不得复述世界设定内容。
 
@@ -348,7 +347,7 @@ function personaPreambleModules() {
 /**
  * 按任务键取默认配置（恢复默认/读侧补缺共用）。choice 分支＝
  * createDefaultPromptConfig() 原样（输出逐字节不变——choice smoke
- * 回归红线）；persona 三任务＝前缀注入模块＋fork 指令正文。
+ * 回归红线）；persona 两任务＝前缀注入模块＋fork 指令正文。
  */
 export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
     switch (task) {
@@ -381,23 +380,6 @@ export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
                         kind: 'text',
                         id: 'persona_gen_prompt',
                         name: '生成指令',
-                        role: 'user',
-                        order: 30,
-                        enabled: true,
-                        content: PERSONA_GEN_PROMPT,
-                    },
-                ],
-            };
-        case 'persona_refine':
-            return {
-                id: 'default',
-                name: '默认',
-                modules: [
-                    ...personaPreambleModules(),
-                    {
-                        kind: 'text',
-                        id: 'persona_refine_prompt',
-                        name: '润色指令',
                         role: 'user',
                         order: 30,
                         enabled: true,

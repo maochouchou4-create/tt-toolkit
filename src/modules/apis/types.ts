@@ -2,7 +2,7 @@
  * 统一 API 端点域类型（整合轮II）。
  *
  * 端点表是全模块共享的单一真相源：choice（选项生成）与 persona（人设
- * 生成/润色）不再各配各的 API，端点身份（地址/密钥/模型）全部取自本表；
+ * 生成）不再各配各的 API，端点身份（地址/密钥/模型）全部取自本表；
  * 任务参数（输出契约/思考强度/流式等）留在各自任务域。
  */
 import type { OutputContract, ReasoningEffort } from './client';

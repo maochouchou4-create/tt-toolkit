@@ -7,8 +7,8 @@
  *
  * 存储落点（方案 §2.2；整合轮II 升 Record）：
  *   - 全局域 extension_settings.ttToolkit：promptConfigs
- *     （Record<taskKey, PromptConfig>，四任务各一套——choice 选项生成＋
- *     persona 策展/填充/润色；旧数组档读侧迁移为 {choice: 旧生效套}，
+ *     （Record<taskKey, PromptConfig>，三任务各一套——choice 选项生成＋
+ *     persona 策展/填充；旧数组档读侧迁移为 {choice: 旧生效套}，
  *     一次性写回，二次启动零改写）、
  *     directionPresets（用户自建走向预设列表——G4）；
  *     整合轮II 验收修整：externalInjections 键随编辑面删除而退休
@@ -38,7 +38,7 @@ const CHAT_STORY_DIRECTION_KEY = 'storyDirection';
 
 /** 全局域整体结构（批B 落的 prompts 命名空间；choice 侧另有自己的键）。 */
 export interface PromptGlobalDomain {
-    /** 四任务配置（Record——整合轮II；promptActiveId 旧键随之退休，不再写入） */
+    /** 三任务配置（Record——整合轮II；promptActiveId 旧键随之退休，不再写入） */
     promptConfigs: Record<TaskKey, PromptConfig>;
 }
 
@@ -68,7 +68,8 @@ function readPromptDomain(): PromptGlobalDomain {
             if (isConfigShape(record[task])) configs[task] = record[task];
         }
     }
-    // 补缺四键（首次启动全默认；旧档补 persona 三键）
+    // 补缺三键（首次启动全默认；旧档补 persona 两键；存量已退休任务键的
+    // 配置读侧出局——TASK_KEYS 收窄后未知键在写回时自然消失）
     for (const task of TASK_KEYS) {
         if (configs[task]) continue;
         configs[task] = createTaskDefaultConfig(task);
@@ -128,7 +129,7 @@ export const usePromptsStore = defineStore('tt-prompts', {
         lastTraceText: '',
     }),
     getters: {
-        /** 四任务配置全景（编辑面已删；读侧 getter 保留——任务域枚举口） */
+        /** 三任务配置全景（编辑面已删；读侧 getter 保留——任务域枚举口） */
         taskConfigs(): Record<TaskKey, PromptConfig> {
             void this.revision;
             return readPromptDomain().promptConfigs;

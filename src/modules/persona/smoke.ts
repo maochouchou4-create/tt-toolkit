@@ -1,5 +1,5 @@
 /**
- * node 冒烟的整合轮II 机判部分：persona 迁移幂等＋统一端点收编＋四任务
+ * node 冒烟的整合轮II 机判部分：persona 迁移幂等＋统一端点收编＋三任务
  * 提示词引擎＋api 客户端形状＋store 互斥。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
@@ -12,7 +12,6 @@ import { getGlobal, setGlobal } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS, clampTimeout } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
-import { computeDiffBlocks, assembleDiffResult } from './diff';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { migrateApiDomain } from '@/modules/apis/migration';
 import { readApiDomain, writeApiDomain } from '@/modules/apis/storage';
@@ -84,7 +83,7 @@ function runMigrationChecks(): void {
         !first.skipped && first.migratedKeys.length === 0
         && defaults.localConfig.endpointId === ''
         && defaults.uiState.generationPreset === 'current'
-        && defaults.userContext.request === '' && !defaults.userContext.hasResult,
+        && defaults.userContext.request === '' && defaults.userContext.result === '',
         `skipped=${first.skipped} migrated=${first.migratedKeys.join(',') || '无'}`);
 
     // 1b. 预置 5 旧键 + 1 退休键 → 域缺席 → 搬入
@@ -135,8 +134,9 @@ function runMigrationChecks(): void {
     check('迁移：wiSelection/uiState/userContext/pinnedBooks 形状正确（淘汰字段丢弃）',
         JSON.stringify(migrated.wiSelection) === JSON.stringify({ charA: { 'Book One': ['1', '2'] } })
         && migrated.uiState.generationPreset === 'Pure'
-        && migrated.userContext.request === '写个侦探' && migrated.userContext.result === '姓名: 阿德' && migrated.userContext.hasResult
+        && migrated.userContext.request === '写个侦探' && migrated.userContext.result === '姓名: 阿德'
         && !('template' in (migrated.userContext as unknown as Record<string, unknown>))
+        && !('hasResult' in (migrated.userContext as unknown as Record<string, unknown>))
         && migrated.pinnedBooks.includes('pinned-book'));
     check('迁移：退休键 removeItem 清理（pw_template_v6_new_yaml）',
         second.retiredKeysCleaned.includes('pw_template_v6_new_yaml') && ls.get('pw_template_v6_new_yaml') === null);
@@ -235,7 +235,7 @@ function runMigrationChecks(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 2) 四任务提示词引擎（存储形态＋默认模板＋任务键）
+// 2) 三任务提示词引擎（存储形态＋默认模板＋任务键）
 // ---------------------------------------------------------------------------
 
 function runPromptsChecks(): void {
@@ -243,13 +243,12 @@ function runPromptsChecks(): void {
     const raw = getGlobal('promptConfigs') as unknown;
     const record = (raw ?? {}) as Record<string, unknown>;
     const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
-    check('prompts：四任务键 Record 齐备（choice 18 模块回归红线）',
+    check('prompts：三任务键 Record 齐备（choice 18 模块回归红线）',
         !Array.isArray(raw) && typeof raw === 'object' && raw !== null
         && TASK_KEYS.every(k => record[k] !== undefined)
         && Array.isArray(choiceModules) && choiceModules.length === 18
         && prompts.configFor('persona_curator') !== null
-        && prompts.configFor('persona_gen') !== null
-        && prompts.configFor('persona_refine') !== null,
+        && prompts.configFor('persona_gen') !== null,
         `keys=${Object.keys(record).join('/')}`);
 
     // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺三键。
@@ -261,26 +260,21 @@ function runPromptsChecks(): void {
     prompts.$patch({ revision: prompts.revision + 1 });
     const migratedChoice = prompts.configFor('choice');
     const rawAfter = getGlobal('promptConfigs') as unknown;
-    check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 三键）',
+    check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 两键）',
         migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
         && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
     prompts.resetToDefault('choice'); // 还原 choice 18 模块红线
 
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
-    const refineConfig = prompts.configFor('persona_refine');
     const curatorText = (curatorConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
     const genText = (genConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
-    const refineTextModule = refineConfig?.modules.find(m => m.kind === 'text');
     check('prompts：curator 默认模板占位符（{{charInfo}}/{{userRequirements}}）',
         curatorText.includes('{{charInfo}}') && curatorText.includes('{{userRequirements}}'));
     check('prompts：persona_gen 默认模板占位符（{{user}}/{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
         genText.includes('{{user}}') && genText.includes('{{charInfo}}')
         && genText.includes('{{greetings}}') && genText.includes('{{template}}')
         && genText.includes('{{input}}'));
-    check('prompts：persona_refine 与 gen 同文（id 区分、注入前置同构）',
-        refineTextModule?.id === 'persona_refine_prompt' && refineTextModule.content === genText
-        && curatorConfig?.modules[0]?.id === 'inject_persona_preset' && refineConfig?.modules[0]?.id === 'inject_persona_preset');
 
     const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
     const keys = [...templateBlocks.keys()];
@@ -303,7 +297,6 @@ const assemblySources: PersonaAssemblySources = {
     greetings: '「你好，旅行者」',
     userRequest: '写个侦探',
     curatedSchema: '基本信息:\n姓名:\n年龄:',
-    currentPersona: '',
     userName: '王玉',
     charName: '林霜',
 };
@@ -331,15 +324,6 @@ function runPersonaAssemblyChecks(): void {
         && genUser.includes('「你好，旅行者」') && genUser.includes('基本信息:\n姓名:\n年龄:')
         && genUser.includes('写个侦探') && !genUser.includes('{{'));
 
-    // refine 管线：默认模板不含 current_persona 注入模块（不双份），{{input}} 填充
-    const refineConfig = prompts.configFor('persona_refine');
-    const refine = assembleMessages(refineConfig?.modules ?? [], { ...assemblySources, userRequest: '[SYSTEM_OP: DATA_REVISION_PATCH] 修补指令', currentPersona: '姓名: 旧人设' });
-    const refineUser = refine.messages[refine.messages.length - 1].content;
-    check('persona 组装：persona_refine 管线（{{input}} 填充、current_persona 默认不双份注入）',
-        refine.messages.length === 2
-        && refineUser.includes('[SYSTEM_OP: DATA_REVISION_PATCH]') && !refineUser.includes('姓名: 旧人设')
-        && (refineConfig?.modules.every(m => m.kind === 'text' || m.source !== 'current_persona') ?? false));
-
     // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复。
     // 整合轮II 验收修整：toggleModule action 已随提示词编辑面删除——
     // 改本地数组改造（choice smoke modulesOff 同款；modules[].enabled
@@ -360,7 +344,7 @@ async function runPersonaAssemblyDumpChecks(): Promise<void> {
     const dumpText = await (port ? port.dump('persona_gen') : Promise.reject(new Error('口缺席')));
     check('dump 口：按任务 dump 全文（persona_gen：组装 dump 标头＋模块清单＋指令正文）',
         dumpText.includes('=== 消息组装 dump') && dumpText.includes('生成指令')
-        && dumpText.includes('[任务：生成/润色用户人设]'));
+        && dumpText.includes('[任务：生成用户人设]'));
     let thrownUnknown = false;
     try {
         await port?.dump('bogus');
@@ -371,7 +355,7 @@ async function runPersonaAssemblyDumpChecks(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 4) yaml/diff 纯函数行为
+// 4) yaml 纯函数行为
 // ---------------------------------------------------------------------------
 
 function runPureFunctionChecks(): void {
@@ -399,22 +383,6 @@ function runPureFunctionChecks(): void {
     check('stripYamlFence：prefill 未闭合（首行 姓名:）补 prefill 再剥',
         stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n基本信息:') === '基本信息:姓名: 测试\n年龄: 20'
         || stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n') === '姓名: 测试\n年龄: 20');
-
-    // diff 块级 LCS
-    const oldText = '姓名: 阿德\n年龄: 20\n职业: 侦探';
-    const newText = '姓名: 阿德\n年龄: 25\n职业: 私家侦探';
-    const diffBlocks = computeDiffBlocks(oldText, newText);
-    const diffPieces = diffBlocks.filter(b => b.type === 'diff');
-    check('diff：等值块保持＋差异块成对（old/new 文本）',
-        diffBlocks.some(b => b.type === 'equal' && b.value.includes('姓名: 阿德'))
-        && diffPieces.length > 0
-        && diffPieces.every(b => b.oldText !== b.newText));
-    check('diff：默认采纳 new 侧＋assembleDiffResult 拼装',
-        diffPieces.every(b => b.active === 'new') && assembleDiffResult(diffBlocks) === newText);
-    if (diffPieces.length > 0) diffPieces[0].active = 'old';
-    const mixed = assembleDiffResult(diffBlocks);
-    check('diff：切换 active 侧后取舍生效（混合结果 ≠ 纯 new）',
-        mixed !== newText && mixed.includes('姓名: 阿德'));
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +565,7 @@ async function runPersonaE2EChecks(): Promise<void> {
             && !firstJoined.includes('{{charInfo}}') && !firstJoined.includes('{{userRequirements}}')
             && lastFirst?.role === 'assistant' && lastFirst?.content.startsWith('```yaml'));
         check('端到端：personaGen 段消费策展产出（<target_schema> 含 curator 输出、生成指令在场）',
-            secondJoined.includes('[任务：生成/润色用户人设]')
+            secondJoined.includes('[任务：生成用户人设]')
             && secondJoined.includes('Schema Definition') && secondJoined.includes('<target_schema>')
             && secondJoined.includes('基本信息:') && secondJoined.includes('[SYSTEM_OP: LOGIC_CONSTRAINT]')
             && !secondJoined.includes('{{template}}')
@@ -637,7 +605,7 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     const wiText = await collectWorldInfoContext({ extraBooks: [], checkedByBook: {}, charKey: 'global_no_char' });
     check('generation：上下文收集空桶返回空串（不抛错）', typeof wiText === 'string');
 
-    // store 互斥：isProcessing 期间 generate/refine 立即返回
+    // store 互斥：isProcessing 期间 generate 立即返回
     const store = usePersonaStore();
     store.isProcessing = true;
     store.processingLabel = '占用标记';
@@ -645,8 +613,6 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     await store.generate();
     check('store：生成期间再触发被互斥忽略（lastRun 不变、label 不变）',
         store.lastRun === lastRunBefore && store.processingLabel === '占用标记');
-    await store.refine();
-    check('store：生成期间润色同样被互斥忽略（不进 diff 视图）', !store.showDiff);
     store.isProcessing = false;
     store.processingLabel = '';
 
@@ -665,19 +631,13 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     // 超时钳制
     check('storage：请求超时钳制 30..1800', clampTimeout(5) === 30 && clampTimeout(9999) === 1800 && clampTimeout(300) === 300);
 
-    // 划词润色模板（事件直挂语义）
-    store.refineText = '';
-    store.appendRefineSelection('口头禅');
-    check('store：划词润色意见模板追加（对 "选中" 的修改意见为：）',
-        store.refineText === '对 "口头禅" 的修改意见为：');
-
     // 显式保存点：persistUserContext 写域
     store.requestText = '保存点需求';
     store.resultText = '姓名: 保存点';
     store.persistUserContext();
     const persisted = readPersonaDomain().userContext;
     check('store：显式保存点写域（persistUserContext 落 userContext）',
-        persisted.request === '保存点需求' && persisted.result === '姓名: 保存点' && persisted.hasResult);
+        persisted.request === '保存点需求' && persisted.result === '姓名: 保存点');
 
     // 域写单通道 normalize 回读（未知字段丢弃的显式保真）
     const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
@@ -686,14 +646,14 @@ async function runWorldbookAndStoreChecks(): Promise<void> {
     const reread = readPersonaDomain() as unknown as Record<string, unknown>;
     check('storage：域读回 normalize 丢弃未知字段（显式保真纪律）', !('junkField' in reread));
     // 还原（去掉污染键：写域 normalize 单通道自然丢弃）
-    writePersonaDomain(d => { d.userContext = { request: '', result: '', hasResult: false }; });
+    writePersonaDomain(d => { d.userContext = { request: '', result: '' }; });
     const after = readPersonaDomain() as unknown as Record<string, unknown>;
     check('storage：写域单通道清理污染键（normalize 落盘）', !('junkField' in after));
 }
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/四任务引擎/纯函数/api 形状/端到端/互斥机判（整合轮II）===');
+    console.info('=== persona 迁移/统一端点收编/三任务引擎/纯函数/api 形状/端到端/互斥机判（整合轮II）===');
     runMigrationChecks();
     runPromptsChecks();
     runPersonaAssemblyChecks();
@@ -707,5 +667,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/5 旧键搬入＋过渡透传/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写/二次启动零重写）、四任务提示词引擎（Record 四键＋choice 18 模块红线/旧数组一次写迁移/三套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml/diff 纯函数（分块/围栏/取舍拼装）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（统一端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、store 互斥与显式保存点全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/5 旧键搬入＋过渡透传/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体三档/SSE 帧状态机/非流式错误帧）、端到端两段链（统一端点请求形状/curator→personaGen 引擎管线/结果落地）、worldbook 触发词与 fail fast、store 互斥与显式保存点全部通过。');
 }

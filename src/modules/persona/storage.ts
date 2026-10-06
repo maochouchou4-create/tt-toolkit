@@ -55,11 +55,10 @@ export interface LocalConfig {
     extraBooks: string[];
 }
 
-/** 编辑现场暂存（需求框/结果框；refine 的目标缓冲区即 result）。 */
+/** 编辑现场暂存（需求框/结果框）。 */
 export interface UserContext {
     request: string;
     result: string;
-    hasResult: boolean;
 }
 
 /** persona 全局域形状。 */
@@ -74,7 +73,7 @@ export interface PersonaDomain {
 }
 
 export function defaultUserContext(): UserContext {
-    return { request: '', result: '', hasResult: false };
+    return { request: '', result: '' };
 }
 
 export function defaultLocalConfig(): LocalConfig {
@@ -146,12 +145,12 @@ function normalizeWiSelection(value: unknown): Record<string, Record<string, str
 }
 
 function normalizeUserContext(value: unknown): UserContext {
-    // 逐字段重建：旧形状的 template/curatedSchema 字段丢弃（已淘汰）
+    // 逐字段重建：旧形状的 template/curatedSchema/hasResult 字段丢弃
+    // （前两者已淘汰；hasResult 可由 result 派生，恒真值不落盘）
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
     return {
         request: normalizeString(raw.request, ''),
         result: normalizeString(raw.result, ''),
-        hasResult: raw.hasResult === true,
     };
 }
 

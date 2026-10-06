@@ -12,14 +12,14 @@
 export type PromptRole = 'system' | 'user' | 'assistant';
 
 /**
- * 提示词任务键（整合轮II：引擎多任务化）。四条生成管线各自持一套
- * PromptConfig——choice（选项生成）与 persona 三段（策展 schema、按
- * schema 填充人设、润色现有人设）。存储形态 Record<taskKey, PromptConfig>。
+ * 提示词任务键（整合轮II：引擎多任务化）。各生成管线各自持一套
+ * PromptConfig——choice（选项生成）与 persona 两段（策展 schema、按
+ * schema 填充人设）。存储形态 Record<taskKey, PromptConfig>。
  */
-export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'persona_refine';
+export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen';
 
 /** 全部任务键（读侧补缺/迁移遍历用；顺序＝编辑器任务条的呈现顺序）。 */
-export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen', 'persona_refine'];
+export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen'];
 
 /**
  * 注入源标识。每个注入模块绑定一个源；源内容由组装时的
@@ -49,22 +49,25 @@ export type InjectionSource =
     | 'char_info'
     /** 开场白参考（{{greetings}} 占位符同源） */
     | 'greetings'
-    /** 用户请求/修补指令（{{input}}/{{userRequirements}} 占位符同源） */
+    /** 用户请求（{{input}}/{{userRequirements}} 占位符同源） */
     | 'user_request'
     /** 策展产出的 schema（{{template}} 占位符同源） */
-    | 'curated_schema'
-    /** 当前人设文本（refine 的修补基线） */
-    | 'current_persona';
+    | 'curated_schema';
 
-/** persona 任务的注入源集合（判别/分流用）。 */
-export type PersonaInjectionSource =
-    | 'persona_preset'
-    | 'persona_wi'
-    | 'char_info'
-    | 'greetings'
-    | 'user_request'
-    | 'curated_schema'
-    | 'current_persona';
+/**
+ * persona 任务的注入源集合（判别/分流用）。as const 数组＝单一真相源：
+ * engine 的判别集合由此派生，union 由数组派生，无双份维护面。
+ */
+export const PERSONA_INJECTION_SOURCES = [
+    'persona_preset',
+    'persona_wi',
+    'char_info',
+    'greetings',
+    'user_request',
+    'curated_schema',
+] as const;
+
+export type PersonaInjectionSource = (typeof PERSONA_INJECTION_SOURCES)[number];
 
 /** choice 任务的注入源（persona 源之外的全部——engine 分流判别用）。 */
 export type ChoiceInjectionSource = Exclude<InjectionSource, PersonaInjectionSource>;

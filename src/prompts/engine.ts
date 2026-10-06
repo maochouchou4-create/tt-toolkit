@@ -16,6 +16,7 @@ import type {
     PromptModule,
     StoryDirection,
 } from './types';
+import { PERSONA_INJECTION_SOURCES } from './types';
 
 /** 聊天历史条目（原始 user/assistant 楼层；<current_scene> 包裹在引擎内做）。 */
 export interface HistoryEntry {
@@ -83,11 +84,11 @@ export interface AssemblyResult {
 }
 
 /**
- * persona 三任务的组装供给（整合轮II）。与 AssemblySources 平行的独立
- * 接口：persona 管线的注入面与 choice 完全不同（角色卡全量文本/世界书
- * 参考/用户请求/schema——不是 choice 的分段标签注入），共用一个接口
- * 会让两边互相背对方不需要的字段。收集由 persona 调用方完成（宿主数据
- * 与任务运行态——策展 schema、用户请求都是运行时才知道的）。
+ * persona 两任务（策展＋填充）的组装供给（整合轮II）。与 AssemblySources
+ * 平行的独立接口：persona 管线的注入面与 choice 完全不同（角色卡全量
+ * 文本/世界书参考/用户请求/schema——不是 choice 的分段标签注入），共用
+ * 一个接口会让两边互相背对方不需要的字段。收集由 persona 调用方完成
+ * （宿主数据与任务运行态——策展 schema、用户请求都是运行时才知道的）。
  */
 export interface PersonaAssemblySources {
     /** 生成用预设 system 段（已解析+宏清洗；空串＝纯净模式/无预设） */
@@ -98,12 +99,10 @@ export interface PersonaAssemblySources {
     charInfo: string;
     /** 开场白参考（包装后；{{greetings}} 占位符同源） */
     greetings: string;
-    /** 用户请求/修补指令包装块（{{input}} 与 {{userRequirements}} 同源） */
+    /** 用户请求包装块（{{input}} 与 {{userRequirements}} 同源） */
     userRequest: string;
-    /** 策展产出 schema（包装后；refine 或策展失败回退时为空串） */
+    /** 策展产出 schema（包装后；策展失败回退默认模板时仍非空） */
     curatedSchema: string;
-    /** 当前人设文本（refine 修补基线；空＝无现有人设） */
-    currentPersona: string;
     /** 占位符值（{{user}}/{{char}}） */
     userName: string;
     charName: string;
@@ -114,16 +113,8 @@ function isPersonaSources(sources: AssemblySources | PersonaAssemblySources): so
     return 'charInfo' in sources;
 }
 
-/** persona 注入源集合（判别用；与 types.ts 注释段保持同步）。 */
-const PERSONA_SOURCES: ReadonlySet<string> = new Set([
-    'persona_preset',
-    'persona_wi',
-    'char_info',
-    'greetings',
-    'user_request',
-    'curated_schema',
-    'current_persona',
-]);
+/** persona 注入源判别集合（单一真相源＝types 的 as const 数组，此处只派生）。 */
+const PERSONA_SOURCES: ReadonlySet<string> = new Set<string>(PERSONA_INJECTION_SOURCES);
 
 /** 类型谓词形态的判别（Set.has 本身不带收窄——组装分流两处守门共用）。 */
 function isPersonaSource(source: InjectionSource): source is PersonaInjectionSource {
@@ -180,11 +171,7 @@ function resolvePersonaInjectContent(
         case 'curated_schema':
             return sources.curatedSchema.trim()
                 ? { content: sources.curatedSchema, note: '策展 schema' }
-                : { content: '', note: '无策展 schema（润色模式或策展回退）' };
-        case 'current_persona':
-            return sources.currentPersona.trim()
-                ? { content: sources.currentPersona, note: '当前人设文本' }
-                : { content: '', note: '无当前人设文本' };
+                : { content: '', note: '无策展 schema（策展回退）' };
         default:
             return { content: '', note: `未知 persona 注入源 ${source}` };
     }

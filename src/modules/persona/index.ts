@@ -9,7 +9,6 @@
  * - callPopup 弹窗改 shell 内「人设」tab（PersonaTab.vue）。
  * - 独立 API 砍 Anthropic 原生协议，只保留 OpenAI 兼容纯 fetch 形态。
  * - 旧 localStorage 5 键迁移进 extension_settings.ttToolkit.persona 全局域。
- * - 划词润色 textarea selectionStart/End 事件直挂（砍旧 100ms 防抖）。
  * - 1.2s 防抖热存改显式保存点（见 store.ts 头注）。
  */
 import { usePersonaStore } from './store';

@@ -2,12 +2,12 @@
  * PersonaWeaver fork 状态层（批D 平移，Pinia）。
  *
  * 写时机重设计（相对上游 fork）：旧版 1.2s 防抖逐键热存改为
- * 「store 内存态 + 显式保存点」——生成落地/确认 diff/载入（userContext）、
+ * 「store 内存态 + 显式保存点」——生成落地/载入（userContext）、
  * 保存配置与配置档 CRUD（localConfig）、生成启动（世界书勾选快照）。
  * 平时表单编辑只动内存，不写全局域（消旧版每次键击写 localStorage 的
  * IO 放大）。
  *
- * 互斥纪律：isProcessing 对生成/润色/重 roll 全局互斥（旧模块私有
+ * 互斥纪律：isProcessing 对生成/重 roll 全局互斥（旧模块私有
  * isProcessing 同语义）；lastRun 记忆最近一次请求（重 roll 语义）。
  */
 
@@ -29,7 +29,6 @@ import { createTtlog } from '@/host/ttlog';
 import { testConnection } from '@/modules/apis/client';
 import { resolveEndpointById } from '@/modules/apis/storage';
 import { collectWorldInfoContext, getPresetHintText, runGeneration, type GenerationApiConfig } from './generation';
-import { computeDiffBlocks, assembleDiffResult, type DiffBlock } from './diff';
 import { syncPersonaToWorldInfo, listWorldBookEntriesForLoad } from './worldbook';
 import { TEXT } from './strings';
 import {
@@ -56,9 +55,7 @@ function toast(message: string, level: 'info' | 'success' | 'warning' | 'error' 
 
 /** 最近一次生成请求的记忆（重 roll 同参再来）。 */
 interface LastRunDescriptor {
-    mode: 'initial' | 'refine';
     request: string;
-    currentText: string;
     wiText: string;
     greetingsText: string;
 }
@@ -69,7 +66,7 @@ function snapshotLocalConfig(config: LocalConfig): LocalConfig {
 
 /**
  * 生成调用面配置解析：endpointId → 统一端点表实体。端点缺失（未配置或
- * 已被删除）返回 null，由 generate/refine/reroll 统一 fail fast。
+ * 已被删除）返回 null，由 generate/reroll 统一 fail fast。
  */
 function buildApiConfig(config: LocalConfig): GenerationApiConfig | null {
     const endpoint = resolveEndpointById(config.endpointId);
@@ -88,13 +85,9 @@ export const usePersonaStore = defineStore('tt-persona', {
         config: snapshotLocalConfig(readPersonaDomain().localConfig),
         /** 预设选择（'current'/'pure'/预设名）。 */
         generationPreset: readPersonaDomain().uiState.generationPreset,
-        /** 人设分区：需求框/结果框/润色意见框。 */
+        /** 人设分区：需求框/结果框。 */
         requestText: readPersonaDomain().userContext.request,
         resultText: readPersonaDomain().userContext.result,
-        refineText: '',
-        /** diff 取舍视图状态（确认前不写结果框）。 */
-        diffBlocks: [] as DiffBlock[],
-        showDiff: false,
         /** 生成互斥与进度文案。 */
         isProcessing: false,
         processingLabel: '',
@@ -148,9 +141,6 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.generationPreset = domain.uiState.generationPreset;
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
-            this.diffBlocks = [];
-            this.showDiff = false;
-            this.refineText = '';
         },
 
         /**
@@ -198,12 +188,11 @@ export const usePersonaStore = defineStore('tt-persona', {
                 domain.userContext = {
                     request: this.requestText,
                     result: this.resultText,
-                    hasResult: this.resultText.trim().length > 0,
                 };
             });
         },
 
-        /** 世界书勾选快照进域（生成/润色启动时＝自然保存点）。 */
+        /** 世界书勾选快照进域（生成启动时＝自然保存点）。 */
         persistSelections() {
             const charKey = this.charKey;
             const snapshot = { ...this.checkedByBook };
@@ -275,7 +264,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             }
         },
 
-        // ---------------- 人设分区：生成/润色/重 roll ----------------
+        // ---------------- 人设分区：生成/重 roll ----------------
 
         /** 生成（首次两段链）。互斥：isProcessing 期间静默忽略。 */
         async generate() {
@@ -287,9 +276,6 @@ export const usePersonaStore = defineStore('tt-persona', {
             }
             this.isProcessing = true;
             this.processingLabel = '生成中…';
-            this.refineText = '';
-            this.diffBlocks = [];
-            this.showDiff = false;
             try {
                 this.persistSelections();
                 const wiText = await collectWorldInfoContext({
@@ -301,18 +287,14 @@ export const usePersonaStore = defineStore('tt-persona', {
                     ? (this.greetings[this.selectedGreetingIndex]?.content ?? '')
                     : '';
                 const run: LastRunDescriptor = {
-                    mode: 'initial',
                     request: this.requestText,
-                    currentText: '',
                     wiText,
                     greetingsText,
                 };
                 this.lastRun = run;
                 const result = await runGeneration({
                     ...api,
-                    mode: 'initial',
                     request: run.request,
-                    currentText: '',
                     wiText,
                     greetingsText,
                     generationPreset: this.generationPreset,
@@ -321,62 +303,6 @@ export const usePersonaStore = defineStore('tt-persona', {
                 });
                 this.resultText = result;
                 this.persistUserContext();
-            } catch (err) {
-                toast(err instanceof Error ? err.message : String(err), 'error');
-            } finally {
-                this.isProcessing = false;
-                this.processingLabel = '';
-            }
-        },
-
-        /** 润色（单段 + diff 取舍视图）。 */
-        async refine() {
-            if (this.isProcessing) return;
-            const api = buildApiConfig(this.config);
-            if (!api) {
-                toast(TEXT.TOAST_NO_ENDPOINT, 'error');
-                return;
-            }
-            if (!this.refineText.trim()) {
-                toast(TEXT.TOAST_REFINE_EMPTY, 'warning');
-                return;
-            }
-            if (!this.resultText.trim()) {
-                toast(TEXT.TOAST_NO_VALID_CONTENT, 'warning');
-                return;
-            }
-            this.isProcessing = true;
-            this.processingLabel = '润色中…';
-            this.diffBlocks = [];
-            this.showDiff = false;
-            try {
-                this.persistSelections();
-                const wiText = await collectWorldInfoContext({
-                    extraBooks: [...this.config.extraBooks],
-                    checkedByBook: { ...this.checkedByBook },
-                    charKey: this.charKey,
-                });
-                const run: LastRunDescriptor = {
-                    mode: 'refine',
-                    request: this.refineText,
-                    currentText: this.resultText,
-                    wiText,
-                    greetingsText: '',
-                };
-                this.lastRun = run;
-                const newText = await runGeneration({
-                    ...api,
-                    mode: 'refine',
-                    request: run.request,
-                    currentText: run.currentText,
-                    wiText,
-                    greetingsText: '',
-                    generationPreset: this.generationPreset,
-                    onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
-                    onProgress: label => { this.processingLabel = label; },
-                });
-                this.diffBlocks = computeDiffBlocks(this.resultText, newText);
-                this.showDiff = true;
             } catch (err) {
                 toast(err instanceof Error ? err.message : String(err), 'error');
             } finally {
@@ -399,28 +325,19 @@ export const usePersonaStore = defineStore('tt-persona', {
             }
             const run = this.lastRun;
             this.isProcessing = true;
-            this.processingLabel = run.mode === 'refine' ? '润色中…' : '生成中…';
-            this.diffBlocks = [];
-            this.showDiff = false;
+            this.processingLabel = '生成中…';
             try {
                 const newText = await runGeneration({
                     ...api,
-                    mode: run.mode,
                     request: run.request,
-                    currentText: run.currentText,
                     wiText: run.wiText,
                     greetingsText: run.greetingsText,
                     generationPreset: this.generationPreset,
                     onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
                     onProgress: label => { this.processingLabel = label; },
                 });
-                if (run.mode === 'refine') {
-                    this.diffBlocks = computeDiffBlocks(run.currentText, newText);
-                    this.showDiff = true;
-                } else {
-                    this.resultText = newText;
-                    this.persistUserContext();
-                }
+                this.resultText = newText;
+                this.persistUserContext();
                 toast(TEXT.TOAST_REROLLED);
             } catch (err) {
                 toast(err instanceof Error ? err.message : String(err), 'error');
@@ -430,38 +347,10 @@ export const usePersonaStore = defineStore('tt-persona', {
             }
         },
 
-        /** diff 取舍：切换某块采纳侧。 */
-        setBlockActive(index: number, side: 'old' | 'new') {
-            const block = this.diffBlocks[index];
-            if (block && block.type === 'diff') block.active = side;
-        },
-
-        /** diff 确认：拼装取舍结果写回结果框（落地保存点）。 */
-        confirmDiff() {
-            if (this.diffBlocks.length === 0) {
-                toast(TEXT.TOAST_NO_CHANGES, 'warning');
-                return;
-            }
-            this.resultText = assembleDiffResult(this.diffBlocks);
-            this.diffBlocks = [];
-            this.showDiff = false;
-            this.persistUserContext();
-            toast(TEXT.TOAST_APPLIED);
-        },
-
-        /** 划词润色：把选中片段的修改意见模板追加进润色框（事件直挂，砍旧 100ms 防抖）。 */
-        appendRefineSelection(selected: string) {
-            const piece = `对 "${selected}" 的修改意见为：`;
-            this.refineText = this.refineText ? `${this.refineText}\n${piece}` : piece;
-        },
-
         /** 清空（UI 层 confirm）。 */
         clearAll() {
             this.requestText = '';
             this.resultText = '';
-            this.refineText = '';
-            this.diffBlocks = [];
-            this.showDiff = false;
             this.lastRun = null;
             this.persistUserContext();
         },
@@ -499,8 +388,6 @@ export const usePersonaStore = defineStore('tt-persona', {
         /** 载入当前人设进结果框。 */
         loadCurrentPersona() {
             this.resultText = getPersonaDescription();
-            this.diffBlocks = [];
-            this.showDiff = false;
             this.persistUserContext();
             toast(TEXT.TOAST_LOAD_CURRENT);
         },
@@ -513,8 +400,6 @@ export const usePersonaStore = defineStore('tt-persona', {
                 return;
             }
             this.resultText = entry.content;
-            this.diffBlocks = [];
-            this.showDiff = false;
             this.persistUserContext();
             toast(TEXT.TOAST_RESET_TO_WI);
         },
