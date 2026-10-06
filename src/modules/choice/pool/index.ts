@@ -1,22 +1,10 @@
 /**
- * choice 池模块导出面（批C）。
+ * choice 池模块导出面。
  */
 
-export type { PoolEntry, PoolConfig, PoolConfigEntry, PoolGenParams, PinnedOverflow, DrawResult, PoolInjection } from './types';
-export { safeWeight, resolvePoolConfig, effectivePool, resolvePool, drawAmount, type RandomSource } from './resolver';
-export { EMPTY_POOL_DATA, DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, normalizePoolEntry, normalizePoolConfig, type PoolDomainData } from './normalize';
-export {
-    readPoolData,
-    createPoolEntry,
-    upsertPoolEntry,
-    deletePoolEntry,
-    createPoolConfig,
-    upsertPoolConfig,
-    deletePoolConfig,
-    setDefaultPoolConfig,
-    readChatPoolConfigId,
-    setChatPoolConfigId,
-    drawPoolInjection,
-} from './storage';
-export { readLegacyChoice, importLegacyChoice, exportPoolBackup, parsePoolBackup, importPoolBackup, type PoolImportReport, type PoolBackup } from './import';
+export type { PoolEntry, PoolGenParams, PinnedOverflow, DrawResult, PoolInjection } from './types';
+export { safeWeight, resolvePool, drawAmount, type RandomSource } from './resolver';
+export { EMPTY_POOL_DATA, DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, normalizePoolEntry, type PoolDomainData } from './normalize';
+export { readPoolData, drawPoolInjection } from './storage';
+export { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './asset';
 export { usePoolStore } from './store';

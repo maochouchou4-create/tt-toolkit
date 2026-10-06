@@ -14,15 +14,16 @@
  *   store 从存储域透传（GenerationApiConfig）。
  * - setGenProgress 直写 jQuery 按钮退役：onProgress 回调由 store 接管。
  * - toastr.info(prefill 重试) 退役：onPrefillRetry 回调归调用方 toast。
- * - collectContextData 的 DOM 勾选读取退役：checkedByBook 由 store 的
- *   勾选缓存透传；未渲染的书走存储域已存选择 → enabled 兜底（旧序）。
+ * - collectContextData 的 DOM 勾选读取与「UI 勾选 → 存储域已存选择 →
+ *   enabled 兜底」三级取条目整体退役：世界书改全量注入（绑定书全集条目
+ *   拼接，无视任何条目规则），勾选/钉选域已随域形状删除。
  * - yieldToBrowser(requestAnimationFrame) 退役：Vue 渲染不靠逐书让帧。
  * - 宿主导入一律经 host 层（check-imports 纪律）：getCharacterName /
  *   getUserDisplayName / 世界书与预设通道都从 '@/host' 进；模型请求走
  *   '@/modules/apis/client'（@sillytavern 导入面只在 src/host/）。
  */
 
-import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt, getTavernContext } from '@/host';
+import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries, resolvePresetSystemPrompt } from '@/host';
 import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
@@ -37,7 +38,7 @@ import {
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
-import { loadWiSelectionFor, readPersonaDomain, type ThinkingEffort } from './storage';
+import { readPersonaDomain, type ThinkingEffort } from './storage';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -54,47 +55,18 @@ export interface GenerationApiConfig {
     timeoutSec: number;
 }
 
-/** 世界书上下文收集入参（勾选缓存由 store 透传）。 */
-export interface CollectContextOptions {
-    /** 存储域 extraBooks（世界书勾选面板的补充书目来源）。 */
-    extraBooks: string[];
-    /** UI 已渲染的勾选缓存（书名→勾选 uid 串；无键＝该书未渲染）。 */
-    checkedByBook: Record<string, string[]> | undefined;
-    /** 当前角色键（loadWiSelectionFor 的存储域已存选择）。 */
-    charKey: string;
-}
-
 /**
- * 世界书上下文收集（旧 collectContextData 平移）：
- * 书目 = 当前角色绑定书 + extraBooks 有序去重，≤20 本；每本按
- * 「UI 勾选 → 存储域已存选择 → enabled 兜底」取条目，拼接
- * `[DB:书名] content`。单书失败记日志不阻断（旧序保留）。
+ * 世界书上下文收集（全量注入，已拍板无截断机制）：当前会话绑定书全集
+ * （getContextWorldBooks 四绑定面）逐书全量条目拼接 `[DB:书名] content`
+ * ——无视条目的 enabled/关键词触发等一切规则（getWorldBookEntries 本就
+ * 不滤 disabled，返回前内部消化单书装载失败返回空表，天然不阻断）。
  */
-export async function collectWorldInfoContext(options: CollectContextOptions): Promise<string> {
+export async function collectWorldInfoContext(): Promise<string> {
     const wiContent: string[] = [];
-    const books = [...new Set([...getContextWorldBooks(), ...(options.extraBooks ?? [])])].filter(Boolean);
-    if (books.length > 20) books.length = 20;
-
-    for (const bookName of books) {
-        try {
-            const entries = await getWorldBookEntries(bookName);
-            const uiChecked = options.checkedByBook?.[bookName];
-            let enabledEntries;
-            if (Array.isArray(uiChecked)) {
-                enabledEntries = entries.filter(e => uiChecked.includes(String(e.uid)));
-            } else {
-                const savedSelection = loadWiSelectionFor(options.charKey, bookName);
-                if (savedSelection && savedSelection.length > 0) {
-                    enabledEntries = entries.filter(e => savedSelection.includes(String(e.uid)));
-                } else {
-                    enabledEntries = entries.filter(e => e.enabled);
-                }
-            }
-            for (const entry of enabledEntries) {
-                wiContent.push(`[DB:${bookName}] ${entry.content}`);
-            }
-        } catch (err) {
-            log.warn(`世界书 ${bookName} 上下文收集失败`, err);
+    for (const bookName of getContextWorldBooks()) {
+        const entries = await getWorldBookEntries(bookName);
+        for (const entry of entries) {
+            wiContent.push(`[DB:${bookName}] ${entry.content}`);
         }
     }
     return wiContent.join('\n\n');
@@ -371,11 +343,7 @@ export async function dumpPersonaTask(task: TaskKey): Promise<string> {
             .replace(/{{wInfo}}/gi, '')
             .replace(/{{worldInfo}}/gi, ''),
         wiText: wrapAsXiTaReference(
-            await collectWorldInfoContext({
-                extraBooks: [...(domain.localConfig.extraBooks ?? [])],
-                checkedByBook: undefined,
-                charKey: getTavernContext()?.characterId || 'global_no_char',
-            }),
+            await collectWorldInfoContext(),
             'Global State Variables',
         ),
         charInfo: wrapAsXiTaReference(getCharacterInfoText(), `Entity Profile: ${charName}`),

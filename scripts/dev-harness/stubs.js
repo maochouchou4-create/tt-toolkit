@@ -28,6 +28,9 @@
                 creator_notes: '用户自定义角色。',
                 first_mes: '「这么晚了还来？」林霜头也不抬，手里的算盘拨得噼啪响。',
                 alternate_greetings: ['她抬眼看了看门口的动静，把一盏灯往里挪了挪：「后堂说话。」'],
+                // 绑定世界书（extensions.world 四绑定面之一）：人设 tab 的
+                // 「已全量注入绑定世界书」只读行与全量注入链路在 harness 可见
+                extensions: { world: '王玉·人设书' },
             },
         },
         { name: '阿七', data: { description: '跑腿少年，消息灵通。', personality: '话多、胆小。', scenario: '巷口。' } },
@@ -454,6 +457,11 @@
         },
         emitAppReady() {
             void eventSource.emit(event_types.APP_READY);
+        },
+        // 会话切换模拟：人设 tab 的 CHAT_CHANGED 感知（开场白选择/lastRun
+        // 清空、绑定书单快照重拉）在 harness UI 可驱动验证
+        emitChatChanged() {
+            void eventSource.emit(event_types.CHAT_CHANGED);
         },
     };
 

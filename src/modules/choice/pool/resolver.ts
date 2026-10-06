@@ -1,5 +1,5 @@
 /**
- * 池抽取纯函数（批C）：effectivePool 组装、绑定级联、Efraimidis–Spirakis 加权无放回抽取。
+ * 池抽取纯函数：Efraimidis–Spirakis 加权无放回抽取。
  *
  * 算法出处：Efraimidis & Spirakis, "Weighted Random Sampling over Data Streams"（2005），
  * 加权无放回抽样经典做法——为每个候选计算 key = rand^(1/w)，取 key 最大的前 K 个。
@@ -9,7 +9,7 @@
  * 运行时默认 Math.random。
  */
 
-import type { DrawResult, PoolConfig, PoolEntry, PinnedOverflow } from './types';
+import type { DrawResult, PoolEntry, PinnedOverflow } from './types';
 
 /** 可注入随机源（冒烟注种子 PRNG；运行时默认 Math.random）。 */
 export type RandomSource = () => number;
@@ -34,44 +34,6 @@ function shuffle<T>(arr: T[], random: RandomSource): T[] {
         [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
-}
-
-/**
- * 绑定级联：chat 域 poolConfigId 命中 → 回退 isDefault 配置。
- * 角色级绑定未平移（用户实证从未使用，需要时后续加——批C 决策）。
- * 空串/无效 id = 用默认。
- */
-export function resolvePoolConfig(configs: PoolConfig[], poolConfigId: string): PoolConfig | null {
-    const wanted = poolConfigId.trim();
-    if (wanted) {
-        const hit = configs.find((c) => c.id === wanted);
-        if (hit) return hit;
-    }
-    return configs.find((c) => c.isDefault) ?? null;
-}
-
-/**
- * effectivePool：master_pool 中被配置引用且 enabled!==false 的条目，
- * 叠加引用层 pinned/weight 覆盖。内容字段只读自 master_pool（config 不持有正文）。
- * 无配置时回退全池（引用新装机的空配置会让插件看起来失灵）。
- */
-export function effectivePool(masterPool: PoolEntry[], config: PoolConfig | null): PoolEntry[] {
-    if (!config) return masterPool.map((e) => ({ ...e }));
-    const byId = new Map<string, PoolEntry>();
-    for (const e of masterPool) byId.set(e.id, e);
-    const out: PoolEntry[] = [];
-    for (const ref of config.entries) {
-        const base = byId.get(ref.entryId);
-        // 引用悬空（池条目已删）直接跳过，不视为错误
-        if (!base) continue;
-        if (ref.enabled === false) continue;
-        out.push({
-            ...base,
-            pinned: ref.pinned ?? base.pinned,
-            weight: safeWeight(ref.weight ?? base.weight),
-        });
-    }
-    return out;
 }
 
 /**
@@ -101,7 +63,7 @@ export function drawAmount(remaining: number, oversamplePct: number, poolSize: n
 
 /**
  * 核心抽取：pinned 全发（trim 策略=打乱后截 count）；非 pinned 加权抽取（可超额、可分桶轮询）。
- * shuffleFinal 时分别打乱两区（不打乱则保持「配置 entries 顺序」，分桶轮询时桶序本身随机）。
+ * shuffleFinal 时分别打乱两区（不打乱则保持输入顺序，分桶轮询时桶序本身随机）。
  */
 export function resolvePool(input: {
     pool: PoolEntry[];

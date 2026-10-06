@@ -22,6 +22,8 @@ import { getGlobal, getNavState, LEGACY_NAV_AUTO_TOP_KEY, LEGACY_NAV_QR_ACTIVATE
 /**
  * 清理键清单：单一真相源＝迁移代码的常量表（persona LEGACY_KEYS＋nav
  * 两个迁移源键，service.ts 导出），此处仅聚合，禁另写字面量。
+ * persona 侧自世界书勾选/钉选域退役起为 3 键（pw_wi_selection_v1/
+ * pw_pinned_books_v1 已随 v1.0.0 一次性清理离场，无键可管）。
  */
 export const LEGACY_WIPE_KEYS: readonly string[] = [
     ...Object.values(LEGACY_KEYS),
@@ -78,8 +80,9 @@ export function wipeLegacyKeysOnce(): LegacyWipeReport {
 // 重置 persona 域，本机判必须在 runPersonaSmoke 之前跑）。
 // 判别式：迁移数据「未受损」用与缺省值相反的种子态证明——
 //   userContext.request 缺省 ''（种子非空只能来自 smoke.mjs 预种＋boot
-//   迁移搬运）；pinnedBooks 缺省 []（种子 length 1）；nav.autoTop
-//   缺省 true（种子关态 false）。跨文件不共享标记字面量。
+//   迁移搬运）；localConfig 缺省 stream=true/timeoutSec=300（种子
+//   stream=false/timeoutSec=600）；nav.autoTop 缺省 true（种子关态
+//   false）。跨文件不共享标记字面量。
 // ---------------------------------------------------------------------------
 
 const wipeFailures: string[] = [];
@@ -120,10 +123,8 @@ function seedAll(): void {
     seedKey(LEGACY_NAV_AUTO_TOP_KEY, '0');
     seedKey(LEGACY_NAV_QR_ACTIVATED_KEY, '1');
     seedKey(LEGACY_KEYS.state, JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } }));
-    seedKey(LEGACY_KEYS.wiSelection, JSON.stringify({ global: { demo: ['1'] } }));
     seedKey(LEGACY_KEYS.uiState, JSON.stringify({ generationPreset: 'pure' }));
     seedKey(LEGACY_KEYS.dataUser, JSON.stringify({ request: 'wipe-smoke 场景种子', result: '' }));
-    seedKey(LEGACY_KEYS.pinnedBooks, JSON.stringify(['wipe-smoke 场景种子']));
 }
 
 export function runLegacyWipeSmoke(): void {
@@ -142,7 +143,10 @@ export function runLegacyWipeSmoke(): void {
             'boot：persona 域迁移数据未受损（种子 userContext 存活＝迁移先于清理）',
             persona.userContext.request !== '',
         );
-        check('boot：persona 域钉选迁移数据未受损（种子书存活）', persona.pinnedBooks.length === 1);
+        check(
+            'boot：persona 域迁移数据未受损（种子 localConfig 存活，异于缺省 stream/timeout）',
+            persona.localConfig.stream === false && persona.localConfig.timeoutSec === 600,
+        );
         check('boot：nav 域迁移数据未受损（种子关态存活）', getNavState().autoTop === false);
     } else {
         // 二次启动签名：标记在场 → boot 清理整段跳过 → 预重种的键须原样存活

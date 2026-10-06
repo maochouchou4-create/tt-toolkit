@@ -7,18 +7,15 @@
  * scripts/smoke.mjs 收口断言。
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
-import { extension_settings } from '@/host';
 import { buildGenerateBody } from '@/modules/apis/client';
-import { readApiDomain } from '@/modules/apis/storage';
+import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
 import { useChoiceStore } from './store';
-import { drawAmount, effectivePool, resolvePool, resolvePoolConfig, safeWeight } from './pool/resolver';
+import { drawAmount, resolvePool, safeWeight } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
-import { exportPoolBackup, importLegacyChoice, parsePoolBackup } from './pool/import';
-import { deletePoolConfig, readChatPoolConfigId, readPoolData, setChatPoolConfigId, upsertPoolConfig, upsertPoolEntry } from './pool/storage';
-import { ASSET_POOL_CONFIG_ID, ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
+import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 
 const failures: string[] = [];
 
@@ -134,30 +131,23 @@ function runPoolChecks(): void {
         if (buckets.size < 2) catOk = false;
     }
     check('分组轮询：候选覆盖多个 category 桶（≥2 桶）', catOk);
+
+    // safeWeight 双复核 P3 回归：0/负权＝近零权（fork「实质禁用」语义），坏数据回等权
+    check('safeWeight：0/负权压到近零、非数值回等权（fork 语义）', safeWeight(0) === safeWeight(-1) && safeWeight(0) < 1e-6 && safeWeight('x') === 1);
 }
 
 /**
- * 1.5) 池 asset（批C.2 只读化）：内置池静态形状＋syncAssetPool 行为机判。
- *
- * 顺序契约：本区放在导入往返之前，且结尾把池域重置回空——导入断言的
- * 前置条件是「导入前池=空」（模拟全新安装），而 initChoiceMinimal 的
- * asset 同步已经落过 110 条，不重置会让导入后条目数变成 113。
+ * 1.5) 池 asset（只读资产）：内置池静态形状＋syncAssetPool 行为机判。
  */
 function runAssetPoolChecks(): void {
     // ---- 静态形状（纯函数，不依赖存储态）----
-    const { masterPool, poolConfigs } = buildAssetPool();
+    const { masterPool } = buildAssetPool();
     check('asset：内置池 110 条（112−2 重复）', masterPool.length === 110, `实际 ${masterPool.length}`);
     const cats = new Set(masterPool.map(e => e.category));
     check('asset：整理后 17 个分类（20−3 合并）', cats.size === 17, `实际 ${cats.size}`);
     const transition = masterPool.find(e => e.type === '转场推进');
     check('asset：转场推进转固定（pinned）', !!transition && transition.pinned, `pinned=${String(transition?.pinned)}`);
-    check(
-        'asset：配置唯一且默认（asset-default）',
-        poolConfigs.length === 1 && poolConfigs[0].id === ASSET_POOL_CONFIG_ID && poolConfigs[0].isDefault,
-        `configs=${poolConfigs.length} id=${poolConfigs[0]?.id}`,
-    );
-    check('asset：引用层全量镜像', poolConfigs[0].entries.length === masterPool.length, `refs=${poolConfigs[0].entries.length}/${masterPool.length}`);
-    check('asset：池层不再携带规则（v3：反 OOC 要点并入提示词模板 core_rules）', poolConfigs.every(c => !('rules' in c)), `带 rules 配置 ${poolConfigs.filter(c => 'rules' in c).length}`);
+    check('asset：无停用条目（引用层已删，条目自身 pinned/weight 即真值）', masterPool.every(e => e.weight > 0), `零/负权条目 ${masterPool.filter(e => e.weight <= 0).length}`);
     const ids = new Set(masterPool.map(e => e.id));
     check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
     // v2（m03158 拍板）条目级 rule 移除；v3（m03359 整合轮）连数据形状都不带
@@ -166,7 +156,7 @@ function runAssetPoolChecks(): void {
     // ---- 同步行为（存储态驱动）----
     const resetPool = () => {
         choiceStorage.writeDomain(d => {
-            d.pool = { masterPool: [], poolConfigs: [] };
+            d.pool = { masterPool: [] };
         });
     };
     // 首次同步：旧默认 false 被一次性翻转为 true（拍板：轮询默认开）
@@ -182,160 +172,17 @@ function runAssetPoolChecks(): void {
     domain = choiceStorage.readDomain();
     check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
-    upsertPoolEntry({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false, weight: 1 });
     choiceStorage.writeDomain(d => {
+        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false, weight: 1 });
         d.pool.assetVersion = 0;
     });
     syncAssetPool();
     domain = choiceStorage.readDomain();
     check(
-        'asset 版本变更：污染池全量恢复（垃圾清除、配置归一、gen 不动）',
-        domain.pool.masterPool.length === 110 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.poolConfigs.length === 1 && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
+        'asset 版本变更：污染池全量恢复（垃圾清除、gen 不动）',
+        domain.pool.masterPool.length === 110 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
         `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
     );
-    // 还原导入测试前置：导入断言假定「导入前池=空」（模拟全新安装）
-    resetPool();
-}
-
-/** 2) 导入往返：\r fixture（假密钥）→导入→读出→导出→字段级 diff＋幂等。 */
-function runImportRoundTrip(): void {
-    // fixture 形状＝用户实证 extension_settings.choice（密钥一律假值）
-    const fixture = {
-        master_pool: [
-            { id: 'e1\r', category: '探索', type: '检查酒馆', content: '仔细检查酒馆的每个角落', rule: '保持警惕口吻', pinned: false, weight: 1 },
-            { id: 'e2\r', category: '探索', type: '打听消息', content: '向酒保打听最近传闻', rule: '', pinned: false, weight: 3 },
-            { id: 'e3', category: '社交', type: '闲聊', content: '和邻座搭话', rule: '', pinned: false, weight: 1 },
-        ],
-        configs: [
-            {
-                id: 'c1', name: '旧配置', is_default: true,
-                rules: '禁止 OOC：所有选项必须是角色在当前场景可以真实执行的行动。',
-                entries: [
-                    { entry_id: 'e1\r', enabled: true, pinned: true, weight: 2 },
-                    { entry_id: 'e2\r', enabled: false, pinned: false, weight: 1 },
-                ],
-                generation: { categories_enabled: false, count_mode: '4', dedup_enabled: true, dedup_threshold: 0.75, oversample_pct: 80, pinned_overflow: 'send_all', shuffle_final: true },
-            },
-        ],
-        apis: [
-            { id: 'a1', name: '旧端点一', apiurl: 'https://fake.example.com/v1', key: 'sk-fake-0001', model: 'fake-model-a', stream: false, temperature: 0.5, max_tokens: 1024, exclude_params: '', timeout: 180 },
-            { id: 'a2', name: '旧端点二', apiurl: 'https://fake.example.org/v1', key: 'sk-fake-0002', model: 'fake-model-b', stream: false, temperature: 1, max_tokens: 512, exclude_params: '', timeout: 60 },
-        ],
-        active_api_id: 'a2\r',
-        auto_generate: true,
-        stats: { foo: 1 },
-        ui: { bar: 2 },
-    };
-    (extension_settings as { choice?: unknown }).choice = fixture;
-
-    const report = importLegacyChoice();
-    if (!report) {
-        check('导入：fixture 被识别（readLegacyChoice 命中）', false);
-        return;
-    }
-
-    const { masterPool, poolConfigs } = readPoolData();
-    check(
-        '导入：master_pool 3 条全部导入（\\r id 已 trim；条目 rule 按新契约丢弃）',
-        report.masterPoolImported === 3 && masterPool.length === 3 && masterPool.every(e => !e.id.includes('\r')) && masterPool.some(e => e.id === 'e1' && e.type === '检查酒馆' && e.content === '仔细检查酒馆的每个角落' && !('rule' in e) && e.weight === 1) && report.notes.some(n => n.includes('条目级规则已弃')),
-        `imported=${report.masterPoolImported}`,
-    );
-    const cfg = poolConfigs.find(c => c.id === 'c1');
-    check(
-        '导入：configs 1 套导入（entry_id 同步规范化；停用引用保留；rules 丢弃）',
-        report.configsImported === 1 && !!cfg && cfg.isDefault && !('rules' in cfg) && cfg.entries.length === 2 && cfg.entries[0].entryId === 'e1' && cfg.entries[0].pinned === true && cfg.entries[0].weight === 2 && cfg.entries[1].entryId === 'e2' && cfg.entries[1].enabled === false,
-        `imported=${report.configsImported}`,
-    );
-    const domain = choiceStorage.readDomain();
-    const endpointA1 = readApiDomain().find(e => e.id === 'a1');
-    check(
-        '导入：apis 2 个直映统一端点表（身份四字段；exclude_params/timeout 进忽略清单）',
-        report.apisImported === 2 && !!endpointA1 && endpointA1.name === '旧端点一' && endpointA1.url === 'https://fake.example.com/v1' && endpointA1.key === 'sk-fake-0001' && endpointA1.model === 'fake-model-a',
-        `imported=${report.apisImported}`,
-    );
-    check(
-        '导入：gen 映射（count_mode→count、oversample_pct、auto_generate）',
-        domain.gen.count === 4 && domain.gen.oversamplePct === 80 && domain.gen.autoGenerate === true && domain.gen.categoriesEnabled === false && domain.gen.pinnedOverflow === 'send_all' && domain.gen.shuffleFinal === true,
-        `count=${domain.gen.count} pct=${domain.gen.oversamplePct}`,
-    );
-    check(
-        '导入：active_api_id 命中→activeEndpointId＋选中端点任务参数入任务域',
-        domain.activeEndpointId === 'a2' && domain.task.stream === false && domain.task.temperature === 1 && domain.task.maxTokens === 512 && domain.task.outputContract === 'json_object' && domain.task.reasoningEffort === 'off',
-        `activeEndpointId=${domain.activeEndpointId}`,
-    );
-    check(
-        '导入：未识别字段进忽略清单（stats/ui/dedup_*/exclude_params/timeout/rules）',
-        report.ignoredFields.includes('stats') && report.ignoredFields.includes('ui') && report.ignoredFields.some(f => f.startsWith('configs[].generation.dedup_enabled')) && report.ignoredFields.some(f => f.startsWith('apis[].exclude_params')) && report.ignoredFields.some(f => f.startsWith('apis[].timeout')) && report.ignoredFields.some(f => f.startsWith('configs[].rules')),
-        `ignored=${report.ignoredFields.join('、')}`,
-    );
-
-    // 导出→解析→字段级 diff 零丢失
-    const backupText = exportPoolBackup();
-    const parsed = parsePoolBackup(backupText);
-    let roundtripOk = parsed.ok;
-    if (parsed.ok) {
-        const backup = parsed.data;
-        const byId = new Map(backup.masterPool.map(e => [e.id, e]));
-        for (const raw of fixture.master_pool) {
-            // 条目 rule 按新契约不保真（导入即丢弃）——往返 diff 不比对 rule
-            const entry = byId.get(raw.id.trim());
-            if (!entry || entry.type !== raw.type || entry.content !== raw.content || entry.category !== raw.category || entry.pinned !== raw.pinned || entry.weight !== raw.weight) roundtripOk = false;
-        }
-        const backupCfg = backup.poolConfigs.find(c => c.id === 'c1');
-        if (!backupCfg || ('rules' in backupCfg) || backupCfg.isDefault !== true) roundtripOk = false;
-        else {
-            const refById = new Map(backupCfg.entries.map(r => [r.entryId, r]));
-            for (const raw of fixture.configs[0].entries) {
-                const ref = refById.get(raw.entry_id.trim());
-                if (!ref || ref.enabled !== raw.enabled || ref.pinned !== raw.pinned || ref.weight !== raw.weight) roundtripOk = false;
-            }
-        }
-        const apiById = new Map(backup.endpoints.map(a => [a.id, a]));
-        for (const raw of fixture.apis) {
-            const api = apiById.get(raw.id);
-            if (!api || api.name !== raw.name || api.url !== raw.apiurl || api.key !== raw.key || api.model !== raw.model) roundtripOk = false;
-        }
-        if (backup.gen.count !== 4 || backup.gen.oversamplePct !== 80 || backup.gen.autoGenerate !== true || backup.activeEndpointId !== 'a2'
-            || backup.choiceTask.stream !== false || backup.choiceTask.temperature !== 1 || backup.choiceTask.maxTokens !== 512) roundtripOk = false;
-    }
-    check('导入往返：导出→解析→字段级零丢失', roundtripOk, parsed.ok ? '' : `error=${parsed.error}`);
-
-    // v1 自备份升格：旧形状（apis[] 为 choice 域 ApiConfig）解析即升 v2——
-    // 端点身份进统一表形状，任务参数从选中条目派生
-    const v1Text = JSON.stringify({
-        kind: 'tt-toolkit-pool-backup',
-        version: 1,
-        masterPool: [],
-        poolConfigs: [],
-        gen: {},
-        apis: [
-            { id: 'v1a', name: '旧自备份', apiurl: 'https://v1.example.com/v1', key: 'sk-v1', model: 'v1-model', stream: true, temperature: 0.8, maxTokens: 333, outputContract: 'json_object', reasoningEffort: 'medium' },
-            { id: 'v1b', name: '旁路端点', apiurl: 'https://v1.example.org/v1', key: 'sk-v1b', model: 'v1-model-b', stream: false, temperature: 0.5, maxTokens: 128, outputContract: 'prompt_only', reasoningEffort: 'off' },
-        ],
-        activeApiId: 'v1a',
-    });
-    const v1Parsed = parsePoolBackup(v1Text);
-    const v1Ok = v1Parsed.ok && v1Parsed.data.version === 2
-        && v1Parsed.data.endpoints.length === 2
-        && v1Parsed.data.endpoints[0].url === 'https://v1.example.com/v1' && v1Parsed.data.endpoints[0].key === 'sk-v1' && v1Parsed.data.endpoints[0].model === 'v1-model'
-        && v1Parsed.data.choiceTask.stream === true && v1Parsed.data.choiceTask.temperature === 0.8 && v1Parsed.data.choiceTask.maxTokens === 333 && v1Parsed.data.choiceTask.outputContract === 'json_object' && v1Parsed.data.choiceTask.reasoningEffort === 'medium'
-        && v1Parsed.data.activeEndpointId === 'v1a';
-    check('v1 备份升格：解析即 v2（端点身份四字段＋选中条目任务参数派生）', v1Ok, v1Parsed.ok ? '' : `error=${v1Parsed.error}`);
-
-    // 幂等：重复导入零新增
-    const second = importLegacyChoice();
-    check(
-        '导入幂等：重复导入零新增（3/1/2 全跳过）',
-        !!second && second.masterPoolImported === 0 && second.configsImported === 0 && second.apisImported === 0 && second.masterPoolSkipped === 3 && second.configsSkipped === 1 && second.apisSkipped === 2,
-        `second=${second ? `${second.masterPoolImported}/${second.configsImported}/${second.apisImported}` : 'null'}`,
-    );
-
-    // 校验器拒畸形
-    const bad1 = parsePoolBackup('这不是 json{');
-    const bad2 = parsePoolBackup('{"kind":"other","version":1}');
-    const bad3 = parsePoolBackup('{"kind":"tt-toolkit-pool-backup","version":2}');
-    const bad4 = parsePoolBackup('{"kind":"tt-toolkit-pool-backup","version":1,"masterPool":{},"poolConfigs":[],"apis":[]}');
-    check('导入：畸形备份文本被校验器拒绝', !bad1.ok && !bad2.ok && !bad3.ok && !bad4.ok, `样本结果：${[bad1.ok, bad2.ok, bad3.ok, bad4.ok].join('/')}`);
 }
 
 /** 3) 注入：pool_entries 模块的分区呈现与空态（m03359：池规则并入模板，独立段已删）。 */
@@ -388,32 +235,6 @@ function runInjectionChecks(): void {
     console.info(renderDump(result));
 }
 
-/** 4) 绑定级联：chat 覆盖命中→默认回退；effectivePool 两层语义。 */
-function runBindingCascadeChecks(): void {
-    // 前置：runImportRoundTrip 已落 c1（默认）＋e1/e2/e3
-    upsertPoolConfig({ id: 'c2', name: '第二套', isDefault: false, entries: [{ entryId: 'e3', enabled: true, pinned: false, weight: 1 }] });
-    const configs = readPoolData().poolConfigs;
-
-    setChatPoolConfigId('c2');
-    check('绑定级联：chat 域命中非默认配置', resolvePoolConfig(configs, readChatPoolConfigId())?.id === 'c2');
-    setChatPoolConfigId('bogus');
-    check('绑定级联：无效 id 回退默认配置', resolvePoolConfig(configs, readChatPoolConfigId())?.id === 'c1');
-    setChatPoolConfigId('');
-    check('绑定级联：空串＝用默认配置', resolvePoolConfig(configs, readChatPoolConfigId())?.id === 'c1');
-
-    const { masterPool } = readPoolData();
-    check('effectivePool：无配置回退全池', effectivePool(masterPool, null).length === 3);
-    const c1 = configs.find(c => c.id === 'c1');
-    const pool1 = c1 ? effectivePool(masterPool, c1) : [];
-    check('effectivePool：引用层覆盖（停用剔除＋pinned/weight 覆盖）', pool1.length === 1 && pool1[0]?.id === 'e1' && pool1[0]?.pinned === true && pool1[0]?.weight === 2);
-    // 双复核 P3 回归：0/负权＝近零权（fork「实质禁用」语义），坏数据回等权
-    check('safeWeight：0/负权压到近零、非数值回等权（fork 语义）', safeWeight(0) === safeWeight(-1) && safeWeight(0) < 1e-6 && safeWeight('x') === 1);
-
-    // 清场：绑定回默认、删测试配置（后续自动生成断言用干净的 c1 态）
-    setChatPoolConfigId('');
-    deletePoolConfig('c2');
-}
-
 /** 冒烟 stub 访问（scripts/smoke.mjs 注入；类型只声明本文件用到的面）。 */
 interface SmokeStubs {
     eventSource: { emit(type: string, ...args: unknown[]): unknown };
@@ -433,6 +254,20 @@ async function runAutoGenerateChecks(): Promise<void> {
         return;
     }
     check('自动生成：冒烟 stub 在场', true);
+    // 池态对齐真实启动：asset 同步在场（前序 asset 区结尾池=asset 全量）
+    syncAssetPool();
+    // 端点在场（池写面删除后无导入链落端点；stub fetch 在 smoke.mjs 注入）——
+    // 记录原态（activeEndpointId 必须在前置之前记录），收尾统一还原
+    const savedEndpoints = readApiDomain();
+    const savedActiveEndpointId = choiceStorage.readDomain().activeEndpointId;
+    const smokeEndpoint = savedEndpoints[0] ?? createEndpoint('冒烟端点');
+    // stub fetch 回非流式 JSON（流式帧状态机不认）——任务档临时切非流式，收尾还原
+    const savedTaskStream = choiceStorage.readDomain().task.stream;
+    if (savedEndpoints.length === 0) {
+        writeApiDomain([smokeEndpoint]);
+        choiceStorage.setActiveEndpoint(smokeEndpoint.id);
+    }
+    choiceStorage.updateTask({ stream: false });
     // 清掉批B debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
     // phase 停在 idle」（跳过守卫不得触发任何生成）
     store.clearOptions();
@@ -462,7 +297,6 @@ async function runAutoGenerateChecks(): Promise<void> {
     choiceStorage.updateGenParams({ autoGenerate: true });
 
     // 无端点：悬空 activeEndpointId → resolveChoiceEndpoint null → console.warn（不弹 UI）
-    const savedActiveEndpointId = choiceStorage.readDomain().activeEndpointId;
     choiceStorage.setActiveEndpoint('no-such-endpoint');
     const warns: string[] = [];
     const origWarn = console.warn;
@@ -472,7 +306,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     emitReceived(2, 'normal');
     console.warn = origWarn;
     check('自动生成：端点未选 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('未选择生成端点')), `warns=${warns.length}`);
-    choiceStorage.setActiveEndpoint(savedActiveEndpointId);
+    choiceStorage.setActiveEndpoint(smokeEndpoint.id);
 
     // happy path：同步返回（emit 返回时生成已启动但远未完成——fire-and-forget 实证）
     const returned = emitReceived(2, 'normal');
@@ -486,8 +320,9 @@ async function runAutoGenerateChecks(): Promise<void> {
         await new Promise(r => setTimeout(r, 20));
     }
     check('自动生成：stub 端点回固定 JSON → 解析 4 条（json 主路径）', store.phase === 'idle' && store.options.length === 4 && store.lastParsePath === 'json', `phase=${store.phase} count=${store.options.length} path=${store.lastParsePath} error=${store.error}`);
-    // 生成管线现场抽取池：drawPoolInjection 读导入后的池（e1 必发；条目渲染无规则后缀）
-    check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('检查酒馆：仔细检查酒馆的每个角落') && !store.lastDump.includes('[规则:'));
+    // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（pinned 条目必发；
+    // 条目渲染无规则后缀）
+    check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('转场推进：用一两句精炼的叙述完成时间跳跃或地点切换，快速进入下一段剧情') && !store.lastDump.includes('[规则:'));
     // 整合轮II 验收修整：外部注入全自动链路（stub context 槽位 → sources
     // 自动收集 → engine → dump）。stub_memory 先插入但 depth 4、
     // stub_anchor 后插入但 depth 0——排序断言只有真的按 depth 升序排
@@ -498,6 +333,14 @@ async function runAutoGenerateChecks(): Promise<void> {
     // 柏宝书在场即带（自动口径）：STBaiBaiBook stub（smoke.mjs 注入
     // globalThis）→ getBaibaiSummary 优先注入口径 → <past_events> 段可见
     check('自动生成：柏宝书在场即带（摘要注入 <past_events> 段）', store.lastDump.includes('<past_events>') && store.lastDump.includes('【柏宝书·stub】'), 'stub getInjectedHistory 链路');
+
+    // 还原端点原态（activeEndpointId 还原前置前记录的原值——含「未选」空串；
+    // 本区自落的冒烟端点与选中态不留残）
+    choiceStorage.updateTask({ stream: savedTaskStream });
+    choiceStorage.setActiveEndpoint(savedActiveEndpointId);
+    if (savedEndpoints.length === 0) {
+        writeApiDomain([]);
+    }
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
@@ -649,17 +492,15 @@ export async function runChoiceSmoke(): Promise<void> {
     runParseChecks();
     runReasoningEffortChecks();
     await runDebugForceRawChecks();
-    console.info('=== choice 池抽取/asset 同步/导入/注入/绑定/自动生成机判（批C/C.2）===');
+    console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');
     runPoolChecks();
     runAssetPoolChecks();
-    runImportRoundTrip();
     runInjectionChecks();
-    runBindingCascadeChecks();
     await runAutoGenerateChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（110 条/17 分类/首次翻转/幂等不回翻/污染恢复）、旧数据导入往返＋幂等、池注入分区与分层、绑定级联、MESSAGE_RECEIVED 守卫链全部通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（110 条/17 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过。');
 }

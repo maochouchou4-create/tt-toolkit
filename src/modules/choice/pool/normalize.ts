@@ -6,22 +6,21 @@
  * 拆成独立纯模块，两边单向引用，不出环。
  */
 
-import type { PoolConfig, PoolConfigEntry, PoolEntry, PoolGenParams } from './types';
+import type { PoolEntry, PoolGenParams } from './types';
 import { safeWeight } from './resolver';
 
 /** choice 域下的池子对象形状。 */
 export interface PoolDomainData {
     masterPool: PoolEntry[];
-    poolConfigs: PoolConfig[];
     /**
-     * 内置池内容版本标记（批C.2 只读化引入）：default-pool.json 的 version，
-     * 由 syncAssetPool 写入。normalize 默认丢弃未知字段，这里显式保真——
-     * 它是「内容是否需要随插件更新重刷」的判据，丢了会每次启动都重写一遍池。
+     * 内置池内容版本标记：default-pool.json 的 version，由 syncAssetPool 写入。
+     * normalize 默认丢弃未知字段，这里显式保真——它是「内容是否需要随插件
+     * 更新重刷」的判据，丢了会每次启动都重写一遍池。
      */
     assetVersion?: number;
 }
 
-export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [], poolConfigs: [] };
+export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [] };
 
 /** 池抽取参数缺省值（与 fork 旧数据 generation 块的实测值对齐：oversample 100/send_all/shuffle）。 */
 export const DEFAULT_POOL_GEN_PARAMS: PoolGenParams = {
@@ -51,7 +50,7 @@ export function normalizePoolEntry(raw: unknown): PoolEntry | null {
     if (typeof raw !== 'object' || raw === null) return null;
     const r = raw as Record<string, unknown>;
     const id = asString(r.id).trim();
-    // id 为空的条目无法被配置引用，直接丢弃（导入层同样规则）
+    // id 为空的条目无法定位，直接丢弃
     if (!id) return null;
     return {
         id,
@@ -63,42 +62,13 @@ export function normalizePoolEntry(raw: unknown): PoolEntry | null {
     };
 }
 
-/** 单条配置引用规范化：entryId trim（与池条目 id 同规则，两端一致才能命中）。 */
-export function normalizePoolConfigEntry(raw: unknown): PoolConfigEntry | null {
-    if (typeof raw !== 'object' || raw === null) return null;
-    const r = raw as Record<string, unknown>;
-    const entryId = asString(r.entryId).trim();
-    if (!entryId) return null;
-    return {
-        entryId,
-        enabled: asBool(r.enabled, true),
-        pinned: asBool(r.pinned, false),
-        weight: safeWeight(r.weight),
-    };
-}
-
-/** 池配置规范化：entries 逐条（悬空引用保留——池条目删除时才清引用）。 */
-export function normalizePoolConfig(raw: unknown): PoolConfig | null {
-    if (typeof raw !== 'object' || raw === null) return null;
-    const r = raw as Record<string, unknown>;
-    const id = asString(r.id).trim();
-    if (!id) return null;
-    return {
-        id,
-        name: asString(r.name, '未命名配置'),
-        isDefault: asBool(r.isDefault, false),
-        entries: asArray(r.entries)
-            .map(normalizePoolConfigEntry)
-            .filter((e): e is PoolConfigEntry => e !== null),
-    };
-}
-
 /**
- * 整个池子对象规范化：条目按规范化 id 去重（首见优先——旧档 trim 后可能撞 id），
- * 配置按 id 去重。返回全新对象（与存档解耦）。
+ * 整个池子对象规范化：条目按规范化 id 去重（首见优先——旧档 trim 后可能撞 id）。
+ * 旧存档的引用层（poolConfigs，v1.2.0 前的两层结构）读侧整体出局：normalize
+ * 丢弃未知字段，旧键残留随下一次写通道自然清除。返回全新对象（与存档解耦）。
  */
 export function normalizePoolData(raw: unknown): PoolDomainData {
-    if (typeof raw !== 'object' || raw === null) return { ...EMPTY_POOL_DATA, masterPool: [], poolConfigs: [] };
+    if (typeof raw !== 'object' || raw === null) return { masterPool: [] };
     const r = raw as Record<string, unknown>;
     const seen = new Set<string>();
     const masterPool: PoolEntry[] = [];
@@ -108,17 +78,9 @@ export function normalizePoolData(raw: unknown): PoolDomainData {
         seen.add(entry.id);
         masterPool.push(entry);
     }
-    const seenConfig = new Set<string>();
-    const poolConfigs: PoolConfig[] = [];
-    for (const item of asArray(r.poolConfigs)) {
-        const config = normalizePoolConfig(item);
-        if (!config || seenConfig.has(config.id)) continue;
-        seenConfig.add(config.id);
-        poolConfigs.push(config);
-    }
     // assetVersion 保真（见 PoolDomainData 注释）；非 number 视为未标记（首次/异常档）。
     const assetVersion = typeof r.assetVersion === 'number' ? r.assetVersion : undefined;
-    return assetVersion === undefined ? { masterPool, poolConfigs } : { masterPool, poolConfigs, assetVersion };
+    return assetVersion === undefined ? { masterPool } : { masterPool, assetVersion };
 }
 
 /**

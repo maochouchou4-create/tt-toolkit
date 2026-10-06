@@ -5,7 +5,6 @@
  * 生成）不再各配各的 API，端点身份（地址/密钥/模型）全部取自本表；
  * 任务参数（输出契约/思考强度/流式等）留在各自任务域。
  */
-import type { OutputContract, ReasoningEffort } from './client';
 
 /** 端点条目：身份五元组（id 稳定，供两任务域引用）。 */
 export interface ApiEndpoint {
@@ -16,15 +15,6 @@ export interface ApiEndpoint {
     /** 直连密钥（走宿主 reverse_proxy 通道直达上游，不进宿主 secret store） */
     key: string;
     model: string;
-}
-
-/** choice 任务的生成参数（端点身份之外的全部请求面）。 */
-export interface ChoiceTaskParams {
-    outputContract: OutputContract;
-    reasoningEffort: ReasoningEffort;
-    stream: boolean;
-    temperature: number;
-    maxTokens: number;
 }
 
 /** 端点表存储域（extension_settings.ttToolkit.apis＝端点数组本体）。 */

@@ -53,8 +53,7 @@ interface EventEmitterLike {
 
 /**
  * 事件订阅的窄接口：宿主 EventEmitter 的完整面不需要暴露，
- * 业务侧只允许订阅（emit 是宿主特权，扩展反向 emit 会伪造宿主状态；
- * 摘除监听的 removeListener 暂无消费方，需要时再入此 Pick）。
+ * 业务侧只允许订阅与摘除（emit 是宿主特权，扩展反向 emit 会伪造宿主状态）。
  */
-export const eventBus: Readonly<Pick<EventEmitterLike, 'on' | 'once'>> =
+export const eventBus: Readonly<Pick<EventEmitterLike, 'on' | 'once' | 'removeListener'>> =
     stEventSource as unknown as EventEmitterLike;

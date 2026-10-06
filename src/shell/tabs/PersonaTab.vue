@@ -120,49 +120,24 @@
       <div class="tt-card">
         <div class="tt-card-title">开场白</div>
         <div class="tt-card-sub">注入哪一条开场白作为生成参考</div>
-        <select :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-persona-select" @change="onGreetingChange">
+        <select v-if="store.greetings.length > 0" :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-persona-select" @change="onGreetingChange">
           <option value="">不注入开场白</option>
           <option v-for="(g, i) in store.greetings" :key="i" :value="String(i)">{{ g.label }}</option>
         </select>
+        <div v-else class="tt-persona-empty">进入角色会话后可选择开场白</div>
       </div>
 
       <div class="tt-card">
         <div class="tt-card-title">世界书</div>
-        <div class="tt-card-sub">勾选注入的条目；钉选的书常驻上下文（≤20 本）</div>
-        <div v-for="book in store.availableBooks" :key="book" class="tt-persona-book">
-          <div class="tt-persona-book-head">
-            <button type="button" class="tt-persona-book-toggle" @click="toggleBookEntries(book)">
-              {{ expandedBooks.has(book) ? '▾' : '▸' }} {{ book }}
-            </button>
-            <button
-              type="button"
-              class="tt-persona-book-pin"
-              :class="{ 'tt-persona-book-pin--on': store.config.extraBooks.includes(book) }"
-              @click="store.togglePin(book)"
-            >{{ store.config.extraBooks.includes(book) ? '已钉选' : '钉选' }}</button>
-          </div>
-          <ul v-if="expandedBooks.has(book)" class="tt-persona-entry-list">
-            <li v-for="entry in store.bookEntries[book] ?? []" :key="entry.uid" class="tt-persona-entry">
-              <label class="tt-persona-entry-check">
-                <input
-                  type="checkbox"
-                  :checked="store.isBookChecked(book, entry.uid)"
-                  @change="onEntryCheck(book, entry.uid, $event)"
-                >
-                <span>{{ entry.displayName }}</span>
-              </label>
-              <span class="tt-persona-entry-meta">{{ entry.enabled ? '' : '（条目本身未启用）' }}</span>
-            </li>
-          </ul>
-        </div>
-        <div v-if="store.availableBooks.length === 0" class="tt-persona-empty">暂无世界书（宿主未建/未绑定）</div>
+        <div v-if="store.boundBooks.length > 0" class="tt-persona-note">已全量注入绑定世界书：{{ store.boundBooks.join('、') }}</div>
+        <div v-else class="tt-persona-empty">当前角色未绑定世界书</div>
       </div>
     </details>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onMounted, reactive, ref } from 'vue';
+import { computed, onActivated, onMounted, ref } from 'vue';
 import { usePersonaStore } from '@/modules/persona/store';
 import { useApisStore } from '@/modules/apis/store';
 import { useShellStore } from '@/shell/store';
@@ -170,9 +145,6 @@ import { useShellStore } from '@/shell/store';
 const store = usePersonaStore();
 const apis = useApisStore();
 const shell = useShellStore();
-
-/** 生成参考折叠块里已展开的书目集合。 */
-const expandedBooks = reactive(new Set<string>());
 
 /** 载入世界书条目的下拉选择值（索引字符串）。 */
 const loadCandidateKey = ref('');
@@ -207,18 +179,6 @@ function onPresetChange(event: Event): void {
 function onGreetingChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
     store.selectGreeting(value === '' ? null : Number(value));
-}
-
-function toggleBookEntries(book: string): void {
-    if (expandedBooks.has(book)) expandedBooks.delete(book);
-    else {
-        expandedBooks.add(book);
-        void store.ensureBookEntries(book);
-    }
-}
-
-function onEntryCheck(book: string, uid: number, event: Event): void {
-    store.setCheck(book, uid, (event.target as HTMLInputElement).checked);
 }
 
 /** 生成通道：端点选择写穿（setEndpointId 内部即时落域）。 */
@@ -318,8 +278,7 @@ onActivated(() => { store.refreshHostData(); });
     padding: 3px 6px;
 }
 
-.tt-persona-load-row button,
-.tt-persona-book-pin {
+.tt-persona-load-row button {
     background: transparent;
     color: var(--SmartThemeBodyColor, inherit);
     border: 1px solid var(--SmartThemeBorderColor, #666);
@@ -337,60 +296,6 @@ onActivated(() => { store.refreshHostData(); });
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 5px;
     padding: 3px 6px;
-}
-
-.tt-persona-book {
-    padding: 4px 0;
-    border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor, #666) 40%, transparent);
-}
-
-.tt-persona-book-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.tt-persona-book-toggle {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    background: transparent;
-    color: var(--SmartThemeBodyColor, inherit);
-    border: none;
-    cursor: pointer;
-    font-size: 0.85em;
-}
-
-.tt-persona-book-pin--on {
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.2));
-    font-weight: bold;
-}
-
-.tt-persona-entry-list {
-    list-style: none;
-    margin: 2px 0;
-    padding-left: 14px;
-}
-
-.tt-persona-entry {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8em;
-    padding: 1px 0;
-}
-
-.tt-persona-entry-check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    min-width: 0;
-}
-
-.tt-persona-entry-meta {
-    opacity: 0.5;
-    font-size: 0.9em;
 }
 
 .tt-persona-empty {

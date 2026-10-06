@@ -1,16 +1,15 @@
 /**
- * 条目池两层结构的类型定义（批C）。
+ * 条目池类型定义。
  *
- * 为什么分两层：master_pool 是内容唯一真相源（type/content/category 只读于池层），
- * poolConfigs 是引用层（只决定「用哪些条目」并可覆盖 enabled/pinned/weight）——
- * 内容与配置分离后，多套配置可共享同一批条目，编辑正文不会波及配置。
+ * 池是单层结构：masterPool 即全部内容（type/content/category/pinned/weight
+ * 都在条目自身），唯一样式随 default-pool.json 资产发布、用户只读。
  * m03359 整合轮：规则概念整体删除（条目级 v2 弃、池级 v3 弃）——反 OOC
  * 约束并入提示词模板 core_rules，池数据不再携带任何规则字段。
  */
 
 /** 池条目（内容层，全局唯一真相源）。 */
 export interface PoolEntry {
-    /** 稳定 id。旧版数据导入时统一 trim 规范化（原 id 部分带 \r）。 */
+    /** 稳定 id（asset 池为 asset-<序号>，确定性映射）。 */
     id: string;
     /** 条目标题（渲染为选项的 type 前缀）。 */
     type: string;
@@ -18,38 +17,16 @@ export interface PoolEntry {
     content: string;
     /** 默认分类（分组轮询的桶键）。 */
     category: string;
-    /** 池层默认 pinned（引用层可覆盖）。 */
+    /** 固定条目（每轮必发，不参与抽签）。 */
     pinned: boolean;
-    /** 池层默认权重（引用层可覆盖）。 */
+    /** 抽取权重。 */
     weight: number;
-}
-
-/** 池配置对单条条目的引用（覆盖层，不持有正文）。 */
-export interface PoolConfigEntry {
-    /** 指向 PoolEntry.id（已 trim 规范化）。 */
-    entryId: string;
-    /** false 时该条目不参与本次配置的抽取（未引用 ≠ 停用：未被引用只是不在池里）。 */
-    enabled: boolean;
-    /** 覆盖 pinned。 */
-    pinned: boolean;
-    /** 覆盖 weight。 */
-    weight: number;
-}
-
-/** 池配置（引用层）。 */
-export interface PoolConfig {
-    id: string;
-    name: string;
-    /** 是否默认配置（绑定级联的兜底落点）。 */
-    isDefault: boolean;
-    /** 引用的条目及覆盖。 */
-    entries: PoolConfigEntry[];
 }
 
 /** pinned 条目数超出 gen.count 时的处理策略。 */
 export type PinnedOverflow = 'send_all' | 'trim';
 
-/** 全局抽取参数（挂在 choice 域 gen 下，与 count 等生成参数同级——不是单配置字段）。 */
+/** 全局抽取参数（挂在 choice 域 gen 下，与 count 等生成参数同级）。 */
 export interface PoolGenParams {
     /** 候选条目超额抽取百分比（0-300）。菜单模式：多抽候选让 AI 挑。 */
     oversamplePct: number;

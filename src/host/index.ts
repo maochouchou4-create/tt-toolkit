@@ -60,7 +60,6 @@ export { buildPresetOptions, listOpenAIPresetNames, resolvePresetSystemPrompt } 
 export {
     getContextWorldBooks,
     getWorldBookEntries,
-    listWorldInfoNames,
     loadWorldInfoBook,
     upsertWorldInfoPersonaEntry,
     type WorldBookEntrySummary,
