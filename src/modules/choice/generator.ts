@@ -5,7 +5,7 @@
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施——用户靠它核对
  * 各注入模块逐项可见。
  */
-import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
+import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import {
@@ -19,7 +19,7 @@ import type { ModuleTrace } from '@/prompts';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { useStoryDirectionStore } from './direction';
-import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
+import { DEBUG_MALFORMED_RAW, parseOptions, type ParseReport } from './parse';
 import { clearFloorOptions, latestAssistantFloorIndex } from './persist';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
@@ -37,6 +37,28 @@ export function isGenerating(): boolean {
 }
 
 /**
+ * 0 条选项的失败文案：区分「模型压根没说话」与「说了话但抽不出选项」。
+ *
+ * 判据必须是「正文是否为空」而非「path 是否为 empty」——path 只回答
+ * 「有没有抽出选项」，抽不出时一律归 empty，但导致抽不出的原因里既有
+ * 真空响应，也有纯散文／拒答语／空数组等「模型其实有输出」的形态；
+ * 只看 path 会把后者误报成「模型未返回任何内容」并抹掉原文，用户既被
+ * 指错方向又看不到模型到底说了什么（两者是不同的信息，不是同一事实的
+ * 两份来源）。
+ *
+ * - 正文为空＝上游静默拦截、或思维链耗尽输出预算（finish_reason 还可能
+ *   谎报 stop）——空前缀无信息量，文案直接指向重试/换端点；
+ * - 正文非空＝模型有输出但抽不出选项——保留原文前缀 500 诊断面（坏 JSON
+ *   骸骨、拒答语、纯散文都靠它定位）。
+ */
+export function zeroOptionsMessage(report: ParseReport, rawText: string): string {
+    if (rawText.trim() === '') {
+        return '模型未返回任何内容（0 条选项）：可能被上游静默拦截，或思维链耗尽了输出预算（finish_reason 显示 stop 也不可信）——可直接重试，或更换端点后再试。';
+    }
+    return `解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 500)}`;
+}
+
+/**
  * 生成周期起点：锚定当前末条 assistant 楼层并立即清该楼旧选项存档。
  *
  * 清档必须在本仓侧主动做：宿主 clearMessageData 是白名单删除（不碰
@@ -46,7 +68,7 @@ export function isGenerating(): boolean {
  * （abort）只走复位分支、不写盘。
  * 导出仅供冒烟直调断言「生成开始即清档」（浏览器路径经 generateOptions）。
  */
-export function beginGenerationCycle(): { anchorIndex: number | null; anchorMessage: unknown } {
+export function beginGenerationCycle(): { anchorIndex: number | null; anchorMessage: ChatMessage | null } {
     const anchorIndex = latestAssistantFloorIndex();
     const anchorMessage = anchorIndex !== null ? getChatMessages()[anchorIndex] : null;
     if (anchorIndex !== null) {
@@ -152,15 +174,21 @@ export async function generateOptions(): Promise<void> {
 
         const report = parseOptions(rawText, gen.count);
         if (report.options.length === 0) {
-            // 原始输出前缀 500（诊断面）：坏 JSON 骸骨排障需要看到骨架本身
-            const message = `解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 500)}`;
+            const message = zeroOptionsMessage(report, rawText);
             if (runId !== null) runlogStore.markFailed(runId, message);
             throw new Error(message);
         }
         if (runId !== null) {
             runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length, dropped: report.dropped });
         }
-        store.succeed(report.options, report.path, assembly.dumpText, anchorIndex, anchorMessage, report.dropped);
+        store.succeed({
+            options: report.options,
+            parsePath: report.path,
+            dropped: report.dropped,
+            dump: assembly.dumpText,
+            floorIndex: anchorIndex,
+            floorMessage: anchorMessage,
+        });
         // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {

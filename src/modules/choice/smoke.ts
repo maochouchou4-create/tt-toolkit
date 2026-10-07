@@ -13,7 +13,7 @@ import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
-import { generateOptions } from './generator';
+import { generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { drawAmount, resolvePool, safeWeight } from './pool/resolver';
@@ -370,7 +370,8 @@ async function runFloorPersistChecks(): Promise<void> {
     const emit = (type: string, ...args: unknown[]): unknown => stubs.eventSource.emit(type, ...args);
     const savedActiveEndpointId = readActiveEndpointId();
 
-    interface FakeMessage { mes?: string; is_user?: boolean; is_system?: boolean; extra?: Record<string, unknown>; }
+    // 索引签名对齐 ChatMessage（宿主消息含任意附加键，extra/swipes 等）
+    interface FakeMessage { mes?: string; is_user?: boolean; is_system?: boolean; extra?: Record<string, unknown>; [key: string]: unknown; }
     const msg = (mes: string, extra?: Record<string, unknown>): FakeMessage => ({ mes, is_user: false, extra });
     const choiceExtra = (options: Array<{ title: string; content: string }>, parsePath = 'json'): Record<string, unknown> => ({
         ttToolkit: { choice: { options, parsePath } },
@@ -381,7 +382,7 @@ async function runFloorPersistChecks(): Promise<void> {
     context.chat = chat1;
     const optsA = [{ title: '甲', content: '做甲事' }];
     const callsBefore = stubs.saveChatCalls;
-    check('楼层落盘：writeFloorOptions 写入并返回 true', writeFloorOptions(1, optsA, 'json') === true);
+    check('楼层落盘：writeFloorOptions 写入并返回 true', writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === true);
     check('楼层落盘：写入触发 getContext().saveChat 落盘通道（计数 +1）', stubs.saveChatCalls === callsBefore + 1, `calls=${stubs.saveChatCalls}`);
     const readBack = readFloorOptions(1);
     check(
@@ -398,7 +399,7 @@ async function runFloorPersistChecks(): Promise<void> {
     // ④ 切聊天显示该聊天自己的选项；无存档＝空态
     const chat2: FakeMessage[] = [msg('（另一聊天开场白）'), msg('另一聊天的回复')];
     context.chat = chat2;
-    writeFloorOptions(1, [{ title: '乙', content: '做乙事' }], 'bracket_fallback');
+    writeFloorOptions({ index: 1, payload: { options: [{ title: '乙', content: '做乙事' }], parsePath: 'bracket_fallback' }, expectMessage: null });
     emit('chat_id_changed');
     check('楼层落盘：切聊天后装载新聊天自己的选项（emit CHAT_CHANGED）', store.options.length === 1 && store.options[0]?.title === '乙' && store.lastParsePath === 'bracket_fallback' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
     context.chat = [msg('（无存档聊天开场白）'), msg('无存档楼层')];
@@ -424,7 +425,7 @@ async function runFloorPersistChecks(): Promise<void> {
         `oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} ui=${store.options.length}`,
     );
     // 失败路径：请求未发出（端点缺失）——生成开始已清档，该楼保持无选项态
-    writeFloorOptions(1, optsA, 'json');
+    writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null });
     setActiveEndpointId('no-such-endpoint');
     try {
         await generateOptions();
@@ -461,12 +462,21 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：删到仅剩开场白＝按开场白楼装载空态（不再回退无归属）', store.options.length === 0 && store.floorIndex === 0, `idx=${store.floorIndex}`);
 
     // ⑦ 写侧守门：越界与写前对象校验
-    check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions(99, optsA, 'json') === false && writeFloorOptions(-1, optsA, 'json') === false);
+    check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions({ index: 99, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === false && writeFloorOptions({ index: -1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === false);
     const foreign = msg('别的消息对象');
     const mismatchCalls = stubs.saveChatCalls;
     check(
         '楼层落盘：写前对象校验（索引处已换成别的消息对象）拒绝写入且不触发落盘',
-        writeFloorOptions(0, optsA, 'json', undefined, foreign) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
+        writeFloorOptions({ index: 0, payload: { options: optsA, parsePath: 'json' }, expectMessage: foreign }) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
+        `calls=${stubs.saveChatCalls}`,
+    );
+    // expectMessage: null ＝显式声明「无凭据故不校验」——与旧的可选参数缺席
+    // 同义，但改必填后由类型门拦住漏传（漏传即静默失去防漂移保护）。
+    // 注意此刻 chat 仅剩 0 号开场白楼（上文 splice 后），故索引用 0。
+    const nullGuardCalls = stubs.saveChatCalls;
+    check(
+        '楼层落盘：expectMessage=null 显式不校验仍正常写入（类型门拦漏传，语义与旧省略一致）',
+        writeFloorOptions({ index: 0, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === true && stubs.saveChatCalls === nullGuardCalls + 1,
         `calls=${stubs.saveChatCalls}`,
     );
 
@@ -480,7 +490,7 @@ async function runFloorPersistChecks(): Promise<void> {
 
     // partial 路径存档 roundtrip：白名单放行（漏登记＝该路径存档被当坏档丢弃）
     context.chat = [msg('（开场白）'), msg('partial 楼')];
-    const partialWritten = writeFloorOptions(1, optsA, 'partial', 2);
+    const partialWritten = writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'partial', dropped: 2 }, expectMessage: null });
     const partialBack = readFloorOptions(1);
     check(
         '楼层落盘：partial 路径存档 roundtrip 读回（白名单放行，不判坏档）',
@@ -802,6 +812,31 @@ function runParseGuardChecks(): void {
 }
 
 /**
+ * 0 条选项失败文案机判：判据是「正文是否为空」而非「path 是否 empty」——
+ * path=empty 同时覆盖真空响应与纯散文／拒答语／空数组等「模型其实有输出」
+ * 的形态，只看 path 会把后者误报成「模型未返回内容」并抹掉原文。
+ */
+function runZeroOptionMessageChecks(): void {
+    const emptyMessage = zeroOptionsMessage(parseOptions('', 4), '');
+    check('零选项文案：正文为空（真·零响应）＝指向重试/换端点，不带原始输出前缀',
+        emptyMessage.includes('未返回') && emptyMessage.includes('重试') && emptyMessage.includes('端点') && !emptyMessage.includes('原始输出'),
+        `msg=${emptyMessage}`);
+    const raw = '她聊起配置格式："options":[ 其实只是聊天正文';
+    const rejectMessage = zeroOptionsMessage(parseOptions(raw, 4), raw);
+    check('零选项文案：非 empty 路径保持原口径（路径＋原始输出前缀在场）',
+        rejectMessage.includes('解析得到 0 条选项（路径 json_reject）') && rejectMessage.includes(`原始输出：${raw.slice(0, 500)}`),
+        `msg=${rejectMessage.slice(0, 60)}`);
+    // 关键形态：模型有输出但抽不出选项（path=empty 且正文非空）——不得套用
+    // 「模型未返回任何内容」，且必须带出原文（用户要靠它判断模型说了什么）
+    const prose = '今天天气不错我们出去走走';
+    const proseReport = parseOptions(prose, 4);
+    const proseMessage = zeroOptionsMessage(proseReport, prose);
+    check('零选项文案：正文非空但抽不出选项（散文/拒答语）＝不得误报「未返回内容」且保留原文前缀',
+        proseReport.path === 'empty' && proseMessage.includes('解析得到 0 条选项') && proseMessage.includes(`原始输出：${prose}`) && !proseMessage.includes('未返回'),
+        `path=${proseReport.path} msg=${proseMessage.slice(0, 60)}`);
+}
+
+/**
  * runlog 接线机判：生成管线的记录落点（成功/失败/环形上限/密钥金丝雀）。
  * stub fetch 形态仿 persona smoke（全局 fetch 替换＋finally 还原）。
  */
@@ -918,6 +953,7 @@ export async function runChoiceSmoke(): Promise<void> {
     console.info(dumpText);
     runParseChecks();
     runParseGuardChecks();
+    runZeroOptionMessageChecks();
     runConstantRequestChecks();
     await runDebugForceRawChecks();
     await runRunlogChecks();

@@ -374,10 +374,12 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
 // 期望构成＝v1.5.17 基数 107 ＋ 选项元素级重构新增 13（解析/锚点 6、守门
-// 对象形态与样本族汇总 2、runlog partial 遥测 1、楼层落盘 4）＝ 120。
+// 对象形态与样本族汇总 2、runlog partial 遥测 1、楼层落盘 4）
+// ＝ v1.5.19 零选项文案分支 3（真空响应/非 empty 原口径/正文非空但不抽选项）
+// ＋ expectMessage=null 显式不校验 1 ＝ 124。
 // 不从「分组小计」加总推：分组基数随每批增长，抄旧小计必算错（下次 bump
 // 只改本行等式右侧总数与该批 +N）。
-const CHOICE_PASS_EXPECTED = 120;
+const CHOICE_PASS_EXPECTED = 124;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

@@ -10,7 +10,7 @@
  * 写入约束：extra 会经宿主 structuredClone 进 swipe 槽——写进去的必须
  * 是纯数据（{title,content} 数组＋字符串），不得含函数/响应式代理。
  */
-import { getChatMessages, saveCurrentChat } from '@/host';
+import { getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
 import type { ParsedOption, ParseReport } from './parse';
 
 /** extra 下的本扩展命名空间键（与全局/聊天域键同名，位置不同域）。 */
@@ -76,14 +76,19 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
 
 /**
  * 写某楼层的选项存档并立即落盘。
- * 写前对象校验（expectMessage 在场时）：删楼会使索引左移，索引处可能
+ * 写前对象校验（expectMessage 非 null 时）：删楼会使索引左移，索引处可能
  * 已换成别的消息——不一致即丢弃不写（防把选项落到错误楼层并落盘）。
  * 越界/消息缺席/对象已换返回 false（不抛），由调用方决定展示口径。
+ *
+ * expectMessage 必填、以 null 显式表示「无凭据故不校验」：可选参数会让
+ * 新调用方漏传时静默失去防漂移保护，而这种保护失效本身不报错（改必填
+ * 后漏传由类型门拦下）。
  */
-export function writeFloorOptions(index: number, options: ParsedOption[], parsePath: ParseReport['path'], dropped?: number, expectMessage?: unknown): boolean {
+export function writeFloorOptions(args: { index: number; payload: StoredFloorOptions; expectMessage: ChatMessage | null }): boolean {
+    const { index, payload, expectMessage } = args;
     const message = messageAt(index);
     if (!message) return false;
-    if (expectMessage !== undefined && message !== expectMessage) return false;
+    if (expectMessage !== null && message !== expectMessage) return false;
     // 命名空间容器缺则补建（同引用回写无副作用）
     const extra: Record<string, unknown> = isRecord(message.extra) ? message.extra : {};
     message.extra = extra;
@@ -91,8 +96,8 @@ export function writeFloorOptions(index: number, options: ParsedOption[], parseP
     extra[EXTRA_NAMESPACE_KEY] = namespace;
     // 纯数据重建（见文件头 structuredClone 约束）；dropped 仅在有值时
     // 写入——undefined 属性在守门 typeof 判定下会误判坏档
-    const stored: StoredFloorOptions = { options: options.map(o => ({ title: o.title, content: o.content })), parsePath };
-    if (dropped !== undefined) stored.dropped = dropped;
+    const stored: StoredFloorOptions = { options: payload.options.map(o => ({ title: o.title, content: o.content })), parsePath: payload.parsePath };
+    if (payload.dropped !== undefined) stored.dropped = payload.dropped;
     namespace[EXTRA_CHOICE_KEY] = stored;
     saveCurrentChat();
     return true;
@@ -100,12 +105,13 @@ export function writeFloorOptions(index: number, options: ParsedOption[], parseP
 
 /**
  * 清某楼层的选项存档并落盘（生成开始时调——宿主不替我们清，见文件头）。
- * expectMessage 校验同 write 侧；无档/越界即无事发生（不触发无谓落盘）。
+ * expectMessage 校验同 write 侧（必填、null＝无凭据不校验）；无档/越界即
+ * 无事发生（不触发无谓落盘）。
  */
-export function clearFloorOptions(index: number, expectMessage?: unknown): void {
+export function clearFloorOptions(index: number, expectMessage: ChatMessage | null): void {
     const message = messageAt(index);
     if (!message) return;
-    if (expectMessage !== undefined && message !== expectMessage) return;
+    if (expectMessage !== null && message !== expectMessage) return;
     const namespace = choiceNamespaceOf(message);
     if (!namespace || !(EXTRA_CHOICE_KEY in namespace)) return;
     delete namespace[EXTRA_CHOICE_KEY];

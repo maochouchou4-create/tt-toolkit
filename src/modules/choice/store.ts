@@ -7,9 +7,9 @@
  * 唯一跨会话的是最近一次组装 dump（排障/验收用，不持久化）。
  */
 import { defineStore } from 'pinia';
-import { getChatMessages } from '@/host';
+import { getChatMessages, type ChatMessage } from '@/host';
 import type { ParseReport } from './parse';
-import { clearFloorOptions, readFloorOptions, writeFloorOptions } from './persist';
+import { clearFloorOptions, readFloorOptions, writeFloorOptions, type StoredFloorOptions } from './persist';
 
 export type GeneratePhase = 'idle' | 'running' | 'error';
 
@@ -18,7 +18,7 @@ export type GeneratePhase = 'idle' | 'running' | 'error';
  * 刻意不进 pinia state：reactive 会把对象包成 proxy，身份比较（===）
  * 对回原始目标永远失配——守卫需要的是裸引用，模块级持有。
  */
-let anchoredFloorMessage: unknown = null;
+let anchoredFloorMessage: ChatMessage | null = null;
 
 export const useChoiceStore = defineStore('tt-choice', {
     state: () => ({
@@ -39,17 +39,24 @@ export const useChoiceStore = defineStore('tt-choice', {
             this.phase = 'running';
             this.error = '';
         },
-        succeed(options: Array<{ title: string; content: string }>, parsePath: ParseReport['path'], dump: string, floorIndex: number | null, floorMessage: unknown, dropped?: number) {
+        /**
+         * 生成成功入态。存档三件套（options/parsePath/dropped）复用
+         * StoredFloorOptions（与落盘形态同一真相源，禁同形双类型）；
+         * 渲染态三件套（dump/floorIndex/floorMessage）是本 store 的
+         * 展示面字段，不进存档。
+         */
+        succeed(payload: StoredFloorOptions & { dump: string; floorIndex: number | null; floorMessage: ChatMessage | null }) {
             this.phase = 'idle';
-            this.options = options;
-            this.lastParsePath = parsePath;
-            this.lastDump = dump;
-            this.floorIndex = floorIndex;
-            anchoredFloorMessage = floorMessage;
+            this.options = payload.options;
+            this.lastParsePath = payload.parsePath;
+            this.lastDump = payload.dump;
+            this.floorIndex = payload.floorIndex;
+            anchoredFloorMessage = payload.floorMessage;
             // 消息级落盘（写前对象校验防删楼漂移）；无锚楼（聊天尚无
-            // assistant 楼层）＝无处可挂，仅展示
-            if (floorIndex !== null) {
-                writeFloorOptions(floorIndex, options, parsePath, dropped, floorMessage);
+            // assistant 楼层）＝无处可挂，仅展示。floorIndex 与 floorMessage
+            // 同一次锚定成对出现：引用缺席＝无校验凭据，宁不写不落盘
+            if (payload.floorIndex !== null && payload.floorMessage) {
+                writeFloorOptions({ index: payload.floorIndex, payload, expectMessage: payload.floorMessage });
             }
         },
         fail(message: string) {
