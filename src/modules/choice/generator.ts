@@ -5,7 +5,7 @@
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施——用户靠它核对
  * 各注入模块逐项可见。
  */
-import { getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
+import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast } from '@/host';
 import { callGenerateEndpoint, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import {
@@ -20,6 +20,7 @@ import { useRunlogStore } from '@/modules/runlog/store';
 import { choiceStorage, resolveChoiceEndpoint } from './api';
 import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
+import { clearFloorOptions, latestAssistantFloorIndex } from './persist';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
 
@@ -33,6 +34,25 @@ export function cancelGeneration(): void {
 
 export function isGenerating(): boolean {
     return activeAbort !== null;
+}
+
+/**
+ * 生成周期起点：锚定当前末条 assistant 楼层并立即清该楼旧选项存档。
+ *
+ * 清档必须在本仓侧主动做：宿主 clearMessageData 是白名单删除（不碰
+ * extra.ttToolkit）且普通 regenerate 不调——旧选项会在重 roll 后存活
+ * 并被 structuredClone 传染进新 swipe 槽，不能依赖宿主清理。
+ * 生成失败时该楼保持「无选项」态（正确：旧选项随正文作废）；取消
+ * （abort）只走复位分支、不写盘。
+ * 导出仅供冒烟直调断言「生成开始即清档」（浏览器路径经 generateOptions）。
+ */
+export function beginGenerationCycle(): { anchorIndex: number | null; anchorMessage: unknown } {
+    const anchorIndex = latestAssistantFloorIndex();
+    const anchorMessage = anchorIndex !== null ? getChatMessages()[anchorIndex] : null;
+    if (anchorIndex !== null) {
+        clearFloorOptions(anchorIndex, anchorMessage);
+    }
+    return { anchorIndex, anchorMessage };
 }
 
 /**
@@ -74,6 +94,10 @@ export async function generateOptions(): Promise<void> {
     activeAbort = controller;
 
     store.beginGenerate();
+    // 生成开始即清锚楼旧存档（重 roll/重新生成后旧选项作废）并按新锚楼
+    // 复位展示态——不得走 clearOptions（会把上一楼层仍合法的存档一并清掉）
+    const { anchorIndex, anchorMessage } = beginGenerationCycle();
+    store.syncToFloor(anchorIndex);
     // runlog 接线：runId＝enrich/markFailed 目标；handedToClient＝调用 client
     // 前置 true——client 一经调用，本轮失败记录权归传输层（防同次失败双记：
     // client 抛错时 generator 拿不到 runId，null 判据会误判成「未发出」）
@@ -136,7 +160,7 @@ export async function generateOptions(): Promise<void> {
         if (runId !== null) {
             runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length });
         }
-        store.succeed(report.options, report.path, assembly.dumpText);
+        store.succeed(report.options, report.path, assembly.dumpText, anchorIndex, anchorMessage);
         // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {

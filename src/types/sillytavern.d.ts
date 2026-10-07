@@ -153,6 +153,12 @@ declare module '@sillytavern/scripts/st-context' {
         /** 当前 chat_metadata 的立即保存通道（script.js:11175，async 无参） */
         saveMetadata?: () => Promise<unknown>;
         /**
+         * 当前聊天消息变更后的立即保存通道（内部＝saveChatConditional：
+         * script.js:11198 selected_group 分流，群聊安全）。
+         * @hostAnchor scripts/st-context.js:161 saveChat: saveChatConditional,
+         */
+        saveChat?: () => Promise<unknown>;
+        /**
          * power_user 的转发：movingUIState 持久化各浮层拖动位置
          * （dragElement 写入），壳挂载时自恢复读取。
          * @hostAnchor scripts/st-context.js:235 powerUserSettings: power_user,

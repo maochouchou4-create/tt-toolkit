@@ -33,6 +33,7 @@ export {
     getSendTextareaValue,
     listExtensionPromptSlots,
     runWorldInfoScan,
+    saveCurrentChat,
     sendInputMessage,
     setSendTextareaValue,
     substituteMacros,

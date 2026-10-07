@@ -6,6 +6,7 @@
 
 import { writeChatMetadata, writeExtensionSettings } from '@/host';
 import { CHAT_KEY, GLOBAL_KEY, getChat, getGlobal, readChatDomain, readGlobalDomain, setChat, setGlobal } from './service';
+import type { ChatDomain, GlobalDomain } from './service';
 import { newId } from './id';
 
 export interface RoundtripReport {
@@ -16,7 +17,9 @@ export interface RoundtripReport {
     at: string;
 }
 
-const SMOKE_KEY = '_smoke';
+// 测试探针键：非功能域不入域登记，断言处显式豁免（写读后即删、不落用户数据形状）
+const SMOKE_GLOBAL_KEY = '_smoke' as keyof GlobalDomain;
+const SMOKE_CHAT_KEY = '_smoke' as keyof ChatDomain;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,8 +35,8 @@ export function runStorageRoundtrip(): RoundtripReport[] {
     const reports: RoundtripReport[] = [];
 
     const globalToken = newId('rt');
-    setGlobal(SMOKE_KEY, { token: globalToken });
-    const globalRead = getGlobal<{ token: string }>(SMOKE_KEY)?.token;
+    setGlobal(SMOKE_GLOBAL_KEY, { token: globalToken });
+    const globalRead = getGlobal<{ token: string }>(SMOKE_GLOBAL_KEY)?.token;
     reports.push({
         scope: 'global',
         ok: globalRead === globalToken,
@@ -43,8 +46,8 @@ export function runStorageRoundtrip(): RoundtripReport[] {
     });
 
     const chatToken = newId('rt');
-    setChat(SMOKE_KEY, { token: chatToken });
-    const chatRead = getChat<{ token: string }>(SMOKE_KEY)?.token;
+    setChat(SMOKE_CHAT_KEY, { token: chatToken });
+    const chatRead = getChat<{ token: string }>(SMOKE_CHAT_KEY)?.token;
     reports.push({
         scope: 'chat',
         ok: chatRead === chatToken,
@@ -55,11 +58,11 @@ export function runStorageRoundtrip(): RoundtripReport[] {
 
     writeExtensionSettings(settings => {
         const domain = settings[GLOBAL_KEY];
-        if (isRecord(domain)) delete domain[SMOKE_KEY];
+        if (isRecord(domain)) delete domain[SMOKE_GLOBAL_KEY];
     });
     writeChatMetadata(metadata => {
         const domain = metadata[CHAT_KEY];
-        if (isRecord(domain)) delete domain[SMOKE_KEY];
+        if (isRecord(domain)) delete domain[SMOKE_CHAT_KEY];
     });
 
     return reports;

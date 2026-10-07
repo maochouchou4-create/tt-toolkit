@@ -33,6 +33,23 @@ import { getWorldInfoPrompt as stGetWorldInfoPrompt } from '@sillytavern/scripts
 import { getChatMessages, getTavernContext } from './context';
 import type { ChatMessage } from './context';
 
+/**
+ * 当前聊天消息变更的立即落盘通道（写 message.extra 后调用）。
+ * 只许走 context.saveChat（＝saveChatConditional，内部按群聊分流）；
+ * 保存通道缺席（宿主版本漂移）照 writeChatMetadata 的失败纪律：
+ * 内存改动仍生效，但 console.error 留痕，不许静默当作已落盘。
+ */
+export function saveCurrentChat(): void {
+    const save = getTavernContext()?.saveChat;
+    if (typeof save !== 'function') {
+        console.error('[tt-toolkit][host] getContext().saveChat 缺席，消息变更仅写内存未落盘');
+        return;
+    }
+    void Promise.resolve(save()).catch(e => {
+        console.error('[tt-toolkit][host] saveChat 保存失败', e);
+    });
+}
+
 /** 宿主世界书激活扫描的上下文供给（world-info.js:988 globalScanData 子集）。 */
 export interface WorldInfoScanInput {
     /** 扫描用楼层正文（倒序：最新在前——契约见文件头） */

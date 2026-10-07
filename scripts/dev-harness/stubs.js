@@ -89,6 +89,8 @@
         APP_READY: 'app_ready',
         CHAT_CHANGED: 'chat_id_changed',
         MESSAGE_UPDATED: 'message_updated',
+        MESSAGE_SWIPED: 'message_swiped',
+        MESSAGE_DELETED: 'message_deleted',
         CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
         SETTINGS_LOADED: 'settings_loaded',
         // personas 写回链 emit 的两个事件（eventSource.emit stub 通用）
@@ -173,6 +175,8 @@
             return { pipe: '' };
         },
         saveMetadata: async () => console.info('[harness] saveMetadata（stub）'),
+        // 消息级落盘通道（楼层选项 extra 写入后的保存；harness 聊天数据在内存，noop）
+        saveChat: async () => console.info('[harness] saveChat（stub）'),
         powerUserSettings: { movingUI: power_user.movingUI, movingUIState: power_user.movingUIState },
         getRequestHeaders,
         // persona 供给面：书目清单 / openai 预设管理器 / 当前预设名

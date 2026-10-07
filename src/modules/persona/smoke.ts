@@ -10,6 +10,7 @@
 import { event_types, extension_settings, getCurrentCharacter, readPresetInjectMessages } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
+import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { parseYamlToBlocks } from './yaml';
@@ -848,15 +849,17 @@ function runHostLiveBindingChecks(): void {
     }
 
     // 2. 写通道活目标：chat_metadata 换引用后写落当前对象、读回当前对象
+    // （livenessProbe 是测试探针键，不入 ChatDomain 登记——keyof 豁免）
+    const probeKey = 'livenessProbe' as keyof ChatDomain;
     const originalChat = stubs.chat_metadata;
     try {
         stubs.setChatMetadata({});
-        setChat('livenessProbe', { v: 1 });
+        setChat(probeKey, { v: 1 });
         const domain = stubs.chat_metadata.ttToolkit as Record<string, unknown> | undefined;
         const probe = domain?.livenessProbe as { v?: number } | undefined;
         check('host 活取用：chat_metadata 换引用后 setChat 写落当前对象、getChat 读当前对象（写通道目标=现取，脱挂写丢失回归红线）',
-            (getChat<{ v: number }>('livenessProbe'))?.v === 1 && probe?.v === 1,
-            `getChat=${JSON.stringify(getChat('livenessProbe'))} 宿主当前对象=${JSON.stringify(probe)}`);
+            (getChat<{ v: number }>(probeKey))?.v === 1 && probe?.v === 1,
+            `getChat=${JSON.stringify(getChat(probeKey))} 宿主当前对象=${JSON.stringify(probe)}`);
     } finally {
         stubs.setChatMetadata(originalChat);
     }

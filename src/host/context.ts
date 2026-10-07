@@ -32,6 +32,12 @@ export interface TavernContextLike {
     executeSlashCommandsWithOptions?: (command: string) => Promise<unknown>;
     /** 当前 chat_metadata 的立即保存通道（script.js:11175，async 无参） */
     saveMetadata?: () => Promise<unknown>;
+    /**
+     * 当前聊天消息变更后的立即保存通道（内部＝saveChatConditional：
+     * selected_group 分流 saveGroupChat，群聊安全）。严禁改走
+     * @sillytavern/script 裸导出 saveChat——对群聊 throw。
+     */
+    saveChat?: () => Promise<unknown>;
     /** power_user 转发（st-context.js:235）：movingUIState 持久化浮层拖动位置 */
     powerUserSettings?: {
         movingUI: boolean;

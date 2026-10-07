@@ -37,9 +37,16 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 ## 存储域纪律
 
-- 只写 `extension_settings.ttToolkit` 一个新键域。
-- 旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。
-- localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 5 键 + nav 2 键），勿再引用。
+写任何持久化数据前先定域（三域归属判据）：
+
+- **跨聊天复用**（生成参数、端点表、条目池、提示词配置……）＝全局域 `extension_settings.ttToolkit`；
+- **跟单次聊天走**（剧情走向……）＝聊天域 `chat_metadata.ttToolkit`；
+- **单条消息的派生数据**（该楼选项……）＝该消息 `extra.ttToolkit`——写入必须是纯数据（宿主 swipe 会 structuredClone 进新槽位）；写前做对象校验（删楼会使索引左移）、写后立即 `saveCurrentChat()`；**生成开始须主动清旧档**（宿主 `clearMessageData` 白名单不碰 `ttToolkit`，普通 regenerate 不调，宿主不会替扩展清理）；
+- 角色域 `character.data.extensions.ttToolkit` 预留，无写面。
+
+新键义务：域键常量在**归属模块**定义（字面量仅此一份），并登记进 `src/storage/service.ts` 的 `GlobalDomain`/`ChatDomain` 显式键 union——漏登记 vue-tsc 即报错（编译期登记门）；排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
+
+旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 5 键 + nav 2 键），勿再引用。
 
 ## 提交与发布
 

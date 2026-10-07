@@ -7,15 +7,17 @@
  */
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
-import { waitForResource } from '@/host';
+import { eventBus, event_types, waitForResource } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { ensurePromptConfigs, TASK_KEYS, type TaskKey } from '@/prompts';
 import { dumpPersonaTask } from '@/modules/persona';
 import { version } from '@/version';
 import { installAutoGenerate } from './auto';
 import { assembleCurrent } from './generator';
+import { latestAssistantFloorIndex } from './persist';
 import { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
 import { syncAssetPool } from './pool/asset';
+import { useChoiceStore } from './store';
 import OptionsBar from './OptionsBar.vue';
 
 const BAR_MOUNT_ID = 'tt-choice-bar-mount';
@@ -23,6 +25,25 @@ const POLL_INTERVAL_MS = 500;
 const POLL_MAX_TRIES = 20;
 
 let barMounted = false;
+
+/**
+ * 楼层同步（选项条语义＝「当前楼层的选项」）：四事件统一重载末楼——
+ * CHAT_CHANGED 切聊天 / MESSAGE_SWIPED 换 swipe 槽（宿主 swipe 只 emit
+ * 它，必订）/ MESSAGE_UPDATED 编辑器保存修订 / MESSAGE_DELETED 删楼
+ * （索引左移后重载）。订阅形态照 persona 的幂等安装（扩展生命周期与
+ * 页面同寿，监听常驻不退订）。
+ */
+let floorSyncInstalled = false;
+
+function installFloorSync(): void {
+    if (floorSyncInstalled) return;
+    floorSyncInstalled = true;
+    const sync = () => useChoiceStore().syncToFloor(latestAssistantFloorIndex());
+    eventBus.on(event_types.CHAT_CHANGED, sync);
+    eventBus.on(event_types.MESSAGE_SWIPED, sync);
+    eventBus.on(event_types.MESSAGE_UPDATED, sync);
+    eventBus.on(event_types.MESSAGE_DELETED, sync);
+}
 
 function tryMountBar(): boolean {
     if (barMounted) return true;
@@ -98,6 +119,9 @@ export function initChoice(): void {
     syncAssetPool();
     installGlobalPort();
     installAutoGenerate();
+    installFloorSync();
+    // 启动即按当前末楼装载（聊天晚于扩展就绪时由四事件补齐）
+    useChoiceStore().syncToFloor(latestAssistantFloorIndex());
     void mountBarWithRetry();
     console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TT_TOOLKIT__.prompts）`);
 }
@@ -108,6 +132,7 @@ export function initChoiceMinimal(): void {
     syncAssetPool();
     installGlobalPort();
     installAutoGenerate();
+    installFloorSync();
 }
 
 export { runChoiceSmoke } from './smoke';

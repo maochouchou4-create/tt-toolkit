@@ -14,6 +14,7 @@ import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointI
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions } from './generator';
+import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { drawAmount, resolvePool, safeWeight } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
@@ -241,6 +242,7 @@ function runInjectionChecks(): void {
 interface SmokeStubs {
     eventSource: { emit(type: string, ...args: unknown[]): unknown };
     getContext(): { chat: unknown[] };
+    saveChatCalls: number;
 }
 
 function smokeStubs(): SmokeStubs | null {
@@ -348,6 +350,133 @@ async function runAutoGenerateChecks(): Promise<void> {
     if (savedEndpoints.length === 0) {
         writeApiDomain([]);
     }
+}
+
+/**
+ * 楼层落盘机判（消息级持久化 §用户可见行为 ①–⑧）：
+ * roundtrip/落盘通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼
+ * 重载/写侧守门/坏档回退。事件驱动走 stub eventSource（与浏览器
+ * eventBus 同一条订阅链路）。
+ */
+async function runFloorPersistChecks(): Promise<void> {
+    const stubs = smokeStubs();
+    const store = useChoiceStore();
+    if (!stubs) {
+        check('楼层落盘：冒烟 stub 在场', false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
+        return;
+    }
+    check('楼层落盘：冒烟 stub 在场', true);
+    const context = stubs.getContext();
+    const emit = (type: string, ...args: unknown[]): unknown => stubs.eventSource.emit(type, ...args);
+    const savedActiveEndpointId = readActiveEndpointId();
+
+    interface FakeMessage { mes?: string; is_user?: boolean; is_system?: boolean; extra?: Record<string, unknown>; }
+    const msg = (mes: string, extra?: Record<string, unknown>): FakeMessage => ({ mes, is_user: false, extra });
+    const choiceExtra = (options: Array<{ title: string; content: string }>, parsePath = 'json'): Record<string, unknown> => ({
+        ttToolkit: { choice: { options, parsePath } },
+    });
+
+    // ① 楼层级 roundtrip（机制底座）＋② 落盘通道确实被调用
+    const chat1: FakeMessage[] = [msg('（角色卡开场白楼层）'), msg('AI 的真实回复正文。')];
+    context.chat = chat1;
+    const optsA = [{ title: '甲', content: '做甲事' }];
+    const callsBefore = stubs.saveChatCalls;
+    check('楼层落盘：writeFloorOptions 写入并返回 true', writeFloorOptions(1, optsA, 'json') === true);
+    check('楼层落盘：写入触发 getContext().saveChat 落盘通道（计数 +1）', stubs.saveChatCalls === callsBefore + 1, `calls=${stubs.saveChatCalls}`);
+    const readBack = readFloorOptions(1);
+    check(
+        '楼层落盘：roundtrip 读回一致（options 逐字段＋parsePath）',
+        !!readBack && readBack.parsePath === 'json' && readBack.options.length === 1 && readBack.options[0]?.title === '甲' && readBack.options[0]?.content === '做甲事',
+        `read=${JSON.stringify(readBack)}`,
+    );
+
+    // ③ 刷新后选项还在：清空 store 状态 → 同一 chat 按楼层重新 restore
+    store.$reset();
+    store.restore(1);
+    check('楼层落盘：刷新模拟（清 store 后按楼层 restore）选项与解析路径恢复', store.options.length === 1 && store.options[0]?.title === '甲' && store.lastParsePath === 'json', `count=${store.options.length} path=${store.lastParsePath}`);
+
+    // ④ 切聊天显示该聊天自己的选项；无存档＝空态
+    const chat2: FakeMessage[] = [msg('（另一聊天开场白）'), msg('另一聊天的回复')];
+    context.chat = chat2;
+    writeFloorOptions(1, [{ title: '乙', content: '做乙事' }], 'bracket_fallback');
+    emit('chat_id_changed');
+    check('楼层落盘：切聊天后装载新聊天自己的选项（emit CHAT_CHANGED）', store.options.length === 1 && store.options[0]?.title === '乙' && store.lastParsePath === 'bracket_fallback' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
+    context.chat = [msg('（无存档聊天开场白）'), msg('无存档楼层')];
+    emit('chat_id_changed');
+    check('楼层落盘：切到无存档聊天＝空态', store.options.length === 0 && store.lastParsePath === '');
+
+    // ⑤ 重 roll／重新生成后旧选项作废（核心行为）
+    context.chat = chat1;
+    emit('chat_id_changed');
+    check('楼层落盘：切回原聊天恢复原存档（⑤前置）', store.options.length === 1 && store.options[0]?.title === '甲');
+    // 成功路径：完整生成管线（debugForceRaw 无网络依赖）——生成开始清旧档、
+    // 成功后新档＝本轮解析结果
+    choiceStorage.updateGenParams({ debugForceRaw: true });
+    try {
+        await generateOptions();
+    } finally {
+        choiceStorage.updateGenParams({ debugForceRaw: false });
+    }
+    const afterRegen = readFloorOptions(1);
+    check(
+        '楼层落盘：重 roll 重新生成后旧选项作废（旧档被清、新档＝本轮生成结果、UI 跟随）',
+        !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲') && store.options.length === 4 && store.lastParsePath === 'bracket_fallback',
+        `oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} ui=${store.options.length}`,
+    );
+    // 失败路径：请求未发出（端点缺失）——生成开始已清档，该楼保持无选项态
+    writeFloorOptions(1, optsA, 'json');
+    setActiveEndpointId('no-such-endpoint');
+    try {
+        await generateOptions();
+    } finally {
+        setActiveEndpointId(savedActiveEndpointId);
+    }
+    check(
+        '楼层落盘：生成失败路径旧档已清且不写新档（UI 空态、无残留）',
+        readFloorOptions(1) === null && store.options.length === 0 && store.phase === 'error',
+        `stored=${JSON.stringify(readFloorOptions(1))} phase=${store.phase}`,
+    );
+    store.$reset();
+
+    // ⑤′ swipe 后选项跟随：宿主 syncSwipeToMes 用 swipe 槽 extra 整体替换
+    chat1[1] = { mes: 'swipe 后正文', is_user: false, extra: choiceExtra([{ title: '丙', content: '做丙事' }]) };
+    emit('message_swiped');
+    check(
+        '楼层落盘：swipe 换槽后选项跟随新 swipe 槽的 extra（emit MESSAGE_SWIPED）',
+        store.options.length === 1 && store.options[0]?.title === '丙' && store.floorIndex === 1,
+        `title=${store.options[0]?.title} idx=${store.floorIndex}`,
+    );
+
+    // ⑥ 删楼后重载（索引左移正确性）
+    const delChat: FakeMessage[] = [msg('（开场白）'), msg('甲楼', choiceExtra([{ title: '丁', content: '做丁事' }])), msg('乙楼')];
+    context.chat = delChat;
+    emit('message_deleted');
+    check('楼层落盘：删楼事件重载（无存档末楼＝空态）', store.options.length === 0 && store.floorIndex === 2);
+    delChat.pop();
+    emit('message_deleted');
+    check('楼层落盘：删末楼后按新末楼装载（索引左移不错位）', store.options.length === 1 && store.options[0]?.title === '丁' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
+    delChat.splice(1);
+    emit('message_deleted');
+    // 开场白楼也是 assistant 楼（is_user=false）——剩开场白＝按 0 楼装载空态
+    check('楼层落盘：删到仅剩开场白＝按开场白楼装载空态（不再回退无归属）', store.options.length === 0 && store.floorIndex === 0, `idx=${store.floorIndex}`);
+
+    // ⑦ 写侧守门：越界与写前对象校验
+    check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions(99, optsA, 'json') === false && writeFloorOptions(-1, optsA, 'json') === false);
+    const foreign = msg('别的消息对象');
+    const mismatchCalls = stubs.saveChatCalls;
+    check(
+        '楼层落盘：写前对象校验（索引处已换成别的消息对象）拒绝写入且不触发落盘',
+        writeFloorOptions(0, optsA, 'json', foreign) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
+        `calls=${stubs.saveChatCalls}`,
+    );
+
+    // ⑧ 读侧坏档回退 null
+    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: '不是数组', parsePath: 'json' } } })];
+    check('楼层落盘：坏档（options 非数组）回退 null', readFloorOptions(0) === null);
+    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: 1, content: 'x' }], parsePath: 'json' } } })];
+    check('楼层落盘：坏档（options 元素形状不符）回退 null', readFloorOptions(0) === null);
+    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [], parsePath: 'nope' } } })];
+    check('楼层落盘：坏档（parsePath 非法枚举）回退 null', readFloorOptions(0) === null);
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
@@ -616,10 +745,11 @@ export async function runChoiceSmoke(): Promise<void> {
     runAssetPoolChecks();
     runInjectionChecks();
     await runAutoGenerateChecks();
+    await runFloorPersistChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（110 条/17 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（110 条/17 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过。');
 }

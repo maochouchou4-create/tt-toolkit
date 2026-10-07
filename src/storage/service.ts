@@ -36,25 +36,40 @@ export interface NavStorageState {
     legacyQrCleaned?: boolean;
 }
 
+/**
+ * 全局域显式键登记：每个功能子域一个键，域键常量在归属模块定义
+ * （字面量仅此一份），登记与此处互为表里——新增键不补进本 union，
+ * getGlobal/setGlobal 的 keyof 门在 vue-tsc 阶段报错（编译期登记门）。
+ */
 export interface GlobalDomain {
     nav: NavStorageState;
-    /**
-     * 全局活动端点（引用统一端点表条目 id；''/缺席/指向已删端点＝未选态）。
-     * 「当前用的端点」是全局概念：choice 与 persona 两任务共用同一选中，
-     * 读写走 modules/apis/storage 的 readActiveEndpointId/setActiveEndpointId
-     * 单通道，其他位置不直接碰此键。
-     */
+    /** choice 域（生成参数＋条目池；modules/choice/api.ts GLOBAL_CHOICE_KEY） */
+    choice?: unknown;
+    /** 统一端点表（modules/apis/storage.ts APIS_DOMAIN_KEY） */
+    apis?: unknown;
+    /** 全局活动端点（引用统一端点表条目 id；''/缺席/指向已删端点＝未选态）。 */
     activeEndpointId?: string;
+    /** 破限预设名（modules/apis/storage.ts JAILBREAK_PRESET_KEY） */
+    jailbreakPreset?: unknown;
+    /** persona 域（modules/persona/storage.ts PERSONA_DOMAIN_KEY） */
+    persona?: unknown;
+    /** 提示词配置集（prompts/storage.ts GLOBAL_PROMPT_CONFIGS_KEY） */
+    promptConfigs?: unknown;
+    /** legacy：旧 promptConfigs 数组形态的活跃键（只读迁移残留，读侧出局后自然消失） */
+    promptActiveId?: unknown;
+    /** 剧情走向预设列表（modules/choice/direction.ts GLOBAL_DIRECTION_PRESETS_KEY） */
+    directionPresets?: unknown;
     /**
      * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
      * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
      */
     legacyWipeDone?: boolean;
-    [key: string]: unknown;
 }
 
+/** 聊天域显式键登记（登记义务同 GlobalDomain）。 */
 export interface ChatDomain {
-    [key: string]: unknown;
+    /** 剧情走向（modules/choice/direction.ts CHAT_STORY_DIRECTION_KEY） */
+    storyDirection?: unknown;
 }
 
 /** 读全局域原始单例（不快照——storage 内部面与调试 dump 用）。 */
@@ -94,7 +109,7 @@ function deepSnapshot<T>(value: T): T {
  */
 export function initStorage(): void {
     writeExtensionSettings(settings => {
-        const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as GlobalDomain;
+        const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as unknown as GlobalDomain;
 
         // nav 域迁移：storage 值缺省时从旧 localStorage 键搬（旧键保留）
         const nav = (isRecord(domain.nav) ? domain.nav : {}) as Partial<NavStorageState> & Record<string, unknown>;
@@ -119,31 +134,35 @@ function readLegacyBoolean(key: string, fallback: boolean): boolean {
     return fallback;
 }
 
-/** 读全局域子域（真深快照：返回值与存储单例解耦，写入走 setGlobal）。 */
-export function getGlobal<T>(key: string): T | undefined {
+/**
+ * 读全局域子域（真深快照：返回值与存储单例解耦，写入走 setGlobal）。
+ * key 收窄到显式键 union＝编译期登记门（见 GlobalDomain 注）。
+ */
+export function getGlobal<T>(key: keyof GlobalDomain): T | undefined {
     const domain = readGlobalDomain();
     return deepSnapshot(domain[key]) as T | undefined;
 }
 
 /** 写全局域子域：整体替换该 key 下的对象并调度落盘。 */
-export function setGlobal(key: string, value: unknown): void {
+export function setGlobal(key: keyof GlobalDomain, value: unknown): void {
     writeExtensionSettings(settings => {
-        const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as GlobalDomain;
+        // 写视图＝键登记表（值 unknown：值形状由归属模块的 normalize 守门）
+        const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as Record<keyof GlobalDomain, unknown>;
         domain[key] = value;
         settings[GLOBAL_KEY] = domain;
     });
 }
 
 /** 读聊天域子域（真深快照：返回值与存储单例解耦，写入走 setChat）。 */
-export function getChat<T>(key: string): T | undefined {
+export function getChat<T>(key: keyof ChatDomain): T | undefined {
     const domain = readChatDomain();
     return deepSnapshot(domain[key]) as T | undefined;
 }
 
 /** 写聊天域子域：整体替换该 key，经 host 层立即显式保存。 */
-export function setChat(key: string, value: unknown): void {
+export function setChat(key: keyof ChatDomain, value: unknown): void {
     writeChatMetadata(metadata => {
-        const domain = (isRecord(metadata[CHAT_KEY]) ? metadata[CHAT_KEY] : {}) as ChatDomain;
+        const domain = (isRecord(metadata[CHAT_KEY]) ? metadata[CHAT_KEY] : {}) as Record<keyof ChatDomain, unknown>;
         domain[key] = value;
         metadata[CHAT_KEY] = domain;
     });

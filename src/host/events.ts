@@ -31,6 +31,11 @@ export const event_types = {
     APP_READY: stEventTypes.APP_READY,
     CHAT_CHANGED: stEventTypes.CHAT_CHANGED,
     MESSAGE_UPDATED: stEventTypes.MESSAGE_UPDATED,
+    // swipe 换正文（script.js:11160/12222 emit；swipe 槽 extra 整体替换：
+    // script.js:8597——选项条跟随当前楼层的必订事件）
+    MESSAGE_SWIPED: stEventTypes.MESSAGE_SWIPED,
+    // 删楼（events.js:11）——末楼索引左移后重载选项
+    MESSAGE_DELETED: stEventTypes.MESSAGE_DELETED,
     MESSAGE_RECEIVED: stEventTypes.MESSAGE_RECEIVED,
     CHARACTER_MESSAGE_RENDERED: stEventTypes.CHARACTER_MESSAGE_RENDERED,
     SETTINGS_LOADED: stEventTypes.SETTINGS_LOADED,

@@ -62,7 +62,9 @@ globalThis.localStorage = {
 const eventHandlers = new Map();
 
 // getContext 存根（稳定单例）：守卫链读楼层正文（chat 数组）需要
-// 跨调用持久——每次新对象会让「往 chat 里放消息」这一动作失效
+// 跨调用持久——每次新对象会让「往 chat 里放消息」这一动作失效。
+// chat 是可换装属性（整体替换 stubContext.chat 后 emit CHAT_CHANGED
+// 即模拟切聊天）；saveChat 为消息 extra 落盘通道存根（计数供断言）
 // externalPrompts 给自动注入面三个槽位——stub_anchor
 // （depth 0 非空）、stub_blank（空白 value＝应被跳过）、stub_memory
 // （depth 4 非空）——断言 depth 升序排序与「非空即带、空槽位跳过」
@@ -76,6 +78,10 @@ const stubContext = {
     // chat 域立即保存通道（调用计数供断言：writeChatMetadata 是否真的走它）
     saveMetadata: async () => {
         globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls++;
+    },
+    // 消息级落盘通道（调用计数供断言：writeFloorOptions 是否真的走它）
+    saveChat: async () => {
+        globalThis.__TT_SMOKE_STUBS__.saveChatCalls++;
     },
     // openai 预设管理器存根：破限注入机判用——「冒烟破限」＝assistant 开场
     // ＋user 接话两条启用文本条目，附 marker 占位与停用条目各一（启用过滤/
@@ -207,6 +213,8 @@ globalThis.__TT_SMOKE_STUBS__ = {
         APP_READY: 'app_ready',
         CHAT_CHANGED: 'chat_id_changed',
         MESSAGE_UPDATED: 'message_updated',
+        MESSAGE_SWIPED: 'message_swiped',
+        MESSAGE_DELETED: 'message_deleted',
         MESSAGE_RECEIVED: 'message_received',
         CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
         SETTINGS_LOADED: 'settings_loaded',
@@ -228,6 +236,7 @@ globalThis.__TT_SMOKE_STUBS__ = {
     dragElement: noop,
     getContext: () => stubContext,
     saveMetadataCalls: 0,
+    saveChatCalls: 0,
     // ------------------------------------------------------------------
     // persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
     // ------------------------------------------------------------------
@@ -355,14 +364,19 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
     failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
 }
 
+// 消息级落盘的链路口径在 runFloorPersistChecks 内以 delta 断言收口
+// （writeFloorOptions 调用前后 saveChatCalls 恰 +1）——此处不再设全局
+// 弱门：任何生成成功都会写楼层存档，弱门会被别处用例满足而失去判别力。
+
 // ---------------------------------------------------------------------------
 // choice 机判：组装/解析（[choice-smoke] 输出行收口）＋全局口在场
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（丢断言必须红）：runChoiceSmoke 的 check() 调用数是
 // 可数的——新增断言要同步 +N，删断言同理；阈值式断言（<N）锁不住丢断言。
 // 期望构成：组装注入/解析回退＋解析守门＋常量请求形状＋runlog 接线＋池抽取
-// 分布/池注入/自动生成守卫链，共 88。
-const CHOICE_PASS_EXPECTED = 88;
+// 分布/池注入/自动生成守卫链，共 88；楼层落盘（roundtrip/落盘通道/刷新
+// 恢复/切聊天/重 roll 作废×2/swipe 跟随/删楼×3/写侧守门×2/坏档×3）＋19。
+const CHOICE_PASS_EXPECTED = 107;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
