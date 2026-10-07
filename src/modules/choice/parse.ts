@@ -1,11 +1,20 @@
 /**
- * 选项输出解析（服务商结构化输出为主＋客户端解析兜底）。
+ * 选项输出解析（服务商结构化输出为主＋客户端元素级恢复兜底）。
  *
  * 主路径：JSON 对象契约 {"options":[...]}（与 json_object 档「输出必须
  * 是对象」的规范对齐；裸数组容错保留，兼容旧输出）。LLM 常见畸形先
  * 修复——尾随逗号、markdown 代码围栏、思维链标签前缀。
+ * 元素级恢复：容器完整 parse 失败而 "options" 锚点在场时，用字符串感知
+ * 的逐元素扫描（RFC 8259 §7 转义状态机）切出每个完整 {...} 元素单独
+ * parse——中转站截断常表现为「每条选项本身完整、只缺容器收尾 ]}」，
+ * 容器级 parse 会把整批可用品连坐作废；恢复成功记 partial＋残缺丢弃数。
+ * 切出的片段 parse 成功不构成切分正确的证据（值内未转义引号会错位出
+ * 恰好合法的子串），每元素之后必须做分隔符严格校验：其后首个非空白
+ * 字符只能是 , / ] / EOF（RFC 8259 §5/§6 值分隔语法）——违者整批判
+ * 损坏，交骸骨守门拒收，绝不把坏 JSON 静默恢复成垃圾选项。
  * 兜底路径：行首 [标题]/【标题】括号启发式——response_format 不被
- * 支持/被忽略/解析失败时的确定性回退。
+ * 支持/被忽略/解析失败时的确定性回退；零标题命中时不再把整段散文
+ * 合成为单条无标题选项（fail fast 可见优于静默降级）。
  * 纯函数：畸形输入的回退行为可确定性触发与断言（冒烟判据）。
  */
 
@@ -14,10 +23,15 @@ export interface ParsedOption {
     content: string;
 }
 
-/** 解析路径溯源（dump/排障：走了 JSON 主路径还是括号回退）。 */
+/** 解析路径溯源（dump/排障：走了 JSON 主路径、元素级恢复还是括号回退）。 */
 export interface ParseReport {
-    path: 'json' | 'bracket_fallback' | 'json_reject' | 'empty';
+    path: 'json' | 'partial' | 'bracket_fallback' | 'json_reject' | 'empty';
     options: ParsedOption[];
+    /**
+     * partial 专用：残缺丢弃的尾元素数（切片前统计，与 count 截断无关）。
+     * 其余路径缺席；恢复条数恒等于 options.length，不另设字段（防双真相源）。
+     */
+    dropped?: number;
 }
 
 const REASONING_TAG_RE = /<(?:think(?:ing)?|reasoning|thought|antThinking)>[\s\S]*?<\/(?:think(?:ing)?|reasoning|thought|antThinking)>/gi;
@@ -74,6 +88,16 @@ function fixTrailingCommas(text: string): string {
     return text.replace(/,(?=\s*[}\]])/g, '');
 }
 
+/** 单个元素 → 选项（{title,content}／{title,text}／纯字符串容错；空项为 null）。 */
+function toOption(item: unknown): ParsedOption | null {
+    if (typeof item === 'string') return { title: '', content: item.trim() };
+    if (typeof item !== 'object' || item === null) return null;
+    const o = item as Record<string, unknown>;
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    const content = typeof o.content === 'string' ? o.content.trim() : typeof o.text === 'string' ? o.text.trim() : '';
+    return title || content ? { title, content } : null;
+}
+
 /**
  * JSON 数组解析（主路径）：兼容 {title,content}／纯字符串元素。
  * 非数组/解析失败/解析后全空返回 null。
@@ -83,18 +107,147 @@ function parseJsonArray(text: string): ParsedOption[] | null {
         const parsed = JSON.parse(fixTrailingCommas(text)) as unknown;
         if (!Array.isArray(parsed)) return null;
         const options = parsed
-            .map(item => {
-                if (typeof item === 'string') return { title: '', content: item.trim() };
-                const o = (item ?? {}) as Record<string, unknown>;
-                const title = typeof o.title === 'string' ? o.title.trim() : '';
-                const content = typeof o.content === 'string' ? o.content.trim() : typeof o.text === 'string' ? o.text.trim() : '';
-                return { title, content };
-            })
-            .filter(o => o.content || o.title);
+            .map(toOption)
+            .filter((o): o is ParsedOption => o !== null);
         return options.length > 0 ? options : null;
     } catch {
         return null;
     }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isWsChar(ch: string): boolean {
+    return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+}
+
+function skipWs(text: string, from: number): number {
+    let i = from;
+    while (i < text.length && isWsChar(text[i])) i++;
+    return i;
+}
+
+/**
+ * 字符串感知的扫描游标（RFC 8259 §7）：inString／escape 双标志决定结构
+ * 字符是否承重——正文里出现 {}[]":, 或转义序列只在字符串内，不参与
+ * 容器结构判定（防「正文含花括号被误当边界」）。
+ */
+interface ScanCursor {
+    inString: boolean;
+    escape: boolean;
+}
+
+/** 单步推进游标；返回该字符是否处于字符串外（承重字符判定的依据）。 */
+function stepCursor(cursor: ScanCursor, ch: string): boolean {
+    if (cursor.inString) {
+        if (cursor.escape) cursor.escape = false;
+        else if (ch === '\\') cursor.escape = true;
+        else if (ch === '"') cursor.inString = false;
+        return false;
+    }
+    if (ch === '"') cursor.inString = true;
+    return true;
+}
+
+/**
+ * 顶层锚点：字符串外首个「后紧跟 `:` `[`」的 `"options"` 键，返回 `[` 之后
+ * 下标；无锚点 -1。
+ *
+ * 候选不成立时继续往后扫而非短路返回：`"options"` 可能先作为普通词出现
+ * （正文讨论、或被引号包住的字符串值），此时真正的契约锚点还在后面——
+ * 短路会让本该恢复的选项连坐作废（与「容器缺收口整批作废」同一类损失）。
+ */
+function findTopLevelOptionsAnchor(text: string): number {
+    const KEY = '"options"';
+    const cursor: ScanCursor = { inString: false, escape: false };
+    for (let i = 0; i < text.length; i++) {
+        if (!stepCursor(cursor, text[i])) continue;
+        if (!text.startsWith(KEY, i)) continue;
+        let j = skipWs(text, i + KEY.length);
+        if (text[j] !== ':') continue;
+        j = skipWs(text, j + 1);
+        if (text[j] === '[') return j + 1;
+    }
+    return -1;
+}
+
+/** 从 `{` 起扫出配对 `}` 下标；未闭合 -1（depth 计数＋字符串感知）。 */
+function scanObjectElementEnd(text: string, from: number): number {
+    const cursor: ScanCursor = { inString: false, escape: false };
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+        const ch = text[i];
+        if (!stepCursor(cursor, ch)) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) return i;
+        }
+    }
+    return -1;
+}
+
+/** 元素级扫描产物：恢复出的选项＋残缺丢弃数。 */
+interface ElementScan {
+    options: ParsedOption[];
+    dropped: number;
+}
+
+/**
+ * 对象契约的元素级扫描：从 "options" 锚点逐元素切完整 {...} 单独 parse。
+ *
+ * 三条终止语义（必须分开，不得合并）：
+ * - 元素后到 EOF 只有空白＝容器未收口但元素完整 → 合法恢复；
+ * - 元素不完整/parse 失败＝残缺起点 → 丢弃该元素并停扫（后续必然更残）；
+ * - 元素后出现 , ] EOF 之外的首个非空白字符＝流损坏（inString 错位或
+ *   提前闭合——「能 parse 成功」是巧合不是正确性证据）→ 整批拒绝（null）。
+ */
+function scanContractElements(text: string): ElementScan | null {
+    let i = findTopLevelOptionsAnchor(text);
+    if (i < 0) return null;
+    const options: ParsedOption[] = [];
+    for (;;) {
+        i = skipWs(text, i);
+        if (i >= text.length) return { options, dropped: 0 };
+        const ch = text[i];
+        if (ch === ']') return { options, dropped: 0 };
+        if (ch !== '{') return null;
+        const close = scanObjectElementEnd(text, i);
+        if (close < 0) return { options, dropped: 1 };
+        let element: ParsedOption | null = null;
+        try {
+            element = toOption(JSON.parse(fixTrailingCommas(text.slice(i, close + 1))));
+        } catch {
+            element = null;
+        }
+        if (element === null) return { options, dropped: 1 };
+        options.push(element);
+        i = skipWs(text, close + 1);
+        if (i >= text.length) return { options, dropped: 0 };
+        const sep = text[i];
+        if (sep === ',') {
+            i += 1;
+            continue;
+        }
+        if (sep === ']') return { options, dropped: 0 };
+        return null;
+    }
+}
+
+/**
+ * 「像 JSON」结构判定（骸骨守门判据的单点收敛）：数组开头且 `[` 后首个非
+ * 空白字符是 `{` 或 `"`（JSON 数组形态——`[标题]正文` 的设计形态首字符是
+ * 标题文字，不误伤）；或全文含契约键字面量（兜住散文前缀＋截断 JSON 的
+ * 混合形态）。
+ *
+ * 不判「以 `{` 开头」：调用点在对象契约分支之后，该形态已被前序分支全部
+ * 接管（`{` 开头的文本到不了这里），写进来即不可达判据。
+ */
+function looksLikeJsonShaped(text: string): boolean {
+    return /^\[\s*[{"]/.test(text)
+        || text.includes('"title"') || text.includes('"content"') || text.includes('"options"');
 }
 
 /**
@@ -132,10 +285,9 @@ function parseBracketFallback(text: string): ParsedOption[] {
      */
     const GAP_RE = /^(?:[^\S\r\n]|\p{Extended_Pictographic}(?:\p{Variation_Selector}|\u{200D}|\u{20E3}|\p{Emoji_Modifier})*)*$/u;
     const matches = [...text.matchAll(TITLE_RE)];
-    if (matches.length === 0) {
-        const trimmed = text.trim();
-        return trimmed ? [{ title: '', content: trimmed }] : [];
-    }
+    // 零标题命中＝模型没按选项格式输出：不再把整段散文合成为单条无标题
+    // 选项（silent-failure——用户看不出坏了），交上层按 empty 报错带出原文
+    if (matches.length === 0) return [];
 
     const entries: BracketEntry[] = [];
     for (let i = 0; i < matches.length; i++) {
@@ -166,7 +318,8 @@ function parseBracketFallback(text: string): ParsedOption[] {
 
 /**
  * 解析入口：剥思维链 → 提 <options> 块 → 剥代码围栏 → JSON 主路径 →
- * 括号回退。count 截断（模型超发时只取前 N 条）。
+ * 元素级恢复（partial）→ 骸骨守门 → 括号回退。count 截断（模型超发时
+ * 只取前 N 条）。
  */
 export function parseOptions(text: string, count: number): ParseReport {
     let c = stripReasoning(String(text ?? ''));
@@ -175,34 +328,42 @@ export function parseOptions(text: string, count: number): ParseReport {
     if (!c) return { path: 'empty', options: [] };
 
     // 对象契约形态（主契约：{"options":[...]}——与 json_object 档「输出
-    // 必须是对象」的规范对齐）：解出 options 数组走主路径
+    // 必须是对象」的规范对齐）：三级判定按序——完整 parse 采信；parse
+    // 失败交元素级扫描；零可恢复元素才落骸骨守门
     if (c.startsWith('{')) {
+        let parseFailed = false;
         try {
-            const obj = JSON.parse(fixTrailingCommas(c)) as Record<string, unknown>;
-            if (Array.isArray(obj?.options)) {
+            const obj = JSON.parse(fixTrailingCommas(c)) as unknown;
+            if (isPlainObject(obj) && Array.isArray(obj.options)) {
                 const json = parseJsonArray(JSON.stringify(obj.options));
-                if (json) return { path: 'json', options: json.slice(0, count) };
+                // 空数组直接采信为 empty——落进元素扫描会把合法空态误报成 partial
+                return json
+                    ? { path: 'json', options: json.slice(0, count) }
+                    : { path: 'empty', options: [] };
             }
         } catch {
-            // 落回退
+            parseFailed = true;
         }
+        if (!parseFailed) {
+            // 完整 JSON 但无 options 数组（异构容器）——非契约形态，fail fast
+            return { path: 'json_reject', options: [] };
+        }
+        const scan = scanContractElements(c);
+        if (scan !== null && scan.options.length > 0) {
+            return { path: 'partial', options: scan.options.slice(0, count), dropped: scan.dropped };
+        }
+        return { path: 'json_reject', options: [] };
     }
     // 裸数组容错（回退吸收保留）：兼容旧契约输出与不守对象契约的模型
     if (c.startsWith('[')) {
         const json = parseJsonArray(c);
         if (json) return { path: 'json', options: json.slice(0, count) };
     }
-    // JSON 骸骨守门：主路径解析失败而文本呈 JSON 形态时不进括号回退——回退会把
-    // 数组方括号当标题括号，把整坨 JSON 合成一条废选项（title=JSON 骸骨、
-    // content=尾随 }）。三臂判据：①对象开头（合法括号回退输入不可能以 { 开头，
-    // 零误判）；②数组开头且 [ 后首个非空白字符是 { 或 "（JSON 数组形态——
-    // [标题]正文 的设计形态首字符是标题文字，不误伤）；③全文含契约键字面量
-    // （兜住散文前缀＋截断 JSON 的混合形态）。fail fast 交上层报错带出原文。
-    const jsonAttempt =
-        c.startsWith('{')
-        || /^\[\s*[{"]/.test(c)
-        || c.includes('"title"') || c.includes('"content"') || c.includes('"options"');
-    if (jsonAttempt) {
+    // JSON 骸骨守门：主路径与元素级恢复都无产出而文本呈 JSON 形态时，
+    // 不进括号回退——回退会把数组方括号当标题括号，把整坨 JSON 合成一
+    // 条废选项（title=JSON 骸骨、content=尾随 }）。判据单一谓词化
+    //（looksLikeJsonShaped），fail fast 交上层报错带出原文。
+    if (looksLikeJsonShaped(c)) {
         return { path: 'json_reject', options: [] };
     }
     const fallback = parseBracketFallback(c);

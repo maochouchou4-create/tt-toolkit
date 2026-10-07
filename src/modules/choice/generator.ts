@@ -158,9 +158,9 @@ export async function generateOptions(): Promise<void> {
             throw new Error(message);
         }
         if (runId !== null) {
-            runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length });
+            runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length, dropped: report.dropped });
         }
-        store.succeed(report.options, report.path, assembly.dumpText, anchorIndex, anchorMessage);
+        store.succeed(report.options, report.path, assembly.dumpText, anchorIndex, anchorMessage, report.dropped);
         // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {

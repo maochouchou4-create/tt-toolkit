@@ -18,12 +18,18 @@ const EXTRA_NAMESPACE_KEY = 'ttToolkit';
 /** 命名空间内的选项键（为同位置将来存别的楼层派生数据留位）。 */
 const EXTRA_CHOICE_KEY = 'choice';
 
-const PARSE_PATHS: readonly ParseReport['path'][] = ['json', 'bracket_fallback', 'json_reject', 'empty'];
+/** 存档白名单与 ParseReport['path'] 同源（漏登记＝该路径存档被当坏档丢弃）。 */
+const PARSE_PATHS: readonly ParseReport['path'][] = ['json', 'partial', 'bracket_fallback', 'json_reject', 'empty'];
 
 /** 楼层存档的读取形态（write 侧写入同构）。 */
 export interface StoredFloorOptions {
     options: ParsedOption[];
     parsePath: ParseReport['path'];
+    /**
+     * partial 路径的残缺丢弃数；其余路径缺席。刻意 optional：v1.5.17
+     * 存量档无此字段，守门若要求在场＝升级后旧楼选项全被判坏档清空。
+     */
+    dropped?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,10 +49,11 @@ function choiceNamespaceOf(message: Record<string, unknown>): Record<string, unk
     return isRecord(ns) ? ns : null;
 }
 
-/** 存档形状守门：options 为 {title,content} 字符串数组、parsePath 属合法枚举。 */
+/** 存档形状守门：options 为 {title,content} 字符串数组、parsePath 属合法枚举、dropped 缺席合法／在场须为数字。 */
 function isStoredFloorOptions(value: unknown): value is StoredFloorOptions {
     if (!isRecord(value) || !Array.isArray(value.options) || typeof value.parsePath !== 'string') return false;
     if (!PARSE_PATHS.includes(value.parsePath as ParseReport['path'])) return false;
+    if (value.dropped !== undefined && typeof value.dropped !== 'number') return false;
     return value.options.every(o => isRecord(o) && typeof o.title === 'string' && typeof o.content === 'string');
 }
 
@@ -63,6 +70,7 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
     return {
         options: stored.options.map(o => ({ title: o.title, content: o.content })),
         parsePath: stored.parsePath,
+        dropped: stored.dropped,
     };
 }
 
@@ -72,7 +80,7 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
  * 已换成别的消息——不一致即丢弃不写（防把选项落到错误楼层并落盘）。
  * 越界/消息缺席/对象已换返回 false（不抛），由调用方决定展示口径。
  */
-export function writeFloorOptions(index: number, options: ParsedOption[], parsePath: ParseReport['path'], expectMessage?: unknown): boolean {
+export function writeFloorOptions(index: number, options: ParsedOption[], parsePath: ParseReport['path'], dropped?: number, expectMessage?: unknown): boolean {
     const message = messageAt(index);
     if (!message) return false;
     if (expectMessage !== undefined && message !== expectMessage) return false;
@@ -81,8 +89,11 @@ export function writeFloorOptions(index: number, options: ParsedOption[], parseP
     message.extra = extra;
     const namespace: Record<string, unknown> = isRecord(extra[EXTRA_NAMESPACE_KEY]) ? extra[EXTRA_NAMESPACE_KEY] : {};
     extra[EXTRA_NAMESPACE_KEY] = namespace;
-    // 纯数据重建（见文件头 structuredClone 约束）
-    namespace[EXTRA_CHOICE_KEY] = { options: options.map(o => ({ title: o.title, content: o.content })), parsePath };
+    // 纯数据重建（见文件头 structuredClone 约束）；dropped 仅在有值时
+    // 写入——undefined 属性在守门 typeof 判定下会误判坏档
+    const stored: StoredFloorOptions = { options: options.map(o => ({ title: o.title, content: o.content })), parsePath };
+    if (dropped !== undefined) stored.dropped = dropped;
+    namespace[EXTRA_CHOICE_KEY] = stored;
     saveCurrentChat();
     return true;
 }

@@ -466,7 +466,7 @@ async function runFloorPersistChecks(): Promise<void> {
     const mismatchCalls = stubs.saveChatCalls;
     check(
         '楼层落盘：写前对象校验（索引处已换成别的消息对象）拒绝写入且不触发落盘',
-        writeFloorOptions(0, optsA, 'json', foreign) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
+        writeFloorOptions(0, optsA, 'json', undefined, foreign) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
         `calls=${stubs.saveChatCalls}`,
     );
 
@@ -477,6 +477,34 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：坏档（options 元素形状不符）回退 null', readFloorOptions(0) === null);
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [], parsePath: 'nope' } } })];
     check('楼层落盘：坏档（parsePath 非法枚举）回退 null', readFloorOptions(0) === null);
+
+    // partial 路径存档 roundtrip：白名单放行（漏登记＝该路径存档被当坏档丢弃）
+    context.chat = [msg('（开场白）'), msg('partial 楼')];
+    const partialWritten = writeFloorOptions(1, optsA, 'partial', 2);
+    const partialBack = readFloorOptions(1);
+    check(
+        '楼层落盘：partial 路径存档 roundtrip 读回（白名单放行，不判坏档）',
+        partialWritten === true && !!partialBack && partialBack.parsePath === 'partial' && partialBack.options.length === 1,
+        `written=${String(partialWritten)} read=${JSON.stringify(partialBack)}`,
+    );
+    check(
+        '楼层落盘：丢弃计数随存档 roundtrip 写入读回（写侧链路端到端）',
+        partialBack?.dropped === 2,
+        `dropped=${String(partialBack?.dropped)}`,
+    );
+    // dropped 在场必须是数字（缺席合法——旧档兼容已有专项断言）
+    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: '甲', content: '做甲事' }], parsePath: 'partial', dropped: '两' } } })];
+    check('楼层落盘：坏档（dropped 在场非数字）回退 null', readFloorOptions(0) === null);
+
+    // 旧档兼容：无计数字段的存量形状（{options, parsePath}）读回成功，
+    // 升级不把既有选项判坏档清空
+    context.chat = [msg('旧档楼', { ttToolkit: { choice: { options: [{ title: '旧', content: '旧档正文' }], parsePath: 'json' } } })];
+    const legacyBack = readFloorOptions(0);
+    check(
+        '楼层落盘：无计数字段的旧档形状读回成功（升级不判坏档清空）',
+        legacyBack !== null && legacyBack.parsePath === 'json' && legacyBack.options[0]?.title === '旧',
+        `read=${JSON.stringify(legacyBack)}`,
+    );
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
@@ -554,6 +582,32 @@ function runAssemblyChecks(): string {
     return renderDump(result);
 }
 
+// ---------------------------------------------------------------------------
+// 元素级恢复夹具：实锤截断形态的脱敏重写——只保字节级结构（同样的
+// "key": "value" 空格风格、同样的多元素换行缩进），中文正文一律换成
+// 中性合成内容（真实输出原文不入库）
+// ---------------------------------------------------------------------------
+
+/** 缺容器收口：5 个元素全部闭合完整、只缺收尾 ]}。 */
+const PARTIAL_UNCLOSED_RAW = [
+    '{"options": [',
+    '    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"},',
+    '    {"title": "乙", "content": "乙的行动正文，转身返回议事厅。"},',
+    '    {"title": "丙", "content": "丙的行动正文，在原地等到天黑。"},',
+    '    {"title": "丁", "content": "丁的行动正文，悄悄跟随那名商人。"},',
+    '    {"title": "戊", "content": "戊的行动正文，向守卫出示信物。"}',
+].join('\n');
+
+/** 句中被掐断：前 4 个元素完整、第 5 个只剩半截。 */
+const PARTIAL_MID_CUT_RAW = [
+    '{"options": [',
+    '    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"},',
+    '    {"title": "乙", "content": "乙的行动正文，转身返回议事厅。"},',
+    '    {"title": "丙", "content": "丙的行动正文，在原地等到天黑。"},',
+    '    {"title": "丁", "content": "丁的行动正文，悄悄跟随那名商人。"},',
+    '    {"title": "己", "content": "己的行动正',
+].join('\n');
+
 /** 解析回退确定性触发机判。 */
 function runParseChecks(): void {
     // 调试畸形样本：思维链前缀＋括号格式 → 确定性走括号回退
@@ -587,6 +641,62 @@ function runParseChecks(): void {
     const stacked = '[回溯闪回]🎞️ [记忆片段] 正文内容在这里';
     const stackedReport = parseOptions(stacked, 4);
     check('标签堆叠不切分（1 条而非 2 条）', stackedReport.options.length === 1, `count=${stackedReport.options.length}`);
+
+    // ---- 元素级恢复（partial 路径）----
+    // 缺容器收口（中转站宣告「说完了」却少写收尾 ]} 的实锤形态）：
+    // 5 条全恢复、无丢弃、标题逐一匹配、首条 content 含已知子串
+    const unclosedReport = parseOptions(PARTIAL_UNCLOSED_RAW, 5);
+    check(
+        '元素级恢复：缺容器收口（5 元素完整）→ partial 恢复 5 条无丢弃、标题逐一匹配、首条正文在场',
+        unclosedReport.path === 'partial' && unclosedReport.options.length === 5 && unclosedReport.dropped === 0
+        && unclosedReport.options.map(o => o.title).join(',') === '甲,乙,丙,丁,戊'
+        && (unclosedReport.options[0]?.content ?? '').includes('旧渡口'),
+        `path=${unclosedReport.path} count=${unclosedReport.options.length} dropped=${String(unclosedReport.dropped)}`,
+    );
+
+    // 句中被掐断：存活的是前 4 条（只断条数会让「丢错条」漏过）＋丢弃计数 1
+    const midCutReport = parseOptions(PARTIAL_MID_CUT_RAW, 5);
+    check(
+        '元素级恢复：句中被掐断（第 5 条半个）→ partial 恢复前 4 条、丢弃 1',
+        midCutReport.path === 'partial' && midCutReport.options.length === 4 && midCutReport.dropped === 1
+        && midCutReport.options.map(o => o.title).join(',') === '甲,乙,丙,丁',
+        `path=${midCutReport.path} count=${midCutReport.options.length} dropped=${String(midCutReport.dropped)}`,
+    );
+
+    // 完整 JSON 不受元素级恢复污染：同构夹具补齐收尾 → 仍走 json 主路径
+    const completeReport = parseOptions(`${PARTIAL_UNCLOSED_RAW}\n]}`, 5);
+    check(
+        '元素级恢复：完整 JSON（同构夹具补齐收尾）→ json 主路径 5 条、无丢弃计数',
+        completeReport.path === 'json' && completeReport.options.length === 5 && completeReport.dropped === undefined,
+        `path=${completeReport.path} count=${completeReport.options.length}`,
+    );
+
+    // 纯散文零标题括号：不再合成整段散文当 1 条选项（fail fast 交上层报错带出原文）
+    const proseReport = parseOptions('今天天气不错我们出去走走', 4);
+    check(
+        '散文零标题：不再合成整段散文当 1 条选项（非 bracket_fallback 且 0 条）',
+        proseReport.path !== 'bracket_fallback' && proseReport.options.length === 0,
+        `path=${proseReport.path} count=${proseReport.options.length}`,
+    );
+
+    // 正文含 "options":[ 字面量的讨论文本：不得把正文当选项数组恢复出垃圾
+    const discussedReport = parseOptions('她聊起配置格式："options":[ 其实只是聊天正文', 4);
+    check(
+        '正文含 "options":[ 字面量不误锚（讨论文本按 JSON 骸骨拒收，0 条垃圾）',
+        discussedReport.path === 'json_reject' && discussedReport.options.length === 0,
+        `path=${discussedReport.path} count=${discussedReport.options.length}`,
+    );
+
+    // 锚点前先出现「非键形态的 "options" 词」而真契约在后：不得短路放弃
+    // （候选不成立须继续后扫——短路会让本该恢复的选项连坐作废）。
+    // 形态须以 { 开头才进对象契约分支：散文前缀走的是守门路径，测不到锚点。
+    const lateAnchor = '{"note":"options","options":[{"title":"甲","content":"甲事"},{"title":"乙","content":"乙事"}';
+    const lateReport = parseOptions(lateAnchor, 4);
+    check(
+        '锚点：前有非键 "options" 字符串值时继续后扫命中真契约（partial 恢复 2 条，不连坐作废）',
+        lateReport.path === 'partial' && lateReport.options.length === 2,
+        `path=${lateReport.path} count=${lateReport.options.length}`,
+    );
 }
 
 /**
@@ -661,6 +771,34 @@ function runParseGuardChecks(): void {
     const literalReport = parseOptions(bracketWithLiteral, 4);
     check('守门取舍：括号正文含 "title" 字面量的纯文本按 JSON 骸骨拒收（fail fast 可见，优于静默废选项——取舍锁定）',
         literalReport.path === 'json_reject' && literalReport.options.length === 0, `path=${literalReport.path}`);
+
+    // 坏 JSON 对象契约形态（真正走元素扫描器的路径）：两类形态都必须整批
+    // 拒收——分隔符校验缺失时「他说}了」形态会被错位切成恰好合法的子串、
+    // 静默恢复成 1 条垃圾选项报 partial（比报错更坏的回归），此处钉死归属
+    const badUnclosedQuote = '{"options":[{"title":"A","content":"他说"}了"}]}';
+    const badInlineQuote = '{"options":[{"title":"A","content":"她说"你好"然后离开"}]}';
+    const badUnclosedReport = parseOptions(badUnclosedQuote, 4);
+    const badInlineReport = parseOptions(badInlineQuote, 4);
+    check(
+        '解析防御：坏 JSON 对象契约形态（值内未转义引号两种变体）经元素扫描后仍整批拒收——json_reject 0 条，绝不静默恢复垃圾选项',
+        badUnclosedReport.path === 'json_reject' && badUnclosedReport.options.length === 0
+        && badInlineReport.path === 'json_reject' && badInlineReport.options.length === 0,
+        `path=${badUnclosedReport.path}/${badInlineReport.path} count=${badUnclosedReport.options.length}/${badInlineReport.options.length}`,
+    );
+
+    // 守门样本族汇总回归：既有守门样本在新主路径（元素级恢复）下归属不变
+    const guardFamily: Array<[string, string]> = [
+        ['数组形态未转义引号', '[{"title":"A","content":"她说"你好"然后离开"}]'],
+        ['截断对象', '{"options":[{"'],
+        ['散文前缀＋键字面量', '好的，以下是选项：\n{"options": [{"title":"A","content":"甲"'],
+        ['括号正文含键字面量', bracketWithLiteral],
+    ];
+    const familyReports = guardFamily.map(([name, sample]) => [name, parseOptions(sample, 4)] as const);
+    check(
+        '解析防御汇总：守门样本族（数组/截断/散文前缀/字面量）在新主路径下仍全数 json_reject 0 条',
+        familyReports.every(([, r]) => r.path === 'json_reject' && r.options.length === 0),
+        familyReports.map(([n, r]) => `${n}=${r.path}`).join('、'),
+    );
 }
 
 /**
@@ -726,6 +864,49 @@ async function runRunlogChecks(): Promise<void> {
             `records=${runlog.records.length} leak=${String(allRecords.includes('sk-leak-canary'))}`);
     } finally {
         globalThis.fetch = originalFetch;
+    }
+
+    // partial 遥测端到端：stub fetch 回缺收口 JSON（流式帧形态）→ 生成管线
+    // 走元素级恢复，runlog enrich 带解析路径与丢弃计数（排障可见性）
+    {
+        const savedEndpoints = readApiDomain();
+        const savedActiveEndpointId = readActiveEndpointId();
+        const partialEndpoint = savedEndpoints[0] ?? createEndpoint('partial 端点');
+        if (savedEndpoints.length === 0) writeApiDomain([partialEndpoint]);
+        setActiveEndpointId(partialEndpoint.id);
+        const originalFetch = globalThis.fetch;
+        const partialEncoder = new TextEncoder();
+        globalThis.fetch = (async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({ choices: [{ message: { content: PARTIAL_MID_CUT_RAW } }] }),
+            body: {
+                getReader: () => {
+                    const frames = [
+                        partialEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: PARTIAL_MID_CUT_RAW } }] })}\n\n`),
+                        partialEncoder.encode('data: [DONE]\n\n'),
+                    ];
+                    return { read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true } };
+                },
+            },
+        })) as unknown as typeof fetch;
+        try {
+            runlog.clear();
+            await generateOptions();
+            const record = runlog.records[runlog.records.length - 1];
+            const store = useChoiceStore();
+            check(
+                'runlog：partial 生成 enrich 带解析路径与丢弃计数（4 条恢复＋1 条丢弃）',
+                !!record && record.ok && record.parsePath === 'partial' && record.optionCount === 4 && record.dropped === 1
+                && store.options.length === 4 && store.lastParsePath === 'partial',
+                `ok=${String(record?.ok)} path=${record?.parsePath ?? '无'} count=${String(record?.optionCount)} dropped=${String(record?.dropped)}`,
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+            setActiveEndpointId(savedActiveEndpointId);
+            if (savedEndpoints.length === 0) writeApiDomain([]);
+            useChoiceStore().$reset();
+        }
     }
 }
 

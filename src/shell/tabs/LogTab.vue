@@ -60,9 +60,11 @@ function formatDuration(ms: number): string {
 }
 
 function detailText(r: RunRecord): string {
-    // choice 记录 enrich 后带解析路径与条数；persona/未 enrich 记录无此段
+    // choice 记录 enrich 后带解析路径与条数（partial 附丢弃数）；persona/未 enrich 记录无此段
     if (r.task !== 'choice' || r.parsePath === undefined) return '—';
-    return `${r.parsePath} · ${r.optionCount ?? '?'} 条`;
+    return r.dropped !== undefined
+        ? `${r.parsePath} · ${r.optionCount ?? '?'} 条（丢 ${r.dropped}）`
+        : `${r.parsePath} · ${r.optionCount ?? '?'} 条`;
 }
 
 function recordText(r: RunRecord): string {
@@ -70,7 +72,7 @@ function recordText(r: RunRecord): string {
         `run#${r.id} ${r.at} ${r.task} ${r.ok ? 'ok' : 'fail'}`,
         `端点 ${r.endpointUrl} 模型 ${r.model} 契约 ${r.contract} ${r.stream ? '流式' : '非流式'} 耗时 ${formatDuration(r.durationMs)}`,
         r.error ? `错误 ${r.error}` : '',
-        `解析 ${r.parsePath ?? '—'} 条数 ${r.optionCount ?? '—'}`,
+        `解析 ${r.parsePath ?? '—'} 条数 ${r.optionCount ?? '—'}${r.dropped !== undefined ? ` 丢弃 ${r.dropped}` : ''}`,
         '--- 请求 ---',
         r.requestText,
         '--- 响应 ---',

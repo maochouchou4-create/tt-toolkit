@@ -31,6 +31,8 @@ export interface RunRecord {
     parsePath?: string;
     /** choice 任务 enrich */
     optionCount?: number;
+    /** choice 任务 enrich：partial 路径的残缺丢弃数（排障展示用；非 UI 行为判据） */
+    dropped?: number;
     /** 失败摘要（safeText，300 字内） */
     error?: string;
 }

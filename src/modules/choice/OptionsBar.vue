@@ -57,6 +57,7 @@ const behaviorHint = computed(() => {
 const parsePathLabel = computed(() => {
     if (!store.lastParsePath) return '';
     if (store.lastParsePath === 'json') return 'JSON 契约';
+    if (store.lastParsePath === 'partial') return '部分恢复';
     if (store.lastParsePath === 'bracket_fallback') return '回退解析';
     return '';
 });
@@ -65,6 +66,10 @@ const parsePathLabelTitle = computed(() => {
     // 回退解析＝宽松解析安全网，细节留在日志 tab
     if (store.lastParsePath === 'bracket_fallback') return '模型输出不合 JSON 约定时的宽松解析安全网（详见日志 tab）';
     if (store.lastParsePath === 'json') return '模型输出符合 JSON 契约';
+    if (store.lastParsePath === 'partial') {
+        // 恢复条数恒等于展示条数（无独立计数真相源）；丢弃数在日志 tab
+        return `模型输出未完整收尾，已恢复 ${store.options.length} 条（详见日志 tab）`;
+    }
     return '';
 });
 

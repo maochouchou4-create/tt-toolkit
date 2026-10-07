@@ -36,7 +36,14 @@ interface RunRecordSummary {
     durationMs: number;
     parsePath?: string;
     optionCount?: number;
+    dropped?: number;
     error?: string;
+}
+
+/** 路径＋丢弃数的括注（dropped 仅 partial enrich 后在场）。 */
+function parseDetail(r: RunRecordSummary): string {
+    if (r.parsePath === undefined) return '';
+    return r.dropped !== undefined ? `${r.parsePath} 丢 ${r.dropped}` : r.parsePath;
 }
 
 /**
@@ -47,8 +54,10 @@ function summaryLine(r: RunRecordSummary): string {
     if (!r.ok) {
         return `[tt-toolkit][runlog][${r.task}] run#${r.id} fail：${r.error ?? '（无错误摘要）'}`;
     }
-    // choice 的条数/路径由任务层 enrich 补齐——enrich 未落地前 detail 留空
-    const detail = r.optionCount !== undefined ? `${r.optionCount} 条（${r.parsePath ?? ''}）` : '';
+    // choice 的条数/路径由任务层 enrich 补齐——enrich 未落地前 detail 留空；
+    // partial 的丢弃数随路径一并可见（恢复成功不可见＝把问题藏起来）
+    const paren = parseDetail(r);
+    const detail = r.optionCount !== undefined ? `${r.optionCount} 条（${paren}）` : paren;
     const sec = (r.durationMs / 1000).toFixed(1);
     const tail = [detail, `${sec}s`, r.model].filter(p => p !== '').join(' ');
     return `[tt-toolkit][runlog][${r.task}] run#${r.id} ok：${tail}`;
@@ -77,11 +86,12 @@ export const useRunlogStore = defineStore('tt-runlog', {
             return full.id;
         },
         /** choice 任务层补解析结论；摘要随最终态重发一行（同 run# 可对账）。 */
-        enrich(id: number, patch: { parsePath?: string; optionCount?: number }): void {
+        enrich(id: number, patch: { parsePath?: string; optionCount?: number; dropped?: number }): void {
             const record = this.records.find(r => r.id === id);
             if (!record) return;
             if (patch.parsePath !== undefined) record.parsePath = patch.parsePath;
             if (patch.optionCount !== undefined) record.optionCount = patch.optionCount;
+            if (patch.dropped !== undefined) record.dropped = patch.dropped;
             this.emitSummary(record);
         },
         /** 翻转最终态为失败并写摘要（传输已 commit 的记录由任务层二次定性）。 */

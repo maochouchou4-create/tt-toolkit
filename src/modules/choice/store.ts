@@ -39,7 +39,7 @@ export const useChoiceStore = defineStore('tt-choice', {
             this.phase = 'running';
             this.error = '';
         },
-        succeed(options: Array<{ title: string; content: string }>, parsePath: ParseReport['path'], dump: string, floorIndex: number | null, floorMessage: unknown) {
+        succeed(options: Array<{ title: string; content: string }>, parsePath: ParseReport['path'], dump: string, floorIndex: number | null, floorMessage: unknown, dropped?: number) {
             this.phase = 'idle';
             this.options = options;
             this.lastParsePath = parsePath;
@@ -49,7 +49,7 @@ export const useChoiceStore = defineStore('tt-choice', {
             // 消息级落盘（写前对象校验防删楼漂移）；无锚楼（聊天尚无
             // assistant 楼层）＝无处可挂，仅展示
             if (floorIndex !== null) {
-                writeFloorOptions(floorIndex, options, parsePath, floorMessage);
+                writeFloorOptions(floorIndex, options, parsePath, dropped, floorMessage);
             }
         },
         fail(message: string) {
