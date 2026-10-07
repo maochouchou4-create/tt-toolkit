@@ -26,7 +26,6 @@ export const DEFAULT_TEMPLATES = {
 外貌:
   整体印象:
   标志性特征:
-  穿着习惯:
 性格:
   核心矛盾:
   情绪反应:

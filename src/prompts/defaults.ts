@@ -22,7 +22,7 @@ import type { PromptConfig, TaskKey } from './types';
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（三任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
-export const DEFAULTS_VERSION = 7;
+export const DEFAULTS_VERSION = 8;
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -271,7 +271,7 @@ const PERSONA_CURATOR_PROMPT = `[任务：策展人设 schema]
 
 <reference_modules>
 基本信息——年龄/性别/身份（一句话社会角色，不做明暗分层）；3 叶；几乎必选
-外貌——整体印象/标志性特征/穿着习惯；3 叶；几乎必选
+外貌——整体印象/标志性特征；2 叶；几乎必选
 性格——核心矛盾/情绪反应/说话风格；3 叶；几乎必选
 状态机——各态：概述＋行为特征＋切换触发；≤4 态；有行为/人格反差时（外形变化归形态）
 形态——各形态描写＋切换条件；≤3 态；物理/种族形态变化时
