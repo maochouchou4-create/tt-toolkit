@@ -392,6 +392,15 @@ function runAssemblyChecks(): string {
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
     // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
     check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件发展') && allText.includes('主动行为或反应'));
+    // 平行分支口径：同一刻的多种走法，彼此不互为前情（防递进式串联）。
+    // 三层同锁：规则 5（禁令）＋few-shot 引导句（示范层）＋任务指令（收尾层）
+    // ——只锁一层时另两层被改回串联形态不会翻红
+    check('写作规则＝同一刻的平行分支（各走一路、不互为前情）',
+        allText.includes('此刻同时摆开') && allText.includes('不互为因果') && allText.includes('不得被当成另一条的前情'),
+        `平行口径=${allText.includes('此刻同时摆开')}`);
+    check('平行口径三层同锁（规则/示例/指令）且旧措辞清零',
+        allText.includes('各走一路') && allText.includes('并排的') && !allText.includes('角度错开'),
+        `示例层=${allText.includes('各走一路')} 指令层=${allText.includes('并排的')}`);
     check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
     check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
     check('few-shot 旧三条仍在（反客为主/骤然断电）', allText.includes('反客为主') && allText.includes('骤然断电'));
