@@ -25,7 +25,8 @@
  */
 
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries } from '@/host';
-import { callGenerateEndpoint, type GenerateMessage } from '@/modules/apis/client';
+import { callGenerateEndpoint, isBlankResponseContent, type GenerateMessage } from '@/modules/apis/client';
+import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import type { ApiEndpoint } from '@/modules/apis/types';
 import {
@@ -276,7 +277,9 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     };
 
     const finalize = (rawText: string, prefillContent: string): string => {
-        if (!rawText) throw new Error('API 返回为空 (Empty Response)');
+        // 空白正文也算空（isBlankResponseContent 单点判据）：上游静默拦截
+        // 常回纯空白，静默成功会让用户只看到空结果框——Fail Fast 抛错。
+        if (isBlankResponseContent(rawText)) throw new Error('API 返回为空 (Empty Response)');
         return stripYamlFence(rawText, prefillContent);
     };
 
@@ -336,8 +339,9 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
  * persona 任务的观测 dump（__TT_TOOLKIT__.prompts.dump(task) 分派口）：宿主真实
  * 上下文（角色卡/开场白/世界书）＋空任务态——用户请求与策展 schema
  * 是运行时输入，dump 无从得知，占位符以空串呈现模板形状。与 choice 的
- * dump 同口径（renderDump 全文输出，可整段粘贴给模型/人工核对；传输层
- * 破限前缀不进 dump——实发全文以运行日志为准）。
+ * dump 同口径（消息段＝破限前缀＋组装序列，前缀经 apis/preset-inject 的
+ * composeOutbound 同一实现；prefill 是每段请求的局部追加，不属组装产物，
+ * 实发全文以运行日志为准）。
  */
 export async function dumpPersonaTask(task: TaskKey): Promise<string> {
     if (task === 'choice') throw new Error('dumpPersonaTask 只处理 persona 任务');
@@ -355,5 +359,5 @@ export async function dumpPersonaTask(task: TaskKey): Promise<string> {
         charName,
     };
     const assembled = assemblePersonaMessages(task, sources);
-    return renderDump({ messages: assembled.messages, trace: assembled.trace });
+    return renderDump({ messages: assembled.messages, trace: assembled.trace }, undefined, resolveJailbreakMessages());
 }

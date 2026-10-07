@@ -42,7 +42,7 @@ import { getTavernRequestHeaders } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { useRunlogStore } from '@/modules/runlog/store';
 import type { RunTask } from '@/modules/runlog/types';
-import { resolveJailbreakMessages } from './preset-inject';
+import { composeOutbound } from './preset-inject';
 
 const log = createTtlog('modules/apis/client');
 
@@ -305,22 +305,23 @@ function serializeMessages(messages: GenerateMessage[]): string {
 }
 
 /**
- * 前缀拼装唯一实现：实发数组与哨兵预览同源——「每个出站请求必须带
- * 破限前缀」在这里结构成立，不靠调用点纪律。空序列原样透传（不复制
- * 数组），选中预设时前缀按原角色插最前。
- */
-function composeOutbound(messages: GenerateMessage[]): GenerateMessage[] {
-    const jb = resolveJailbreakMessages();
-    return jb.length > 0 ? [...jb, ...messages] : messages;
-}
-
-/**
+ * 前缀拼装唯一实现在 apis/preset-inject（composeOutbound）——出站拼装、
+ * 运行日志 requestText 与组装 dump 都从同一函数派生。
  * 哨兵补记用：与实发同源的出站序列化（传输层外的任务层记录
  * requestText 时用它）。序列化原语 serializeMessages 模块私有——
  * 丢前缀的裸序列化在模块外结构上不可达。
  */
 export function serializeOutbound(messages: GenerateMessage[]): string {
     return serializeMessages(composeOutbound(messages));
+}
+
+/**
+ * 模型正文是否为空（空白正文也算空——上游静默拦截常回纯空白）。
+ * 单一判据：choice 的零选项文案与 persona 的空响应报错同享，禁各自复写
+ * （两处口径曾一处 trim 一处 falsy 而漂移——空白正文被 falsy 判空放行）。
+ */
+export function isBlankResponseContent(text: string): boolean {
+    return text.trim() === '';
 }
 
 /**

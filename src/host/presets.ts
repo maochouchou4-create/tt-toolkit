@@ -17,6 +17,7 @@
  */
 
 import { getTavernContext } from './context';
+import type { TauriTavernPresetManager } from '@sillytavern/scripts/st-context';
 import { createTtlog } from './ttlog';
 
 const log = createTtlog('host/presets');
@@ -28,20 +29,16 @@ interface PresetLike {
 }
 
 /** getPresetManager('openai') 通道（宿主上下文缺席返回 null）。 */
-function openaiPresetManager(): { getCompletionPresetByName?: (name: string) => unknown } | null {
+function openaiPresetManager(): TauriTavernPresetManager | null {
     const getter = getTavernContext()?.getPresetManager;
     if (typeof getter !== 'function') return null;
-    const manager = (getter as (apiId: string) => unknown)('openai');
-    return manager && typeof manager === 'object' ? (manager as { getCompletionPresetByName?: (name: string) => unknown }) : null;
+    return getter('openai') ?? null;
 }
 
 /** 预设名清单（TT 的 {名字:索引} 对象形态，兼容名字数组形态；失败空表）。 */
 export function listOpenAIPresetNames(): string[] {
     try {
-        const manager = openaiPresetManager();
-        const getPresetList = (manager as { getPresetList?: (api: string) => unknown } | null)?.getPresetList;
-        if (typeof getPresetList !== 'function') return [];
-        const list = getPresetList('openai') as { preset_names?: unknown } | null;
+        const list = openaiPresetManager()?.getPresetList('openai') as { preset_names?: unknown } | null;
         const names = list?.preset_names;
         if (Array.isArray(names)) return names.filter((x): x is string => typeof x === 'string').sort();
         if (names && typeof names === 'object') return Object.keys(names as Record<string, unknown>).sort();
@@ -79,9 +76,8 @@ export function readPresetInjectMessages(name: string): PresetInjectMessage[] | 
     if (!name) return null;
     try {
         const manager = openaiPresetManager();
-        const byName = manager?.getCompletionPresetByName;
-        if (typeof byName !== 'function') return null;
-        const preset = presetAsRecord(byName(name));
+        if (!manager) return null;
+        const preset = presetAsRecord(manager.getCompletionPresetByName(name));
         if (!preset?.prompts) return null;
         // 启用序不可判（prompt_order 缺席/无 100001 段）＝异构或坏数据预设：
         // 回落 p.enabled??true 会把全部文本条目（含 main/cns 等杂件）整包

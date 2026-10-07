@@ -14,6 +14,7 @@
  */
 
 import { getContext as stGetContext } from '@sillytavern/scripts/st-context';
+import type { TauriTavernPresetManager } from '@sillytavern/scripts/st-context';
 
 export interface ChatMessage {
     mes?: string;
@@ -51,8 +52,8 @@ export interface TavernContextLike {
     chatCompletionSettings?: Record<string, unknown>;
     /** 全量世界书名快照（st-context.js:289） */
     getWorldInfoNames?: () => unknown;
-    /** 预设管理器转发（st-context.js:293，preset-manager.js:97 getPresetManager） */
-    getPresetManager?: (apiId: string) => unknown;
+    /** 预设管理器转发（st-context.js:293，preset-manager.js:97 getPresetManager；class 方法须保留接收者调用） */
+    getPresetManager?: (apiId: string) => TauriTavernPresetManager | null;
 }
 
 /** 宿主上下文（可能为 null：无聊天打开时部分字段缺席）。 */

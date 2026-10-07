@@ -68,6 +68,22 @@ const eventHandlers = new Map();
 // externalPrompts 给自动注入面三个槽位——stub_anchor
 // （depth 0 非空）、stub_blank（空白 value＝应被跳过）、stub_memory
 // （depth 4 非空）——断言 depth 升序排序与「非空即带、空槽位跳过」
+// openai 预设管理器存根类（与宿主 preset-manager.js 同构）：两个方法都是
+// class 方法——getCompletionPresetByName 内部必须走 this.getPresetList()，
+// 与宿主 :777 → :549 的 this 依赖链同构（禁改回箭头函数/属性箭头）
+class PresetManagerStub {
+    constructor(presets, presetNames) {
+        this._presets = presets;
+        this._presetNames = presetNames;
+    }
+    getPresetList() { return { presets: this._presets, preset_names: this._presetNames, settings: {} }; }
+    getCompletionPresetByName(name) {
+        const { presets, preset_names } = this.getPresetList();
+        const idx = preset_names[name];
+        return idx === undefined ? undefined : presets[idx];
+    }
+}
+
 const stubContext = {
     chat: [],
     chatId: null,
@@ -83,13 +99,15 @@ const stubContext = {
     saveChat: async () => {
         globalThis.__TT_SMOKE_STUBS__.saveChatCalls++;
     },
-    // openai 预设管理器存根：破限注入机判用——「冒烟破限」＝assistant 开场
-    // ＋user 接话两条启用文本条目，附 marker 占位与停用条目各一（启用过滤/
-    // 角色保真/marker 剔除的判据材料）；无 system 角色启用条目——persona
-    // 预设文风通道（extractSystemParts）不受此桩影响仍归空
-    getPresetManager: () => ({
-        getPresetList: () => ({ preset_names: { '冒烟破限': 0 } }),
-        getCompletionPresetByName: (name) => (name === '冒烟破限' ? {
+    // openai 预设管理器存根：与宿主同构的 class 实例——宿主
+    // getCompletionPresetByName 内部走 this.getPresetList()，箭头函数替身
+    // 不接受 this，曾让「宿主 this 丢失」缺陷在冒烟里全绿漏测。
+    // 「冒烟破限」＝assistant 开场＋user 接话两条启用文本条目，附 marker
+    // 占位与停用条目各一（启用过滤/角色保真/marker 剔除的判据材料）；
+    // 无 system 角色启用条目——persona 预设文风通道（extractSystemParts）
+    // 不受此桩影响仍归空
+    getPresetManager: () => new PresetManagerStub(
+        [{
             prompts: [
                 { identifier: 'jb-open', role: 'assistant', content: '破限开场白' },
                 { identifier: 'jb-marker', marker: true, content: '占位' },
@@ -102,8 +120,9 @@ const stubContext = {
                 { identifier: 'jb-user', enabled: true },
                 { identifier: 'jb-off', enabled: false },
             ] }],
-        } : undefined),
-    }),
+        }],
+        { '冒烟破限': 0 },
+    ),
     extensionPrompts: {
         // 插入序故意与 depth 序不同（memory 先插入但 depth 更深）——
         // 排序断言只有真的实现了 depth 排序才绿
@@ -376,10 +395,13 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 期望构成＝v1.5.17 基数 107 ＋ 选项元素级重构新增 13（解析/锚点 6、守门
 // 对象形态与样本族汇总 2、runlog partial 遥测 1、楼层落盘 4）
 // ＝ v1.5.19 零选项文案分支 3（真空响应/非 empty 原口径/正文非空但不抽选项）
-// ＋ expectMessage=null 显式不校验 1 ＝ 124。
+// ＋ expectMessage=null 显式不校验 1
+// ＋ 解析尾部分流六形态新增 5（收口散文/收口无锚点残渣/收口后垃圾/两份契约串接/缺分隔符）
+// ＋ 空白正文单点判据 1（纯空白同走「未返回内容」分支——共享谓词的判别样本）
+// ＝ 130。
 // 不从「分组小计」加总推：分组基数随每批增长，抄旧小计必算错（下次 bump
 // 只改本行等式右侧总数与该批 +N）。
-const CHOICE_PASS_EXPECTED = 124;
+const CHOICE_PASS_EXPECTED = 130;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -439,19 +461,22 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) 
 // persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成 65 条：迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/
+// 期望构成 67 条：迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/
 // 退休键/legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃
 // 含 v1.3 endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重
 // 映射/choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动
 // 清空 1＋prompts 7（三任务键齐备/choice 18 模块红线/persona 两任务默认形状/
 // 旧数组一次写迁移/任务隔离开关/按任务恢复默认/骨架双源机判）＋persona 组装
-// 3＋persona dump 观测口 2＋纯函数 5＋api 14（含 finish_reason=length 截断
-// 显式报错回归＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null）＋
+// 3＋persona dump 观测口 2＋纯函数 5＋api 16（含 finish_reason=length 截断
+// 显式报错回归＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null，
+// ＋stub 同构机判 2：同一实例双方法 this 内部互调、保留接收者按名取预设）＋
 // e2e 7（含取消通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段
 // 前缀在场＋悬空 fail-soft 不注入）＋store 7＋会话感知 3
 // （CHAT_CHANGED 重置开场白默认档＋emit 接线全链＋无开场白卡回落不注入）＋
 // host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）。
-const PERSONA_PASS_EXPECTED = 65;
+// 本批 +2（dump 口：观测口径标注传输层前缀状态；观测面收敛——选中预设＝实发序列含破限前缀段与计数行）
+// ＋ 空白正文 fail fast 1（纯空白抛「API 返回为空」：错误 toast 在场＋结果框保持原值＋互斥态干净）
+const PERSONA_PASS_EXPECTED = 70;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

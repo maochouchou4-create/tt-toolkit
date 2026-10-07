@@ -181,10 +181,10 @@
         getRequestHeaders,
         // persona 供给面：书目清单 / openai 预设管理器 / 当前预设名
         getWorldInfoNames: () => [...wiBooks.keys()],
-        getPresetManager: () => ({
-            getPresetList: () => ({ presets: ['存根预设'], preset_names: { '存根预设': 0 }, settings: {} }),
-            getCompletionPresetByName: name => (name === '存根预设' ? stubPreset : undefined),
-        }),
+        // 预设管理器存根与宿主同构（class 实例，getCompletionPresetByName
+        // 内部走 this.getPresetList()——箭头替身不接受 this，会盖住宿主
+        // this 丢失类缺陷）
+        getPresetManager: () => new PresetManagerStub([stubPreset], { '存根预设': 0 }),
         chatCompletionSettings: { preset_settings_openai: '存根预设' },
         extensionPrompts: {
             // 假装是一个记忆摘要类插件占用通用注入槽位（外部注入全自动
@@ -212,6 +212,21 @@
         ],
         prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }, { identifier: 'jailbreak', enabled: true }] }],
     };
+
+    // openai 预设管理器存根类（与宿主 preset-manager.js 同构：class 方法
+    // ＋ getCompletionPresetByName 内部走 this.getPresetList()）
+    class PresetManagerStub {
+        constructor(presets, presetNames) {
+            this._presets = presets;
+            this._presetNames = presetNames;
+        }
+        getPresetList() { return { presets: this._presets, preset_names: this._presetNames, settings: {} }; }
+        getCompletionPresetByName(name) {
+            const { presets, preset_names } = this.getPresetList();
+            const idx = preset_names[name];
+            return idx === undefined ? undefined : presets[idx];
+        }
+    }
 
     // --------------------------------------------------------
     // SlashCommand / SlashCommandParser stub（斜令注册面）

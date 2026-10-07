@@ -189,17 +189,47 @@ function scanObjectElementEnd(text: string, from: number): number {
     return -1;
 }
 
-/** 元素级扫描产物：恢复出的选项＋残缺丢弃数。 */
+/**
+ * 容器闭合后的尾部残留是否还带着一份契约陈述（第二份 options 对象、
+ * 或裸契约键字面量）。命中＝流已损坏（后缀被吞或拼接了第二份输出），
+ * 整批拒收交上层报错带出原文。
+ * `"options"` 臂要求其后是 `[`（键后跟数组字面量）——尾部散文里
+ * 逐字引用「"options": 数组格式」一类的格式说明不算契约陈述。
+ */
+function residueStatesContract(residue: string): boolean {
+    return /"options"\s*:\s*\[/.test(residue)
+        || residue.includes('"title"') || residue.includes('"content"');
+}
+
+/** 元素级扫描产物：恢复出的选项＋残缺丢弃数＋容器是否完整收口。 */
 interface ElementScan {
     options: ParsedOption[];
     dropped: number;
+    closed: boolean;
+}
+
+/**
+ * 容器收口单点：扫到数组收口的 `]` 后判定整批走向。
+ * - `]` 后首个非空白字符是 `}` → 容器闭合；其后的尾部残留含契约陈述
+ *   （第二份契约）＝流损坏整批拒收，否则采信（散文/无害残渣不连坐）；
+ * - `]` 后是别的结构字符 → 收口点后跟垃圾＝破损流，整批拒收；
+ * - EOF → 容器未收口（截断形态），元素级恢复语义保留。
+ */
+function closeContainer(text: string, bracketIndex: number, options: ParsedOption[]): ElementScan | null {
+    const after = skipWs(text, bracketIndex + 1);
+    if (after >= text.length) return { options, dropped: 0, closed: false };
+    if (text[after] !== '}') return null;
+    const residue = text.slice(after + 1).trim();
+    if (residue !== '' && residueStatesContract(residue)) return null;
+    return { options, dropped: 0, closed: true };
 }
 
 /**
  * 对象契约的元素级扫描：从 "options" 锚点逐元素切完整 {...} 单独 parse。
  *
- * 三条终止语义（必须分开，不得合并）：
- * - 元素后到 EOF 只有空白＝容器未收口但元素完整 → 合法恢复；
+ * 四条终止语义（必须分开，不得合并）：
+ * - 元素后到 EOF 只有空白＝容器未收口但元素完整 → 合法恢复（不闭合）；
+ * - 扫到 `]` 交容器收口单点（closeContainer：闭合校验＋尾部契约锚点校验）；
  * - 元素不完整/parse 失败＝残缺起点 → 丢弃该元素并停扫（后续必然更残）；
  * - 元素后出现 , ] EOF 之外的首个非空白字符＝流损坏（inString 错位或
  *   提前闭合——「能 parse 成功」是巧合不是正确性证据）→ 整批拒绝（null）。
@@ -210,28 +240,28 @@ function scanContractElements(text: string): ElementScan | null {
     const options: ParsedOption[] = [];
     for (;;) {
         i = skipWs(text, i);
-        if (i >= text.length) return { options, dropped: 0 };
+        if (i >= text.length) return { options, dropped: 0, closed: false };
         const ch = text[i];
-        if (ch === ']') return { options, dropped: 0 };
+        if (ch === ']') return closeContainer(text, i, options);
         if (ch !== '{') return null;
         const close = scanObjectElementEnd(text, i);
-        if (close < 0) return { options, dropped: 1 };
+        if (close < 0) return { options, dropped: 1, closed: false };
         let element: ParsedOption | null = null;
         try {
             element = toOption(JSON.parse(fixTrailingCommas(text.slice(i, close + 1))));
         } catch {
             element = null;
         }
-        if (element === null) return { options, dropped: 1 };
+        if (element === null) return { options, dropped: 1, closed: false };
         options.push(element);
         i = skipWs(text, close + 1);
-        if (i >= text.length) return { options, dropped: 0 };
+        if (i >= text.length) return { options, dropped: 0, closed: false };
         const sep = text[i];
         if (sep === ',') {
             i += 1;
             continue;
         }
-        if (sep === ']') return { options, dropped: 0 };
+        if (sep === ']') return closeContainer(text, i, options);
         return null;
     }
 }
@@ -350,6 +380,11 @@ export function parseOptions(text: string, count: number): ParseReport {
         }
         const scan = scanContractElements(c);
         if (scan !== null && scan.options.length > 0) {
+            // 容器完整收口且零丢弃＝流本身完好（截断只发生在容器收尾之后
+            // 的无害尾部）→ 采信为主路径；元素级恢复产出才落 partial
+            if (scan.closed && scan.dropped === 0) {
+                return { path: 'json', options: scan.options.slice(0, count) };
+            }
             return { path: 'partial', options: scan.options.slice(0, count), dropped: scan.dropped };
         }
         return { path: 'json_reject', options: [] };

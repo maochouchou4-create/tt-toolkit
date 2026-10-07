@@ -6,8 +6,9 @@
  * 各注入模块逐项可见。
  */
 import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
-import { callGenerateEndpoint, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
+import { callGenerateEndpoint, isBlankResponseContent, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
+import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
     assembleMessages,
     collectAssemblySources,
@@ -52,7 +53,7 @@ export function isGenerating(): boolean {
  *   骸骨、拒答语、纯散文都靠它定位）。
  */
 export function zeroOptionsMessage(report: ParseReport, rawText: string): string {
-    if (rawText.trim() === '') {
+    if (isBlankResponseContent(rawText)) {
         return '模型未返回任何内容（0 条选项）：可能被上游静默拦截，或思维链耗尽了输出预算（finish_reason 显示 stop 也不可信）——可直接重试，或更换端点后再试。';
     }
     return `解析得到 0 条选项（路径 ${report.path}）——原始输出：${rawText.slice(0, 500)}`;
@@ -79,9 +80,10 @@ export function beginGenerationCycle(): { anchorIndex: number | null; anchorMess
 
 /**
  * 组装当前上下文的消息数组（dump 口与生成管线共用一条路径）。
- * 观测面口径：本函数的 dump＝提示词引擎模块观测（不含传输层破限前缀）；
- * 实发全文（含破限前缀）以运行日志页的请求记录为准——两个观测面各说
- * 各话，前缀进引擎观测口属挂账立项（transportPrelude 重构）。
+ * 观测面口径：dumpText 的消息段＝实发序列（破限前缀＋组装，前缀经
+ * apis/preset-inject 的 composeOutbound 同一实现，与运行日志 requestText
+ * 的前缀层同源）；`messages` 字段＝传输前序列（传输层在此之上补前缀）。
+ * 尾部闲聊/传输前缀等「契约之外的内容」见 parse.ts 的尾部分流判据。
  *
  * 池供给在这里现场抽取（每次组装重抽、pinned 恒在）——抽一次快照
  * 传给 sources/engine，prompts 层不回读 choice 域（单向供给）。
@@ -101,7 +103,7 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
         poolInjection,
     });
     const result = assembleMessages(config.modules, sources);
-    return { dumpText: renderDump(result), messages: result.messages, trace: result.trace };
+    return { dumpText: renderDump(result, undefined, resolveJailbreakMessages()), messages: result.messages, trace: result.trace };
 }
 
 /**

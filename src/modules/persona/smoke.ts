@@ -7,7 +7,7 @@
  * 断言确定性；与浏览器真实数据共用同一条 storage/generation 代码路径
  * （dist 加载即覆盖）。
  */
-import { event_types, extension_settings, getCurrentCharacter, readPresetInjectMessages } from '@/host';
+import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
@@ -387,6 +387,11 @@ async function runPersonaAssemblyDumpChecks(): Promise<void> {
     check('dump 口：按任务 dump 全文（persona_gen：组装 dump 标头＋模块清单＋指令正文）',
         dumpText.includes('=== 消息组装 dump') && dumpText.includes('生成指令')
         && dumpText.includes('[任务：生成用户人设]'));
+    // 观测面口径：dump 的消息段含传输层破限前缀段——
+    // 冒烟桩未选预设 → 标注「无传输层前缀」；选中预设的场景由 stub 破限
+    // 断言覆盖（jb 前缀进消息序列 = 同一 composeOutbound 实现）
+    check('dump 口：观测口径标注传输层前缀状态（未选预设＝无传输层前缀）',
+        dumpText.includes('消息数组（') && dumpText.includes('无传输层前缀'));
     let thrownUnknown = false;
     try {
         await port?.dump('bogus');
@@ -493,6 +498,30 @@ async function runApiChecks(): Promise<void> {
         && jbEntries[1].role === 'user' && jbEntries[1].content === '破限接话',
         `jb=${JSON.stringify(jbEntries)}`);
     check('api：破限预设悬空名返回 null（fail-soft 判据）', readPresetInjectMessages('不存在预设') === null);
+
+    // stub 同构机判：管理器经 getPresetManager('openai') 取得实例——双方法
+    // 在同一实例上，且 getCompletionPresetByName 保留接收者调用返回的预设
+    // 与 this.getPresetList() 清单里的对象同一（内部 this 互调链成立的
+    // 结构判据；stub 若退化成箭头函数/解引用调用，此断言翻红）
+    const pm = getTavernContext()?.getPresetManager?.('openai');
+    const pmRec = pm && typeof pm === 'object' ? (pm as unknown as Record<string, unknown>) : null;
+    const pmList = pmRec && typeof pmRec.getPresetList === 'function'
+        ? (pmRec.getPresetList as (api: string) => { presets: unknown[]; preset_names: Record<string, number> })('openai')
+        : null;
+    const pmPreset = pmRec && typeof pmRec.getCompletionPresetByName === 'function'
+        ? (pmRec.getCompletionPresetByName as (name: string) => unknown)('冒烟破限')
+        : undefined;
+    check('api：破限管理器 stub 同构（同一实例双方法，this 内部互调成立）',
+        pmRec !== null
+        && typeof pmRec.getCompletionPresetByName === 'function'
+        && typeof pmRec.getPresetList === 'function'
+        && pmList !== null && Array.isArray(pmList.presets)
+        && pmPreset !== undefined && pmPreset === pmList.presets[pmList.preset_names['冒烟破限']],
+        `pm=${JSON.stringify(pmPreset)} / list=${JSON.stringify(pmList)}`);
+    check('api：破限管理器保留接收者按名取预设（解引用丢 this 在此翻红）',
+        pmPreset !== null && typeof pmPreset === 'object'
+        && Array.isArray((pmPreset as { prompts?: unknown[] }).prompts)
+        && (pmPreset as { prompts: unknown[] }).prompts.length === 4);
 
     // reasoning_effort 纪律（off 不发已在基础形状断言——这里断言 high 发）
     const bodyEffort = buildGenerateBody(
@@ -685,6 +714,16 @@ async function runPersonaE2EChecks(): Promise<void> {
                 && jbFirstMessages.length > 1,
                 `first=${JSON.stringify(jbFirst)} calls=${calls.length}`);
 
+            // 观测面收敛（dump 前缀段）：选中预设后 dump 的消息段＝实发序列
+            // （前缀＋组装，同一 composeOutbound 实现），头部计数行写「= 破限
+            // 前缀 P 条 + 组装 M 条」、前缀条目带标注——漏传 prelude 即在此翻红
+            const jbDumpText = await (toolkitGlobalPort().prompts as { dump: (task?: string) => Promise<string> } | undefined)
+                ?.dump('persona_gen') ?? '';
+            check('dump 口：观测面收敛（选中预设＝实发序列含破限前缀段与计数行）',
+                jbDumpText.includes('消息数组（') && jbDumpText.includes('= 破限前缀 2 条 + 组装 ')
+                && jbDumpText.includes('（破限前缀）') && jbDumpText.includes('破限开场白'),
+                `head=${jbDumpText.split('\n').find(l => l.includes('消息数组（')) ?? '（无）'}`);
+
             // 悬空选中：fail-soft——生成照常、首条回到任务消息（无注入）
             writeJailbreakPreset('不存在预设');
             store.requestText = '悬空破限试验';
@@ -724,6 +763,32 @@ async function runPersonaE2EChecks(): Promise<void> {
             && store.isProcessing === false && store.processingLabel === ''
             && store.resultText === resultBeforeCancel,
             `fetchEntered=${String(fetchEntered)} result=${store.resultText}`);
+
+        // 空白正文 fail fast（空白也算空的单点判据）：fetch 桩回纯空白 SSE 流
+        // ——curator 段 fail-soft 回退默认模板照常，personaGen 段 finalize 抛
+        // 「API 返回为空」。用户可见面三件套机判：错误 toast 在场（toastr
+        // 间谍临时接管、验毕删除）、结果框保持原值（falsy 判空下纯空白会
+        // 静默成功并置空结果框——保留断言的前提是原值非空）、互斥态干净
+        const blankToastErrors: string[] = [];
+        const blankWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
+        blankWindow.toastr = { error: message => { blankToastErrors.push(message); } };
+        const resultBeforeBlank = store.resultText;
+        store.requestText = '空白正文试验';
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            return sseResponse('  \n\t ');
+        }) as typeof fetch;
+        try {
+            await store.generate();
+            check('端到端：空白正文抛「API 返回为空」（两段链走完后错误 toast 在场、结果框保持原值、互斥态干净）',
+                calls.length === 8
+                && resultBeforeBlank.length > 0 && store.resultText === resultBeforeBlank
+                && store.isProcessing === false && store.processingLabel === ''
+                && blankToastErrors.length === 1 && blankToastErrors[0].includes('API 返回为空'),
+                `toast=${JSON.stringify(blankToastErrors)} result=${store.resultText}`);
+        } finally {
+            delete blankWindow.toastr;
+        }
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);

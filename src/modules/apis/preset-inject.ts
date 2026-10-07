@@ -34,3 +34,13 @@ export function resolveJailbreakMessages(): GenerateMessage[] {
     warnedNames.delete(name);
     return messages;
 }
+
+/**
+ * 出站拼装单点：破限前缀＋组装序列——实发（fetch body）、运行日志
+ * requestText、组装 dump 三面从同一实现派生，禁再有第二份拼装。
+ * 空前缀原样透传（不复制数组）。
+ */
+export function composeOutbound(messages: GenerateMessage[]): GenerateMessage[] {
+    const jb = resolveJailbreakMessages();
+    return jb.length > 0 ? [...jb, ...messages] : messages;
+}

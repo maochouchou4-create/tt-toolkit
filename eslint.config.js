@@ -5,6 +5,7 @@
 import globals from 'globals';
 import pluginVue from 'eslint-plugin-vue';
 import tseslint from 'typescript-eslint';
+import { fileURLToPath } from 'node:url';
 
 export default tseslint.config(
     {
@@ -43,6 +44,24 @@ export default tseslint.config(
             // 平移代码与宿主边界打交道多，any 边界集中在 host 层收敛；
             // no-explicit-any 保持 error，边界处用显式 unknown + 收窄
             '@typescript-eslint/no-explicit-any': 'error',
+        },
+    },
+    {
+        // host 适配层开类型感知门禁：跨层调用宿主对象的方法必须保留
+        // 接收者（宿主 class 方法体走 this，解引用后裸调丢 this 抛错——
+        // 破限注入曾因此恒空的实锤）；unbound-method 只在此块吃 projectService
+        files: ['src/host/**/*.ts'],
+        plugins: {
+            '@typescript-eslint': tseslint.plugin,
+        },
+        languageOptions: {
+            parserOptions: {
+                projectService: true,
+                tsconfigRootDir: fileURLToPath(new URL('.', import.meta.url)),
+            },
+        },
+        rules: {
+            '@typescript-eslint/unbound-method': 'error',
         },
     },
     {

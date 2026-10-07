@@ -9,9 +9,10 @@ TauriTavern（SillyTavern 的 Tauri 分支）的自维护扩展「TT 工具箱�
 ## 硬规矩（违反＝返工）
 
 1. `src/host/` 是**唯一**允许 import `@sillytavern/*` 的区域（ambient d.ts + `scripts/check-host-anchors.mjs` 锚点机判；HOST_SRC_ROOT 指向本机 TauriTavern 源码树）。
-2. AFPL 纪律：参考旧 fork 源码只许借鉴概念，禁止照抄表达式。
-3. 版本链三处一致：`src/version.ts` 字面量常量 + `manifest.json` + `package.json`。改任何 `src/` 代码必须走完「七门全绿 → 重建 dist → `node scripts/dev-harness/build.mjs`」才能 commit。
-4. 条目池唯一真相源＝`src/modules/choice/pool/default-pool.json`。改池＝改 JSON + bump version + 重建，绝不经 TT 设置面写池。
+2. host 适配层调用宿主对象方法须保留接收者（`getPresetManager` 返回 class 实例、方法体走 this；解引用后裸调丢 this——unbound-method 门禁把关）。
+3. AFPL 纪律：参考旧 fork 源码只许借鉴概念，禁止照抄表达式。
+4. 版本链三处一致：`src/version.ts` 字面量常量 + `manifest.json` + `package.json`。改任何 `src/` 代码必须走完「七门全绿 → 重建 dist → `node scripts/dev-harness/build.mjs`」才能 commit。
+5. 条目池唯一真相源＝`src/modules/choice/pool/default-pool.json`。改池＝改 JSON + bump version + 重建，绝不经 TT 设置面写池。
 
 ## 七道门禁（commit 前全绿）
 
@@ -55,6 +56,6 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 ## 深度背景（本机路径，仅限本机开发者）
 
-- 重写方案 SSOT：`D:\code\实施方案\tt-toolkit从零重写方案.md`（用户会用并行会话修改它，引用前必须重读原文，不能信转述）。
+- 重写方案已随 v1.0.0 收官按生命周期删除，不再有方案 SSOT 文件；跨会话进度与踩坑以下一条的 memory 条目为准。
 - 跨会话进度与踩坑记忆：`C:\Users\34139\.dsh\memory\workspaces\D-code\tauritavern-toolkit.md`。写它前先读其文件头「维护规则」：两职（速览/当前状态/本机环境坑）；历史进 git log、规则进本文，里程碑只更新其「当前状态」节。
 - 用户协作习惯：中文交流；咨询只答不动手，等明确「开工」才改码；施工者（子智能体）自述不作裁决证据，验收由 Lead 亲跑门禁＋亲读关键代码；用户无法打开 devtools（打包版 Tauri），验收指引只给 UI 级步骤。

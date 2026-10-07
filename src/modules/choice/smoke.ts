@@ -689,6 +689,75 @@ function runParseChecks(): void {
         `path=${proseReport.path} count=${proseReport.options.length}`,
     );
 
+    // ---- 解析尾部分流六形态（容器闭合校验＋尾部契约锚点校验）----
+    // A 容器收口＋尾部中文散文：收口即采信，不再误报「部分恢复」徽标
+    const closedProseRaw = [
+        '{"options": [',
+        '\n    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"}',
+        '\n]}',
+        '\n以上就是可选的行动方向，请选择其一继续剧情。',
+    ].join('');
+    const closedProseReport = parseOptions(closedProseRaw, 4);
+    check(
+        '尾部分流：容器收口＋尾部中文散文 → json 主路径 1 条、无丢弃计数',
+        closedProseReport.path === 'json' && closedProseReport.options.length === 1 && closedProseReport.dropped === undefined,
+        `path=${closedProseReport.path} count=${closedProseReport.options.length}`,
+    );
+
+    // B 收口＋尾部无锚点结构残渣：残渣不含契约陈述＝无害，采信
+    const closedInertRaw = [
+        '{"options": [',
+        '\n    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"}',
+        '\n]}',
+        '\n{"note": "模型附带的收尾备注"}',
+    ].join('');
+    const closedInertReport = parseOptions(closedInertRaw, 4);
+    check(
+        '尾部分流：容器收口＋尾部无锚点残渣 → json 主路径 1 条（无害残渣不连坐）',
+        closedInertReport.path === 'json' && closedInertReport.options.length === 1,
+        `path=${closedInertReport.path} count=${closedInertReport.options.length}`,
+    );
+
+    // C 收口点后跟垃圾（] 后不是 }）：破损流整批拒收，不静默接受
+    const strayBracketRaw = [
+        '{"options": [',
+        '\n    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"}',
+        '\n]]}',
+    ].join('');
+    const strayBracketReport = parseOptions(strayBracketRaw, 4);
+    check(
+        '尾部分流：收口点后跟多余 ] → json_reject 0 条（破损流不静默接受）',
+        strayBracketReport.path === 'json_reject' && strayBracketReport.options.length === 0,
+        `path=${strayBracketReport.path} count=${strayBracketReport.options.length}`,
+    );
+
+    // D 两份契约串接：闭合后残留含第二份契约陈述 → 整批拒收（不静默吞掉）
+    const doubledRaw = [
+        '{"options": [',
+        '\n    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"}',
+        '\n]}{"options": [{"title": "乙", "content": "乙的行动正文，转身返回议事厅。"}]}',
+    ].join('');
+    const doubledReport = parseOptions(doubledRaw, 4);
+    check(
+        '尾部分流：两份契约串接 → json_reject 0 条（第二份契约不静默丢弃）',
+        doubledReport.path === 'json_reject' && doubledReport.options.length === 0,
+        `path=${doubledReport.path} count=${doubledReport.options.length}`,
+    );
+
+    // F 元素间缺分隔符：分隔符严格校验拦截 → 整批拒收
+    const noSepRaw = [
+        '{"options": [',
+        '\n    {"title": "甲", "content": "甲的行动正文，走向河边的旧渡口。"}',
+        '\n    {"title": "乙", "content": "乙的行动正文，转身返回议事厅。"}',
+        '\n]}',
+    ].join('');
+    const noSepReport = parseOptions(noSepRaw, 4);
+    check(
+        '尾部分流：元素间缺分隔符 → json_reject 0 条（分隔符严格校验）',
+        noSepReport.path === 'json_reject' && noSepReport.options.length === 0,
+        `path=${noSepReport.path} count=${noSepReport.options.length}`,
+    );
+
     // 正文含 "options":[ 字面量的讨论文本：不得把正文当选项数组恢复出垃圾
     const discussedReport = parseOptions('她聊起配置格式："options":[ 其实只是聊天正文', 4);
     check(
@@ -821,6 +890,12 @@ function runZeroOptionMessageChecks(): void {
     check('零选项文案：正文为空（真·零响应）＝指向重试/换端点，不带原始输出前缀',
         emptyMessage.includes('未返回') && emptyMessage.includes('重试') && emptyMessage.includes('端点') && !emptyMessage.includes('原始输出'),
         `msg=${emptyMessage}`);
+    // 纯空白是判据的判别样本：trim 语义下与空串同归「未返回内容」——
+    // 若判据回退成 falsy 判空，此样本会落进原始输出臂（回归红线）
+    const blankMessage = zeroOptionsMessage(parseOptions('  \n\t ', 4), '  \n\t ');
+    check('零选项文案：纯空白正文同走「未返回内容」分支（空白判据＝trim 后为空，非 falsy）',
+        blankMessage.includes('未返回') && blankMessage.includes('重试') && !blankMessage.includes('原始输出'),
+        `msg=${blankMessage}`);
     const raw = '她聊起配置格式："options":[ 其实只是聊天正文';
     const rejectMessage = zeroOptionsMessage(parseOptions(raw, 4), raw);
     check('零选项文案：非 empty 路径保持原口径（路径＋原始输出前缀在场）',

@@ -132,6 +132,17 @@ declare module '@sillytavern/scripts/slash-commands/SlashCommand' {
 
 declare module '@sillytavern/scripts/st-context' {
     /**
+     * 宿主 openai 预设管理器（`getPresetManager('openai')` 返回的 class 实例；
+     * 方法体内部走 `this`，调用方必须保留接收者——解引用后裸调会丢 this 抛错）。
+     * @hostAnchor scripts/preset-manager.js:97 export function getPresetManager(apiId = '') {
+     * @hostAnchor scripts/preset-manager.js:549 getPresetList(api) {
+     * @hostAnchor scripts/preset-manager.js:777 getCompletionPresetByName(name) {
+     */
+    export interface TauriTavernPresetManager {
+        getPresetList(api?: string): unknown;
+        getCompletionPresetByName(name: string): unknown;
+    }
+    /**
      * getContext() 返回宿主上下文（此处只声明本仓消费的字段子集，
      * 全量字段见宿主源码）。
      * @hostAnchor scripts/st-context.js:121 export function getContext() {
@@ -182,7 +193,7 @@ declare module '@sillytavern/scripts/st-context' {
          * 预设管理器转发（persona 预设清单/按名取预设）。
          * @hostAnchor scripts/st-context.js:293 getPresetManager,
          */
-        getPresetManager?: (apiId: string) => unknown;
+        getPresetManager?: (apiId: string) => TauriTavernPresetManager | null;
         [key: string]: unknown;
     } | null;
 }
