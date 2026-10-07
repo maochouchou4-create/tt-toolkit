@@ -59,6 +59,8 @@ export interface GlobalDomain {
     promptActiveId?: unknown;
     /** 剧情走向预设列表（modules/choice/direction.ts GLOBAL_DIRECTION_PRESETS_KEY） */
     directionPresets?: unknown;
+    /** 大小总结设置（modules/summary/settings.ts GLOBAL_SUMMARY_KEY） */
+    summary?: unknown;
     /**
      * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
      * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
@@ -70,6 +72,8 @@ export interface GlobalDomain {
 export interface ChatDomain {
     /** 剧情走向（modules/choice/direction.ts CHAT_STORY_DIRECTION_KEY） */
     storyDirection?: unknown;
+    /** 大小总结聊天态（modules/summary/settings.ts CHAT_SUMMARY_KEY） */
+    summary?: unknown;
 }
 
 /** 读全局域原始单例（不快照——storage 内部面与调试 dump 用）。 */

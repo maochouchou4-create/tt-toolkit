@@ -7,6 +7,7 @@
  */
 import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
+import { resolveActiveEndpoint } from '@/modules/apis/storage';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
@@ -18,7 +19,7 @@ import {
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
 import { useRunlogStore } from '@/modules/runlog/store';
-import { choiceStorage, resolveChoiceEndpoint } from './api';
+import { choiceStorage } from './api';
 import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions, type ParseReport } from './parse';
 import { clearFloorOptions, latestAssistantFloorIndex } from './persist';
@@ -153,7 +154,7 @@ export async function generateOptions(): Promise<void> {
                 responseText: DEBUG_MALFORMED_RAW,
             });
         } else {
-            const endpoint = resolveChoiceEndpoint();
+            const endpoint = resolveActiveEndpoint();
             if (!endpoint) {
                 throw new Error('未选择生成端点——到「API」页点端点条目上的「使用」按钮');
             }

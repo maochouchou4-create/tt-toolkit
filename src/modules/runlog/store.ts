@@ -1,5 +1,5 @@
 /**
- * 运行日志 store（会话内存 ring）：choice/persona 生成的统一观测面。
+ * 运行日志 store（会话内存 ring）：choice/persona/summary 生成的统一观测面。
  *
  * 单一写入点＝共享传输层 callGenerateEndpoint（成功/失败全量记录），
  * 任务层只 enrich/markFailed 补解析结论。纯会话内存：不落盘、不进

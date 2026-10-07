@@ -13,13 +13,14 @@ export type PromptRole = 'system' | 'user' | 'assistant';
 
 /**
  * 提示词任务键（引擎多任务化）。各生成管线各自持一套
- * PromptConfig——choice（选项生成）与 persona 两段（策展 schema、按
- * schema 填充人设）。存储形态 Record<taskKey, PromptConfig>。
+ * PromptConfig——choice（选项生成）、persona 两段（策展 schema、按
+ * schema 填充人设）与 summary 两段（小总结压缩、大总结合并）。
+ * 存储形态 Record<taskKey, PromptConfig>。
  */
-export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen';
+export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'summary_small' | 'summary_big';
 
 /** 全部任务键（读侧补缺/迁移遍历用）。 */
-export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen'];
+export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen', 'summary_small', 'summary_big'];
 
 /**
  * 注入源标识。每个注入模块绑定一个源；源内容由组装时的
@@ -43,7 +44,10 @@ export type InjectionSource =
     // ---- persona 任务注入源——内容在 PersonaAssemblySources ----
     /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装）。预设 system 段
      *  源已随任务级预设选择退役（破限预设统一走传输层注入，见 apis/preset-inject）。 */
-    | 'persona_wi';
+    | 'persona_wi'
+    // ---- summary 任务注入源——内容在 SummaryAssemblySources ----
+    /** 前情源文本（小总结＝待压缩楼层原文；大总结＝旧大总结＋小总结群） */
+    | 'summary_source';
     // 角色卡信息/开场白/用户请求/策展 schema 四件不再走注入源：数据面字段
     // 在 PersonaAssemblySources、占位符填充链（fillPersonaPlaceholders）
     // 独立存活。
@@ -58,8 +62,18 @@ export const PERSONA_INJECTION_SOURCES = [
 
 export type PersonaInjectionSource = (typeof PERSONA_INJECTION_SOURCES)[number];
 
-/** choice 任务的注入源（persona 源之外的全部——engine 分流判别用）。 */
-export type ChoiceInjectionSource = Exclude<InjectionSource, PersonaInjectionSource>;
+/**
+ * summary 任务的注入源集合（单一真相源形态同 persona：engine 判别集合
+ * 与 union 均由数组派生）。
+ */
+export const SUMMARY_INJECTION_SOURCES = [
+    'summary_source',
+] as const;
+
+export type SummaryInjectionSource = (typeof SUMMARY_INJECTION_SOURCES)[number];
+
+/** choice 任务的注入源（persona/summary 源之外的全部——engine 分流判别用）。 */
+export type ChoiceInjectionSource = Exclude<InjectionSource, PersonaInjectionSource | SummaryInjectionSource>;
 
 /** 文本模块：用户可编辑的规则/任务/格式文本。 */
 export interface TextModule {

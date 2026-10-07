@@ -87,6 +87,11 @@ export function resolveEndpointById(id: string): ApiEndpoint | null {
     return readApiDomain().find(e => e.id === id) ?? null;
 }
 
+/** 读当前生效端点（全局活动键命中统一端点表；缺席/悬空返回 null＝未选态）。 */
+export function resolveActiveEndpoint(): ApiEndpoint | null {
+    return resolveEndpointById(readActiveEndpointId());
+}
+
 /** 新建端点骨架（id 冲突域内唯一；字段由调用方填）。 */
 export function createEndpoint(name: string): ApiEndpoint {
     return {

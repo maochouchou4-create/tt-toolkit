@@ -306,7 +306,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);
     choiceStorage.updateGenParams({ autoGenerate: true });
 
-    // 无端点：全局活动键悬空 → resolveChoiceEndpoint null → console.warn（不弹 UI）
+    // 无端点：全局活动键悬空 → resolveActiveEndpoint null → console.warn（不弹 UI）
     setActiveEndpointId('no-such-endpoint');
     const warns: string[] = [];
     const origWarn = console.warn;

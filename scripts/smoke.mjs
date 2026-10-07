@@ -445,16 +445,18 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
 
 // 提示词配置初始化：默认模板落进全局域 storage（choice
 // 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。
-// 存储形态 Record<taskKey, PromptConfig> 三任务键：choice 18 模块红线
+// 存储形态 Record<taskKey, PromptConfig> 五任务键：choice 18 模块红线
 // 不变，persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
 // 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
-// 读侧出局，写回自然清除）
+// 读侧出局，写回自然清除），summary 两任务键在场（任务指令＋源文本注入）。
+// 本批 +0 断言（summary 形状并入本组既有键检查，PASS 计数不变）。
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
 const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
-if (promptTaskKeys.length !== 3 || promptChoiceModules !== 18 || !personaKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 三任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
+const summaryKeyOk = ['summary_small', 'summary_big'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0 && promptDomain[k].modules.some(m => m?.source === 'summary_source'));
+if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk || !summaryKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 五任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -569,4 +571,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/三任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

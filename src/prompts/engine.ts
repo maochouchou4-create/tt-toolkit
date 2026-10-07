@@ -15,8 +15,9 @@ import type {
     PersonaInjectionSource,
     PromptModule,
     StoryDirection,
+    SummaryInjectionSource,
 } from './types';
-import { PERSONA_INJECTION_SOURCES } from './types';
+import { PERSONA_INJECTION_SOURCES, SUMMARY_INJECTION_SOURCES } from './types';
 
 /** 聊天历史条目（原始 user/assistant 楼层；<current_scene> 包裹在引擎内做）。 */
 export interface HistoryEntry {
@@ -106,17 +107,45 @@ export interface PersonaAssemblySources {
     charName: string;
 }
 
+/**
+ * summary 两任务（小总结压缩＋大总结合并）的组装供给。与 choice/persona
+ * sources 平行的独立接口：summary 管线是纯文本压缩（不注入角色卡/世界书
+ * /历史——剧情素材全部已折进源文本），共用其他接口会让两边互相背对方
+ * 不需要的字段。收集由 summary 调用方完成（楼层原文与总结态都是运行时
+ * 数据）。
+ */
+export interface SummaryAssemblySources {
+    /** 源文本（小总结＝待压缩楼层原文；大总结＝旧大总结＋小总结群） */
+    sourceText: string;
+    /** 占位符值（{{user}}/{{char}}；任务指令文案不直接引用，保留命名对齐） */
+    userName: string;
+    charName: string;
+}
+
 /** sources 联合的判别（AssemblySources 无 charInfo 字段——in 收窄可靠）。 */
-function isPersonaSources(sources: AssemblySources | PersonaAssemblySources): sources is PersonaAssemblySources {
+function isPersonaSources(sources: AssemblySources | PersonaAssemblySources | SummaryAssemblySources): sources is PersonaAssemblySources {
     return 'charInfo' in sources;
+}
+
+/** sources 联合的判别（SummaryAssemblySources 无 charInfo——in 收窄可靠）。 */
+function isSummarySources(sources: AssemblySources | PersonaAssemblySources | SummaryAssemblySources): sources is SummaryAssemblySources {
+    return 'sourceText' in sources;
 }
 
 /** persona 注入源判别集合（单一真相源＝types 的 as const 数组，此处只派生）。 */
 const PERSONA_SOURCES: ReadonlySet<string> = new Set<string>(PERSONA_INJECTION_SOURCES);
 
-/** 类型谓词形态的判别（Set.has 本身不带收窄——组装分流两处守门共用）。 */
+/** summary 注入源判别集合（单一真相源形态同 persona）。 */
+const SUMMARY_SOURCES: ReadonlySet<string> = new Set<string>(SUMMARY_INJECTION_SOURCES);
+
+/** 类型谓词形态的判别（Set.has 本身不带收窄——组装分流多处守门共用）。 */
 function isPersonaSource(source: InjectionSource): source is PersonaInjectionSource {
     return PERSONA_SOURCES.has(source);
+}
+
+/** summary 注入源判别（与 isPersonaSource 同款谓词形态）。 */
+function isSummarySource(source: InjectionSource): source is SummaryInjectionSource {
+    return SUMMARY_SOURCES.has(source);
 }
 
 /**
@@ -155,6 +184,31 @@ function resolvePersonaInjectContent(
         default:
             return { content: '', note: `未知 persona 注入源 ${source}` };
     }
+}
+
+/**
+ * summary 注入源→内容解析。与 choice/persona 的解析函数平行：源文本由
+ * 调用方拼装完毕（楼层原文逐楼标注 speaker／大总结＋小总结群的分节格式），
+ * 引擎不再包分段标签——压缩任务的结构（批界、批数）已编码在源文本里，
+ * 再包一层只会稀释任务指令的注意力。空内容＝模块跳过（trace 留痕）。
+ */
+function resolveSummaryInjectContent(
+    source: SummaryInjectionSource,
+    sources: SummaryAssemblySources,
+): { content: string; note: string } {
+    switch (source) {
+        case 'summary_source':
+            return sources.sourceText.trim()
+                ? { content: sources.sourceText, note: '前情源文本' }
+                : { content: '', note: '前情源文本为空' };
+    }
+}
+
+/** summary 文本模块占位符替换（任务指令为纯文本无占位符——保留 {{user}}/{{char}} 通道对齐各任务形态）。 */
+function fillSummaryPlaceholders(content: string, sources: SummaryAssemblySources): string {
+    return content
+        .replaceAll('{{user}}', sources.userName || '用户')
+        .replaceAll('{{char}}', sources.charName || '角色');
 }
 
 /** 组装管线占位符替换（确定性：值全部来自 sources）。 */
@@ -312,7 +366,7 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
 }
 
 /**
- * 组装消息数组（模块管线主入口；choice 与 persona 任务共用）。
+ * 组装消息数组（模块管线主入口；choice/persona/summary 任务共用）。
  *
  * 消息序列规则：
  *   - 模块按 order 升序逐个求值；chat_history 展开为多条 user/assistant
@@ -321,14 +375,14 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
  *   - 相邻同 role 合并（system/assistant；user 不互相合并——聊天历史末
  *     条 user 与任务指令同为 user 时，合并会把「任务指令」混进历史正文，
  *     user 消息在提示词里是独立输入边界）。
- *   - persona sources 时走 persona 占位符/注入源；任务源与 sources 形态
- *     不匹配的模块跳过并留痕（手改存档才会出现，不做静默吞）。
+ *   - persona sources 时走 persona 占位符/注入源；summary sources 同理；
+ *     任务源与 sources 形态不匹配的模块跳过并留痕（手改存档才会出现，
+ *     不做静默吞）。
  */
 export function assembleMessages(
     modules: PromptModule[],
-    sources: AssemblySources | PersonaAssemblySources,
+    sources: AssemblySources | PersonaAssemblySources | SummaryAssemblySources,
 ): AssemblyResult {
-    const personaMode = isPersonaSources(sources);
     const sorted = [...modules].sort((a, b) => a.order - b.order);
     const messages: AssemblyMessage[] = [];
     const trace: ModuleTrace[] = [];
@@ -339,9 +393,12 @@ export function assembleMessages(
             continue;
         }
         if (mod.kind === 'text') {
-            const content = (personaMode
-                ? fillPersonaPlaceholders(mod.content, sources)
-                : fillPlaceholders(mod.content, sources)
+            const content = (
+                isPersonaSources(sources)
+                    ? fillPersonaPlaceholders(mod.content, sources)
+                    : isSummarySources(sources)
+                        ? fillSummaryPlaceholders(mod.content, sources)
+                        : fillPlaceholders(mod.content, sources)
             ).trim();
             if (!content) {
                 trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'text', injected: false, note: '文本为空' });
@@ -352,9 +409,9 @@ export function assembleMessages(
             continue;
         }
         // inject 模块：persona 形态先分流（persona 源解析；choice 源无数据跳过）
-        if (personaMode) {
+        if (isPersonaSources(sources)) {
             if (!isPersonaSource(mod.source)) {
-                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于选项生成任务（本次 persona 组装无此数据）' });
+                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于其他生成任务（本次 persona 组装无此数据）' });
                 continue;
             }
             const { content, note } = resolvePersonaInjectContent(mod.source, sources);
@@ -366,8 +423,27 @@ export function assembleMessages(
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
             continue;
         }
+        // inject 模块：summary 形态次分流（仅 summary_source 有数据）
+        if (isSummarySources(sources)) {
+            if (!isSummarySource(mod.source)) {
+                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于其他生成任务（本次 summary 组装无此数据）' });
+                continue;
+            }
+            const { content, note } = resolveSummaryInjectContent(mod.source, sources);
+            if (!content.trim()) {
+                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
+                continue;
+            }
+            pushMessage(messages, { role: mod.role, content: content.trim() });
+            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
+            continue;
+        }
         if (isPersonaSource(mod.source)) {
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于人设任务（选项生成组装无此数据）' });
+            continue;
+        }
+        if (isSummarySource(mod.source)) {
+            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于总结任务（选项生成组装无此数据）' });
             continue;
         }
         if (mod.source === 'chat_history') {

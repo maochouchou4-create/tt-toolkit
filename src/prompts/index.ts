@@ -12,11 +12,12 @@ export type {
     PromptModule,
     PromptRole,
     StoryDirection,
+    SummaryInjectionSource,
     TaskKey,
     TextModule,
 } from './types';
-export { TASK_KEYS } from './types';
-export { assembleMessages, historyToMessages, type AssemblySources, type PersonaAssemblySources, type AssemblyResult, type HistoryEntry, type PoolEntryLine, type PoolInjectionSupply } from './engine';
+export { PERSONA_INJECTION_SOURCES, SUMMARY_INJECTION_SOURCES, TASK_KEYS } from './types';
+export { assembleMessages, historyToMessages, type AssemblySources, type PersonaAssemblySources, type SummaryAssemblySources, type AssemblyResult, type HistoryEntry, type PoolEntryLine, type PoolInjectionSupply } from './engine';
 export { collectAssemblySources } from './sources';
 export { DEFAULTS_VERSION, createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
 export { ensurePromptConfigs, GLOBAL_PROMPT_CONFIGS_KEY } from './storage';

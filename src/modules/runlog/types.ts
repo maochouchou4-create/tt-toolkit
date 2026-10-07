@@ -1,12 +1,16 @@
 /**
- * 运行日志记录契约（choice/persona 共用的生成可观测性面）。
+ * 运行日志记录契约（choice/persona/summary 共用的生成可观测性面）。
  *
  * 会话内存口径：不落盘、不进 extension_settings（跨重启留痕由 commit
  * 内的 ttlog 摘要转发承担，正文只活在内存 ring 里）。
  */
 
-/** 生成任务归属（观测点在共享传输层，按任务区分摘要与 enrich 权）。 */
-export type RunTask = 'choice' | 'persona';
+/**
+ * 生成任务归属（观测点在共享传输层，按任务区分摘要与 enrich 权）。
+ * 与 prompts/TASK_KEYS 手工同步扩（本模块不 import prompts——runlog 被
+ * apis client 消费，引入 prompts 侧依赖成环），平行清单靠本注释锚维持。
+ */
+export type RunTask = 'choice' | 'persona' | 'summary';
 
 export interface RunRecord {
     /** 自增，会话内唯一 */

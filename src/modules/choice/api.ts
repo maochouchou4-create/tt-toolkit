@@ -13,8 +13,6 @@
  *   - GG（gcli 假流式端点）非流式请求挂死——stream=true 是硬需求。
  */
 import { getGlobal, setGlobal } from '@/storage';
-import type { ApiEndpoint } from '@/modules/apis/types';
-import { readActiveEndpointId, readApiDomain } from '@/modules/apis/storage';
 import type { PoolGenParams } from './pool/types';
 import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
@@ -74,11 +72,6 @@ function writeDomain(mutate: (domain: ChoiceDomain) => void): void {
     // 越界/overflow 拼错）不会经写通道持久化
     domain.gen = normalizePoolGenParams(domain.gen);
     setGlobal(GLOBAL_CHOICE_KEY, domain);
-}
-
-/** 读当前生效端点（全局活动键命中统一端点表；缺席返回 null＝未选态）。 */
-export function resolveChoiceEndpoint(): ApiEndpoint | null {
-    return readApiDomain().find(e => e.id === readActiveEndpointId()) ?? null;
 }
 
 export const choiceStorage = {

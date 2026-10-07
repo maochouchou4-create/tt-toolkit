@@ -15,7 +15,8 @@
  */
 
 import { eventBus, event_types, getChatMessages, getHostApiErrorLabel } from '@/host';
-import { choiceStorage, resolveChoiceEndpoint } from './api';
+import { resolveActiveEndpoint } from '@/modules/apis/storage';
+import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
 
 /** 幂等安装标记（浏览器/node 两路 init 都可能调用）。 */
@@ -62,7 +63,7 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
 
     if (isGenerating()) return false;
 
-    const endpoint = resolveChoiceEndpoint();
+    const endpoint = resolveActiveEndpoint();
     if (!endpoint) {
         // 不弹 UI（理由见文件头）；留 console 线索供排障
         console.warn('[tt-toolkit][choice] 自动生成跳过：未选择生成端点');

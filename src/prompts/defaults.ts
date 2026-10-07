@@ -1,5 +1,6 @@
 /**
- * 任务默认模板（三任务：choice 选项生成＋persona 两段——策展/填充）。
+ * 任务默认模板（五任务：choice 选项生成＋persona 两段——策展/填充＋
+ * summary 两段——小总结压缩/大总结合并）。
  * choice 部分＝唯一的任务模板（fork 出厂模板是上游猫娘 RP 特化演化，
  * 文本不搬不抄，按「通用 RP + flash 级模型」制版原则重写）；persona
  * 部分＝PersonaWeaver fork 默认提示词原样平移（见文末分节注释）。
@@ -20,7 +21,7 @@ import type { PromptConfig, TaskKey } from './types';
 
 /**
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
- * 快照并整键重建（三任务键无编辑面＝不存在用户定制，覆盖无损）。
+ * 快照并整键重建（任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
 export const DEFAULTS_VERSION = 11;
 
@@ -355,7 +356,8 @@ function personaPreambleModules() {
 /**
  * 按任务键取默认配置（恢复默认/读侧补缺共用）。choice 分支＝
  * createDefaultPromptConfig() 原样（输出逐字节不变——choice smoke
- * 回归红线）；persona 两任务＝前缀注入模块＋fork 指令正文。
+ * 回归红线）；persona 两任务＝前缀注入模块＋fork 指令正文；summary
+ * 两任务＝任务指令＋源文本注入骨架。
  */
 export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
     switch (task) {
@@ -397,5 +399,73 @@ export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
                     },
                 ],
             };
+        case 'summary_small':
+            return summaryTaskConfig(SUMMARY_SMALL_PROMPT);
+        case 'summary_big':
+            return summaryTaskConfig(SUMMARY_BIG_PROMPT);
     }
+}
+
+// ---------------------------------------------------------------------------
+// summary 任务默认模板（小总结压缩＋大总结合并）。任务指令正文为拍板定稿
+// 文本，一字不差——压缩口径（事件一句话/伏笔必记/亲密情节只记结果/纯文本
+// 输出）是对多份同类总结提示词实测口径的收敛，改写＝破坏定稿。管线形态
+// 与 persona 同构：一个文本模块（任务指令）＋一个注入模块（源文本）。
+// 源文本不含引擎占位符，模块结构与 choice/persona 对齐保持单一管线形态。
+// ---------------------------------------------------------------------------
+
+/** 小总结任务指令（summary_small）。 */
+const SUMMARY_SMALL_PROMPT = [
+    '你是一部沉浸式角色扮演对话的剧情记录员。下面提供一段按时间先后排列的对话楼层，请把它们压缩成一份小总结，作为后续创作时的前情参考。',
+    '',
+    '要求：',
+    '1. 用陈述句记录实际发生的事：不复述对白原文，不评价，不预测后续。',
+    '2. 每个事件写一句话，包含时间（剧情内时间原文明示的照抄，未明示的按先后标注「第X幕」）、地点、在场人物。',
+    '3. 相关事件合并；忽略纯心理与氛围描写，只留情节事实与结果。',
+    '4. 伏笔、承诺、约定、重要物品的得失、人物关系的每次变化必须记录，不得遗漏。',
+    '5. 亲密情节只记录事实与结果（谁与谁发生了什么、关系如何变化），不展开过程细节。',
+    '6. 全文 150 到 250 字，纯文本输出：不使用任何标题、编号、标签或 markdown 格式。',
+].join('\n');
+
+/** 大总结任务指令（summary_big）。 */
+const SUMMARY_BIG_PROMPT = [
+    '你是同一部角色扮演对话的剧情记录员。下面提供旧的大总结与近期的若干条小总结，请把它们合并成一份更新后的大总结，作为全部前剧情节的唯一参考。',
+    '',
+    '要求：',
+    '1. 以时间为线索组织：按剧情阶段或日期分节，每节一段。',
+    '2. 每节写明该段的关键剧情、地点、在场人物、发生的事。',
+    '3. 只记已经发生的事实：陈述句，不复述对白，不评价，不预测。',
+    '4. 合并重复信息：多份小总结里连续讲述的同一件事归并为一句话。',
+    '5. 保留所有伏笔与未回收的线索、人物关系的每次变化、重要物品的流转；信息只增不减。',
+    '6. 人物与专名以原文写法为准，不新造名字。',
+    '7. 篇幅以覆盖全部关键信息为准（通常 300 到 600 字），纯文本输出：不使用 markdown 格式，分节只用一行空行分隔。',
+].join('\n');
+
+/** summary 两任务共用模板骨架：任务指令（system）＋前情源文本注入（user）。 */
+function summaryTaskConfig(prompt: string): PromptConfig {
+    return {
+        id: 'default',
+        name: '默认',
+        defaultsVersion: DEFAULTS_VERSION,
+        modules: [
+            {
+                kind: 'text',
+                id: 'task',
+                name: '任务指令',
+                role: 'system',
+                order: 10,
+                enabled: true,
+                content: prompt,
+            },
+            {
+                kind: 'inject',
+                id: 'inject_summary_source',
+                name: '前情源文本',
+                role: 'user',
+                order: 20,
+                enabled: true,
+                source: 'summary_source',
+            },
+        ],
+    };
 }

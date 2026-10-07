@@ -11,6 +11,10 @@
  *   官方 400，不可全局固定。
  * - max_tokens 不发（v1.5.3 拍板）：服务端默认输出上限，思维链与正文共享
  *   显式上限会掐断正文。
+ * - summaryTemperature 0.7：总结＝信息压缩，保真优先于多样性（choice 1.0
+ *   是枚举多样性场景，两值不共用）。
+ * - summaryReasoningEffort 'low'：机械压缩不需深推理；仅 o 系端点消费该
+ *   字段（同上 reasoningEffort 的宿主转发口径）。
  */
 export const TASK_DEFAULTS = {
     temperature: 1.0,
@@ -18,4 +22,6 @@ export const TASK_DEFAULTS = {
     reasoningEffort: 'high',
     personaTimeoutSec: 600,
     choiceOutputContract: 'json_object',
+    summaryTemperature: 0.7,
+    summaryReasoningEffort: 'low',
 } as const;

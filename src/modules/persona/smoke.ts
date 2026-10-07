@@ -1,5 +1,5 @@
 /**
- * node 冒烟的 persona 机判部分：迁移幂等＋统一端点收编＋三任务
+ * node 冒烟的 persona 机判部分：迁移幂等＋统一端点收编＋五任务
  * 提示词引擎＋api 客户端形状＋store 互斥。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
@@ -246,7 +246,7 @@ function runMigrationChecks(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 2) 三任务提示词引擎（存储形态＋默认模板＋任务键）
+// 2) 五任务提示词引擎（存储形态＋默认模板＋任务键）
 // ---------------------------------------------------------------------------
 
 function runPromptsChecks(): void {
@@ -254,7 +254,7 @@ function runPromptsChecks(): void {
     const raw = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
     const record = (raw ?? {}) as Record<string, unknown>;
     const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
-    check('prompts：三任务键 Record 齐备（choice 18 模块回归红线）',
+    check('prompts：五任务键 Record 齐备（choice 18 模块回归红线）',
         !Array.isArray(raw) && typeof raw === 'object' && raw !== null
         && TASK_KEYS.every(k => record[k] !== undefined)
         && Array.isArray(choiceModules) && choiceModules.length === 18
@@ -262,7 +262,7 @@ function runPromptsChecks(): void {
         && prompts.configFor('persona_gen') !== null,
         `keys=${Object.keys(record).join('/')}`);
 
-    // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺三键。
+    // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺席键。
     // 迁移写在启动 init（ensurePromptConfigs——读路径零副作用后的唯一
     // 落盘口），模拟「旧档在场」的启动即调 init
     const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
@@ -932,7 +932,7 @@ function runHostLiveBindingChecks(): void {
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/三任务引擎/纯函数/api 形状/端到端/互斥机判 ===');
+    console.info('=== persona 迁移/统一端点收编/五任务引擎/纯函数/api 形状/端到端/互斥机判 ===');
     runMigrationChecks();
     runPromptsChecks();
     runPersonaAssemblyChecks();
@@ -947,5 +947,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、三任务提示词引擎（Record 三键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、五任务提示词引擎（Record 五键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }
