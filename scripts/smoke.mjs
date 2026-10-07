@@ -521,8 +521,10 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 无可总结/无可合并/空白输出 fail、e2e 完整链 7（落地/槽重挂/saveChat
 // 通道/请求形状 0.7＋low/组装 speaker/runlog task/落账后取消不回滚）、
 // 级联 5（不满不触发/满触发替换清空/大总结源文本节/槽单节形态/手动同判）、
-// 源文本纯函数 1）＝ 41。
-const SUMMARY_PASS_EXPECTED = 41;
+// 源文本纯函数 1）＋事件接线 6（未开自动不触发/分组 chat_id 不当楼层/
+// 算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/达标场景启动后台生成/
+// 完成后互斥归位＋折叠落账＋running 镜像清位）＝ 47。
+const SUMMARY_PASS_EXPECTED = 47;
 const summaryPassLines = outputLines.filter(l => l.startsWith('[summary-smoke] PASS'));
 const summaryFailLines = outputLines.filter(l => l.startsWith('[summary-smoke] FAIL'));
 if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {

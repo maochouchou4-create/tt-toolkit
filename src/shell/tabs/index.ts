@@ -7,10 +7,12 @@ import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
 import { useApisStore } from '@/modules/apis/store';
+import { useSummaryStore } from '@/modules/summary/store';
 import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';
 import PersonaTab from './PersonaTab.vue';
+import SummaryTab from './SummaryTab.vue';
 
 export function createApiTab(): ShellTab {
     return {
@@ -49,6 +51,23 @@ export function createPersonaTab(): ShellTab {
             const app = createApp(PersonaTab);
             app.use(pinia);
             app.mount(container);
+        },
+    };
+}
+
+export function createSummaryTab(): ShellTab {
+    return {
+        id: 'summary',
+        tabTitle: '总结',
+        mount(container) {
+            const app = createApp(SummaryTab);
+            app.use(pinia);
+            app.mount(container);
+        },
+        // tab 常驻挂载（容器只挂一次、激活只切可见）——后台自动总结落账后，
+        // 状态行靠这里每次激活刷新（resync 三触发点之一）
+        onActivate() {
+            useSummaryStore(pinia).resync();
         },
     };
 }

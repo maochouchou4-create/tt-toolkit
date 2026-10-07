@@ -1,11 +1,12 @@
 /**
  * 扩展引导：唯一环境分支点（模块不自行探测环境自启动）。
  *
- * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
- * （含 API 页）→ initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
+ * （含 API 页与总结页）→ initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
  * 全局口＋选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
- * choice/persona 旧 API 字段）→ initPersona() → wipeLegacyKeysOnce()（遗留
+ * choice/persona 旧 API 字段）→ initPersona() → initSummary()（事件接线
+ * ＋自愈＋启动挂槽）→ wipeLegacyKeysOnce()（遗留
  * localStorage 键一次性清理——顺序硬约束，必须位于全部幂等迁移之后）。
  * node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：initStorage() → host
  * 探测清单 + storage roundtrip → nav 最小初始化 → nav dump。
@@ -25,7 +26,7 @@ import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { mountShell, registerTab } from '@/shell';
-import { createApiTab, createChoiceSettingsTab, createLogTab, createPersonaTab } from '@/shell/tabs';
+import { createApiTab, createChoiceSettingsTab, createLogTab, createPersonaTab, createSummaryTab } from '@/shell/tabs';
 import { dumpStorage, runStorageRoundtrip } from '@/storage/debug';
 import { initStorage } from '@/storage';
 import { runLegacyWipeSmoke, wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
@@ -33,7 +34,7 @@ import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice'
 import { initNav, initNavMinimal } from '@/modules/nav';
 import { initApis } from '@/modules/apis';
 import { initPersona, initPersonaMinimal, runPersonaSmoke } from '@/modules/persona';
-import { initSummaryMinimal, runSummarySmoke } from '@/modules/summary';
+import { initSummary, initSummaryMinimal, runSummarySmoke } from '@/modules/summary';
 import { version } from '@/version';
 
 /** 存储域 dump 挂入统一排障口（devtools 直取 __TT_TOOLKIT__.storage.dump()）。 */
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
     registerTab(createChoiceSettingsTab());
     registerTab(createApiTab());
     registerTab(createPersonaTab());
+    registerTab(createSummaryTab());
     registerTab(createLogTab());
     initChoice();
     initNav();
@@ -97,6 +99,8 @@ async function main(): Promise<void> {
     // 再收编 choice/persona 旧 API 字段——顺序敏感，勿调换
     initApis();
     initPersona();
+    // 大小总结：事件接线＋自愈＋启动挂槽（端点表已就位，守卫链读得到活动端点）
+    initSummary();
     // 遗留 localStorage 键一次性清理——位于全部幂等迁移之后
     // （迁移消费在先、删除在后，绝不碰已迁移数据），见 storage/legacy-wipe
     wipeLegacyKeysOnce();

@@ -1,18 +1,20 @@
 /**
  * node 冒烟的 summary 机判部分：触发算术＋守卫链＋状态机＋槽组合
- * ＋完整链端到端（scripts/smoke.mjs 收口断言，与 choice/persona
+ * ＋完整链端到端＋事件接线（scripts/smoke.mjs 收口断言，与 choice/persona
  * smoke 同构：check() 打 [summary-smoke] PASS/FAIL 行）。
  *
  * 全部走 stub 宿主数据（chat 数组／端点表／dispatching fetch 桩），
  * 与浏览器真实数据共用同一条 generator/state/slot 代码路径。每段
  * 自清理：stub 单例跨段共享（boot2 重跑同段），不留 fixture 残留。
  */
-import { extension_settings, type ChatMessage } from '@/host';
+import { event_types, extension_settings, type ChatMessage } from '@/host';
 import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
 import { useRunlogStore } from '@/modules/runlog/store';
+import { handleSummaryMessageReceived, installSummaryAuto } from './auto';
+import { useSummaryStore } from './store';
 import { MAX_FLOORS_PER_RUN, planAutoSmallSummary, planManualSmallSummary, roundsToTrigger, shouldRunBigSummary } from './arithmetic';
 import { buildBigSourceText, buildSmallSourceText, cancelSummaryGeneration, isSummaryRunning, restoreAllSummaries, runBigSummary, runSmallSummary } from './generator';
-import { DEFAULT_SUMMARY_SETTINGS, normalizeSummaryChatState, normalizeSummarySettings, readSummaryChatState, writeSummaryChatState } from './settings';
+import { DEFAULT_SUMMARY_SETTINGS, normalizeSummaryChatState, normalizeSummarySettings, readSummaryChatState, writeSummaryChatState, writeSummarySettings } from './settings';
 import { clearSummarySlot, SLOT_KEY } from './slot';
 import { composeSlotValue } from './slot-compose';
 import { hiddenFloorCount, hideFloors, isRawFloor, isSummaryHiddenFloor, rawFloorIndices, restoreAllFloors, selfHealSummaryState } from './state';
@@ -28,6 +30,8 @@ interface SmokeStubs {
     getContext(): { chat: Array<Record<string, unknown>>; extensionPrompts: Record<string, { value: string; position: number; depth: number; scan: boolean; role: number }>; [key: string]: unknown };
     /** 聊天域写通道的物理挂载点（chat 域键的缺席态还原用）。 */
     chat_metadata: Record<string, unknown>;
+    /** 宿主事件源（emit 是宿主特权——测试侧直发 CHAT_CHANGED 触发真实接线）。 */
+    eventSource: { emit(type: string, ...args: unknown[]): Promise<void> };
     saveChatCalls: number;
     generateCalls: Array<{ url: string; body: Record<string, unknown> }>;
 }
@@ -377,6 +381,61 @@ async function runGenerationChecks(): Promise<void> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 6) 事件接线（installSummaryAuto 的守卫分支＋CHAT_CHANGED 生命周期）
+// ---------------------------------------------------------------------------
+
+async function runAutoWiringChecks(): Promise<void> {
+    const stubs = smokeStubs();
+    const ttDomain = extension_settings.ttToolkit as Record<string, unknown>;
+    const savedSettings = ttDomain.summary;
+    const savedEndpoints = readApiDomain();
+    const savedActive = readActiveEndpointId();
+    try {
+        // 守卫分支（事件入口侧与 generator 守卫同判；基线设置缺席＝autoEnabled false）
+        seedChat(10);
+        check('接线：自动总结未开启时事件入口不触发', handleSummaryMessageReceived(9) === false);
+        writeSummarySettings({ autoEnabled: true, intervalRounds: 3, keepRounds: 3, bigEvery: 3 });
+        check('接线：分组 chat_id（非数字 messageId）不当楼层触发', handleSummaryMessageReceived('12345') === false);
+        seedChat(4); // raw 4 楼全在保留窗口内（keep 3 轮）
+        check('接线：算术不达标时事件入口不触发', handleSummaryMessageReceived(3) === false);
+        // CHAT_CHANGED 生命周期：abort in-flight → 自愈（翻回的 flag 楼重隐藏）→ 按聊天态重挂槽
+        seedChat(8);
+        hideFloors([0, 1]);
+        stubs.getContext().chat[0].is_system = false; // 自愈间隙被外部翻回
+        writeSummaryChatState({ smallSummaries: [{ text: '前情。', fromFloor: 0, toFloor: 1 }], bigSummary: '' });
+        clearSummarySlot();
+        installSummaryAuto();
+        await stubs.eventSource.emit(event_types.CHAT_CHANGED);
+        check('接线：CHAT_CHANGED 自愈重隐藏＋按聊天态重挂槽',
+            stubs.getContext().chat[0]?.is_system === true && (slotState()?.value ?? '').includes('【小总结·近期】'));
+        // fire 成功路径：达标场景经事件守卫触发 → fire-and-forget → 完成后互斥与 running 镜像归位
+        delete (stubs.chat_metadata as { ttToolkit?: Record<string, unknown> }).ttToolkit?.summary;
+        const endpoint = createEndpoint('接线冒烟端点');
+        endpoint.url = 'https://wiring-smoke.example.com/v1';
+        endpoint.key = 'sk-wiring';
+        endpoint.model = 'wiring-model';
+        writeApiDomain([endpoint]);
+        setActiveEndpointId(endpoint.id);
+        seedChat(14); // raw 14 楼，keep 3 轮 → aged 8 楼 ≥ interval 3 轮（达标）
+        check('接线：达标场景事件入口返回 true 并启动后台生成', handleSummaryMessageReceived(13) === true);
+        const settled = await waitFor(() => !isSummaryRunning());
+        check('接线：自动生成完成后互斥归位＋楼层折叠落账＋running 镜像清位',
+            settled && hiddenFloorCount() === 8 && readSummaryChatState().smallSummaries.length === 1 && useSummaryStore().runningKind === null);
+    } finally {
+        writeApiDomain(savedEndpoints);
+        setActiveEndpointId(savedActive);
+        if (savedSettings === undefined) delete ttDomain.summary;
+        else ttDomain.summary = savedSettings;
+        stubs.getContext().chat = [];
+        // chat 域 summary 键本段起点为缺席——delete 还原（与 generation 段同纪律：
+        // 写空值会把键建出来，污染 boot2 重跑的起点）
+        delete (stubs.chat_metadata as { ttToolkit?: Record<string, unknown> }).ttToolkit?.summary;
+        clearSummarySlot();
+        delete stubs.getContext().extensionPrompts[SLOT_KEY];
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用；排在 choice/persona smoke 之后——共享 stub 单例与 fetch 桩）。 */
 export async function runSummarySmoke(): Promise<void> {
     console.info('=== summary 触发算术/状态机/槽组合/守卫链/端到端机判 ===');
@@ -385,10 +444,11 @@ export async function runSummarySmoke(): Promise<void> {
     runStateChecks();
     runNormalizeChecks();
     await runGenerationChecks();
+    await runAutoWiringChecks();
     if (failures.length > 0) {
         console.error(`[summary-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[summary-smoke] OK：触发算术（agedCount/取偶/上限留池/roundsToTrigger 同源）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动）、normalize 钳制、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort low→落账→隐藏→槽重挂）全部通过。');
+    console.info('[summary-smoke] OK：触发算术（agedCount/取偶/上限留池/roundsToTrigger 同源）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动）、normalize 钳制、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort low→落账→隐藏→槽重挂）、事件接线（守卫分支＋CHAT_CHANGED 自愈重挂）全部通过。');
 }

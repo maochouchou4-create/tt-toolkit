@@ -127,6 +127,10 @@ export async function runSmallSummary(options: { auto: boolean }): Promise<Summa
         if (targetIdx.length < 2) return { kind: 'skipped', reason: NOTHING_TO_SUMMARIZE_REASON };
         const text = await generateSummaryText('summary_small', buildSmallSourceText(targetIdx.map(i => chat[i])), controller.signal);
         if (isBlankResponseContent(text)) return { kind: 'failed', message: '模型未返回任何内容（可能被上游静默拦截或思维链耗尽输出预算）' };
+        // 生成完成瞬间的末次复查：CHAT_CHANGED abort 恰落在 fetch 已 resolve
+        // 之后时，旧聊天的 hide/落账会作用到新聊天上（跨聊天串写）——
+        // cancelled 提前退出，hide 之后才是不可中断区（取消边界拍板）。
+        if (controller.signal.aborted) return { kind: 'cancelled' };
         // ——取消边界：hide 启动后以下路径不可中断（无 abort 检查）——
         hideFloors(targetIdx);
         const state = readSummaryChatState();
@@ -140,7 +144,9 @@ export async function runSmallSummary(options: { auto: boolean }): Promise<Summa
         if (shouldRunBigSummary(state.smallSummaries.length, settings.bigEvery)) {
             const bigOutcome = await runBigSummaryLocked(controller.signal);
             bigRan = bigOutcome.kind === 'big-done';
-            if (!bigRan) bigError = bigOutcome.kind === 'failed' ? bigOutcome.message : bigOutcome.kind;
+            // 只透传 failed 的错误文案；cancelled/skipped 静默（取消无可见
+            // 变更的纪律——「大总结失败：cancelled」是文案泄漏不是错误报告）
+            if (!bigRan && bigOutcome.kind === 'failed') bigError = bigOutcome.message;
         }
         console.info(`[tt-toolkit][summary] 小总结完成：折叠 ${targetIdx.length} 楼${bigRan ? '，大总结已合并' : ''}`);
         return { kind: 'small-done', foldedFloors: targetIdx.length, bigRan, bigError };
@@ -158,6 +164,8 @@ async function runBigSummaryLocked(signal: AbortSignal): Promise<SummaryRunOutco
     if (state.smallSummaries.length === 0) return { kind: 'skipped', reason: NOTHING_TO_MERGE_REASON };
     const text = await generateSummaryText('summary_big', buildBigSourceText(state), signal);
     if (isBlankResponseContent(text)) return { kind: 'failed', message: '模型未返回任何内容（可能被上游静默拦截或思维链耗尽输出预算）' };
+    // 生成完成瞬间的末次复查（同小总结：abort 落在 resolve 后时不得写新聊天）
+    if (signal.aborted) return { kind: 'cancelled' };
     // ——取消边界：替换路径不可中断——重新读态防生成期间漂移
     const next = readSummaryChatState();
     next.bigSummary = text.trim();

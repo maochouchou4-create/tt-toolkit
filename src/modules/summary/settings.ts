@@ -3,7 +3,7 @@
  *
  * 两域分工：
  *   - 全局域＝总结设置（开关＋节奏参数；跨聊天复用）；
- *   - 聊天域＝当前聊天的总结态（小总结群＋大总结正文＋覆盖计数）。
+ *   - 聊天域＝当前聊天的总结态（小总结群＋大总结正文）。
  * 被隐藏楼层的标记不落本域：单一事实源在各楼 message.extra.ttToolkit.summaryHidden
  * （纯数据 boolean，structuredClone 安全），hiddenCount 一律派生不落第二份。
  *
