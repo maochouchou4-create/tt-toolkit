@@ -48,6 +48,12 @@ export interface TavernContextLike {
     getRequestHeaders?: () => Record<string, string>;
     /** 宿主通用注入槽位表转发（st-context.js:158：extensionPrompts: extension_prompts） */
     extensionPrompts?: Record<string, unknown>;
+    /**
+     * 注入槽写入（script.js:10647 经 st-context.js:158-159 转发）。
+     * 必须保留接收者调用（ctx.setExtensionPrompt(...)）——解引用裸调丢
+     * this 是 v1.6.0 破限注入恒空的实锤形态（unbound-method 门禁覆盖）。
+     */
+    setExtensionPrompt?: (key: string, value: string, position: number, depth: number, scan?: boolean, role?: number, filter?: unknown) => unknown;
     /** oai_settings 转发（st-context.js:233；当前激活 openai 预设名读取） */
     chatCompletionSettings?: Record<string, unknown>;
     /** 全量世界书名快照（st-context.js:289） */

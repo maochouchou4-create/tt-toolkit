@@ -44,8 +44,6 @@ export interface SummaryChatState {
     smallSummaries: SmallSummaryRecord[];
     /** 当前大总结正文（空串＝尚无） */
     bigSummary: string;
-    /** 大总结已覆盖的楼层数（含已折叠的小总结区间；加载时钳制 ≤ flagCount） */
-    bigCoveredCount: number;
 }
 
 export const DEFAULT_SUMMARY_SETTINGS: SummarySettings = {
@@ -82,14 +80,13 @@ export function normalizeSummarySettings(raw: unknown): SummarySettings {
 
 /** 总结聊天态归一（纯函数：非数组/坏条目剔除，形状守门）。 */
 export function normalizeSummaryChatState(raw: unknown): SummaryChatState {
-    if (!raw || typeof raw !== 'object') return { smallSummaries: [], bigSummary: '', bigCoveredCount: 0 };
+    if (!raw || typeof raw !== 'object') return { smallSummaries: [], bigSummary: '' };
     const record = raw as Record<string, unknown>;
     return {
         smallSummaries: Array.isArray(record.smallSummaries)
             ? record.smallSummaries.filter(isSmallSummaryRecord)
             : [],
         bigSummary: typeof record.bigSummary === 'string' ? record.bigSummary : '',
-        bigCoveredCount: clampInt(record.bigCoveredCount, 0, Number.MAX_SAFE_INTEGER, 0),
     };
 }
 
@@ -111,4 +108,9 @@ export function readSummaryChatState(): SummaryChatState {
 /** 写当前聊天总结态单通道（写侧再归一）。 */
 export function writeSummaryChatState(state: SummaryChatState): void {
     setChat(CHAT_SUMMARY_KEY, normalizeSummaryChatState(state));
+}
+
+/** 清空当前聊天总结态（「还原全部」用——与楼层 flag 还原配套的编排件）。 */
+export function clearSummaryChatState(): void {
+    writeSummaryChatState({ smallSummaries: [], bigSummary: '' });
 }

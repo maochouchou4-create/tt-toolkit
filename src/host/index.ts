@@ -26,8 +26,10 @@ export type { MovingUIStateEntry, WandMenuEntry } from './dom';
 // 生成请求客户端在 src/modules/apis/client.ts（统一 API 层）；
 // host 层保留请求头装配（@sillytavern 导入面不变）
 export { getTavernRequestHeaders } from './headers';
+export { writeExtensionPromptSlot } from './extension-prompt';
 export { getHostApiErrorLabel } from './i18n';
 export {
+    EXTRA_NAMESPACE_KEY,
     getChatHistory,
     getPersonaDescription,
     getSendTextareaValue,

@@ -34,6 +34,13 @@ import { getChatMessages, getTavernContext } from './context';
 import type { ChatMessage } from './context';
 
 /**
+ * message.extra 下本扩展命名空间键（楼层级派生数据的挂载点，全仓唯一
+ * 字面量——choice 选项/summary 隐藏标记等单楼派生数据共用；写入必须纯
+ * 数据，宿主 swipe 会 structuredClone 进新槽）。
+ */
+export const EXTRA_NAMESPACE_KEY = 'ttToolkit';
+
+/**
  * 当前聊天消息变更的立即落盘通道（写 message.extra 后调用）。
  * 只许走 context.saveChat（＝saveChatConditional，内部按群聊分流）；
  * 保存通道缺席（宿主版本漂移）照 writeChatMetadata 的失败纪律：

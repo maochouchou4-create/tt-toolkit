@@ -10,12 +10,10 @@
  * 写入约束：extra 会经宿主 structuredClone 进 swipe 槽——写进去的必须
  * 是纯数据（{title,content} 数组＋字符串），不得含函数/响应式代理。
  */
-import { getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
+import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
 import type { ParsedOption, ParseReport } from './parse';
 
-/** extra 下的本扩展命名空间键（与全局/聊天域键同名，位置不同域）。 */
-const EXTRA_NAMESPACE_KEY = 'ttToolkit';
-/** 命名空间内的选项键（为同位置将来存别的楼层派生数据留位）。 */
+/** 命名空间内的选项键（为同位置存别的楼层派生数据留位——summary 已用 summaryHidden）。 */
 const EXTRA_CHOICE_KEY = 'choice';
 
 /** 存档白名单与 ParseReport['path'] 同源（漏登记＝该路径存档被当坏档丢弃）。 */

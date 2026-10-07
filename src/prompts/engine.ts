@@ -117,9 +117,6 @@ export interface PersonaAssemblySources {
 export interface SummaryAssemblySources {
     /** 源文本（小总结＝待压缩楼层原文；大总结＝旧大总结＋小总结群） */
     sourceText: string;
-    /** 占位符值（{{user}}/{{char}}；任务指令文案不直接引用，保留命名对齐） */
-    userName: string;
-    charName: string;
 }
 
 /** sources 联合的判别（AssemblySources 无 charInfo 字段——in 收窄可靠）。 */
@@ -202,13 +199,6 @@ function resolveSummaryInjectContent(
                 ? { content: sources.sourceText, note: '前情源文本' }
                 : { content: '', note: '前情源文本为空' };
     }
-}
-
-/** summary 文本模块占位符替换（任务指令为纯文本无占位符——保留 {{user}}/{{char}} 通道对齐各任务形态）。 */
-function fillSummaryPlaceholders(content: string, sources: SummaryAssemblySources): string {
-    return content
-        .replaceAll('{{user}}', sources.userName || '用户')
-        .replaceAll('{{char}}', sources.charName || '角色');
 }
 
 /** 组装管线占位符替换（确定性：值全部来自 sources）。 */
@@ -397,7 +387,7 @@ export function assembleMessages(
                 isPersonaSources(sources)
                     ? fillPersonaPlaceholders(mod.content, sources)
                     : isSummarySources(sources)
-                        ? fillSummaryPlaceholders(mod.content, sources)
+                        ? mod.content
                         : fillPlaceholders(mod.content, sources)
             ).trim();
             if (!content) {
