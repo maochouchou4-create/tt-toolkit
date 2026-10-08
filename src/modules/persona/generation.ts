@@ -40,7 +40,7 @@ import {
     type TaskKey,
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
-import { parseYamlToBlocks } from './yaml';
+import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -100,9 +100,6 @@ export function stripYamlFence(rawText: string, prefillContent?: string): string
     }
     return text.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
 }
-
-/** 策展输出可解析性判定：切不出顶层键即回退默认模板（fail-soft）。 */
-const isParsableSchema = (schema: string): boolean => parseYamlToBlocks(schema).size > 0;
 
 /**
  * 用户输入的安全化包装：双引号换单引号 + SYSTEM_OP 指令块
@@ -219,7 +216,11 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
         try {
             responseContent = await doRequest(promptArray);
         } catch (err) {
-            // 分类：1) 自触发超时 2) 网络层错误 3) 400/Bad Request + prefill → 去 prefill 重试 4) 其它原样抛
+            // 分类：1) 自触发超时 2) 网络层错误 3) 400/Bad Request + prefill → 去 prefill 重试 4) 其它原样抛。
+            // 宿主错误信封也走本判据：信封正文保留着上游原文（含 statusCode
+            // 一类字段），故 400 家族经信封路径同样命中重试（本扩展两段请求
+            // 均以 assistant prefill 结尾，被网关以「末条是模型轮」拒收正是
+            // 这一族——prefill 兼容重试就是为它准备的）。
             const errLower = (err && (err instanceof Error ? err.message : err.toString()) || '').toString().toLowerCase();
             const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
             if (!(prefillContent && isBadRequest)) classifyFailure(err);
@@ -307,7 +308,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
             signal: config.signal,
         });
         const curated = raw ? stripYamlFence(raw, PREFILL_SCHEMA) : '';
-        if (!isParsableSchema(curated)) {
+        if (!isSchemaSkeleton(curated)) {
             log.warn('策展输出为空或不可解析，回退默认模板', { curated });
             return DEFAULT_TEMPLATES.user;
         }

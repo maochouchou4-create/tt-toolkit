@@ -19,7 +19,7 @@
  * toast）。手动路径的 toast 归 store（UI 层）。
  */
 
-import { eventBus, event_types, showToast } from '@/host';
+import { eventBus, event_types, getChatMessages, isHostErrorText, showToast } from '@/host';
 import { resolveActiveEndpoint } from '@/modules/apis/storage';
 import { planAutoSmallSummary } from './arithmetic';
 import { cancelSummaryGeneration, isSummaryRunning, runSmallSummary, type SummaryRunOutcome } from './generator';
@@ -84,6 +84,16 @@ export function handleSummaryMessageReceived(messageId: unknown): boolean {
     // 分组消息 emit 形态是 (chat_id, type)——非整数一律不当楼层索引
     // （chat_id 恰为纯数字串时 Number() 兜底会误判成楼层，choice/auto.ts:47 同款）
     if (typeof messageId !== 'number' || !Number.isInteger(messageId) || messageId < 0) return false;
+
+    // 宿主错误楼层跳过：宿主把生成失败伪装成一条正常回复落地（判据本体与
+    // 出处见 host/api-error.ts）。summary 与 choice 的关键差别——这里不是
+    // 「出不出选项」而是「会不会把错误正文当剧情」：错误正文一旦进
+    // 总结源文本（generator.buildSmallSourceText 逐楼取 mes），产出的就是
+    // 一段总结错误的假摘要，且会经槽注入进后续所有对话。quiet 不滤是设计
+    // （quiet 楼层也是剧情），但错误正文不是剧情。
+    const chat = getChatMessages();
+    const floor = messageId < chat.length ? chat[messageId] : undefined;
+    if (isHostErrorText(floor?.mes)) return false;
 
     const settings = readSummarySettings();
     if (!settings.autoEnabled) return false;

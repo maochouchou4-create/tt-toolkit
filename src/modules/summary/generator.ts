@@ -10,7 +10,7 @@
  * quiet 楼层不滤（与 choice 相反）：总结按楼层计数，quiet 楼层也是剧情
  * 内容——过滤归事件守卫（接线层），生成管线只认 raw 楼层判据。
  */
-import { getChatMessages, getTavernContext, type ChatMessage } from '@/host';
+import { getChatMessages, getTavernContext, isHostErrorText, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, type GenerateRequestConfig } from '@/modules/apis/client';
 import { resolveActiveEndpoint } from '@/modules/apis/storage';
 import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
@@ -125,7 +125,13 @@ export async function runSmallSummary(options: { auto: boolean }): Promise<Summa
         const chat = getChatMessages();
         const targetIdx = rawIdx.slice(0, plan.batchSize).filter(i => typeof chat[i]?.mes === 'string');
         if (targetIdx.length < 2) return { kind: 'skipped', reason: NOTHING_TO_SUMMARIZE_REASON };
-        const text = await generateSummaryText('summary_small', buildSmallSourceText(targetIdx.map(i => chat[i])), controller.signal);
+        // 源文本只取非宿主错误楼层：错误正文不是剧情，进摘要即产出「总结错误
+        // 的假摘要」并经槽注入后续所有对话。错误楼层仍随批折叠（aged 垃圾
+        // 楼不留存），只是不参与摘要内容——触发时机由 auto.ts 守卫拦在入口，
+        // 这里管的是「早先落下的错误楼被后来某次批顺带扫进来」的存量面。
+        const contentIdx = targetIdx.filter(i => !isHostErrorText(chat[i]?.mes));
+        if (contentIdx.length < 2) return { kind: 'skipped', reason: NOTHING_TO_SUMMARIZE_REASON };
+        const text = await generateSummaryText('summary_small', buildSmallSourceText(contentIdx.map(i => chat[i])), controller.signal);
         if (isBlankResponseContent(text)) return { kind: 'failed', message: '模型未返回任何内容（可能被上游静默拦截或思维链耗尽输出预算）' };
         // 生成完成瞬间的末次复查：CHAT_CHANGED abort 恰落在 fetch 已 resolve
         // 之后时，旧聊天的 hide/落账会作用到新聊天上（跨聊天串写）——

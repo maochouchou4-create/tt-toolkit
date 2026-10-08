@@ -14,7 +14,7 @@
  * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差。
  */
 
-import { eventBus, event_types, getChatMessages, getHostApiErrorLabel } from '@/host';
+import { eventBus, event_types, getChatMessages, isHostErrorText } from '@/host';
 import { resolveActiveEndpoint } from '@/modules/apis/storage';
 import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
@@ -52,10 +52,9 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
     const mes = message?.mes;
     if (typeof mes !== 'string' || mes.trim() === '') return false;
     // 错误正文跳过：宿主把生成失败伪装成带 API Error 标签的正常回复
-    // 落地（无结构化标志，只能前缀判别；同源标签＋硬编码兜底的 why
-    // 见 host/i18n.ts 头注）——错误正文上不出选项
-    const text = mes.trimStart();
-    if (text.startsWith(getHostApiErrorLabel()) || text.startsWith('[API Error]')) return false;
+    // 落地（无结构化标志，只能前缀判别；判据本体与出处见 host/api-error.ts）
+    // ——错误正文上不出选项
+    if (isHostErrorText(mes)) return false;
     // messageId===0：首楼欢迎消息（角色卡开场白），不是 AI 对玩家的回复
     if (idx === 0) return false;
 

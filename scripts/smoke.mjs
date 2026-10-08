@@ -174,7 +174,13 @@ function sseResponse(content) {
                     encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`),
                     encoder.encode('data: [DONE]\n\n'),
                 ];
-                return { read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true } };
+                return {
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    // 与宿主同构：真实 ReadableStreamDefaultReader 带 cancel，
+                    // 被放弃的流由传输层显式关闭（缺它会让那条路径在桩上抛
+                    // TypeError 并盖掉原始错误）
+                    cancel: async () => undefined,
+                };
             },
         },
     };
@@ -501,7 +507,10 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）。
 // 本批 +2（dump 口：观测口径标注传输层前缀状态；观测面收敛——选中预设＝实发序列含破限前缀段与计数行）
 // ＋ 空白正文 fail fast 1（纯空白抛「API 返回为空」：错误 toast 在场＋结果框保持原值＋互斥态干净）
-const PERSONA_PASS_EXPECTED = 70;
+// ＋ 宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误正文/拦下空与散文/拦下散言前导换皮形态/
+// 拦下与切块口径分歧的 1 空格散言行；传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/
+// 正常产出以标签开头不误杀；端到端 1：curator 段遇信封即中断、第二段不发出）
+const PERSONA_PASS_EXPECTED = 79;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -521,10 +530,11 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 无可总结/无可合并/空白输出 fail、e2e 完整链 7（落地/槽重挂/saveChat
 // 通道/请求形状 0.7＋low/组装 speaker/runlog task/落账后取消不回滚）、
 // 级联 5（不满不触发/满触发替换清空/大总结源文本节/槽单节形态/手动同判）、
-// 源文本纯函数 1）＋事件接线 6（未开自动不触发/分组 chat_id 不当楼层/
-// 算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/达标场景启动后台生成/
-// 完成后互斥归位＋折叠落账＋running 镜像清位）＝ 47。
-const SUMMARY_PASS_EXPECTED = 47;
+// 源文本纯函数 1）＋事件接线 8（未开自动不触发/分组 chat_id 不当楼层/
+// 算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/错误正文楼层到达时
+// 触发被拦下/批次内错误正文楼不进摘要源文本/达标场景启动后台生成/
+// 完成后互斥归位＋折叠落账＋running 镜像清位）＝ 49。
+const SUMMARY_PASS_EXPECTED = 49;
 const summaryPassLines = outputLines.filter(l => l.startsWith('[summary-smoke] PASS'));
 const summaryFailLines = outputLines.filter(l => l.startsWith('[summary-smoke] FAIL'));
 if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {

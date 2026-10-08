@@ -13,7 +13,7 @@ import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
-import { parseYamlToBlocks } from './yaml';
+import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain } from '@/modules/apis/migration';
@@ -430,6 +430,34 @@ function runPureFunctionChecks(): void {
     check('stripYamlFence：prefill 未闭合（首行 姓名:）补 prefill 再剥',
         stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n基本信息:') === '基本信息:姓名: 测试\n年龄: 20'
         || stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n') === '姓名: 测试\n年龄: 20');
+
+    // isSchemaSkeleton：策展产出的可用性判据。事故原型——宿主错误正文里
+    // 「连接目标服务失败：」「请求地址: …」都是合法的「键行」形态，旧判据
+    // （切得出顶层键即合法）把它判成可用 schema 送进第二段。新判据要求
+    // 每一行都是键/缩进内容/列表项，顶格散文出局。
+    check('yaml：骨架判据放行真骨架（含缩进叶与围栏）',
+        isSchemaSkeleton('```yaml\n基本信息:\n  年龄:\n  性别:\n外貌:\n  整体印象:\n```')
+        && isSchemaSkeleton(DEFAULT_TEMPLATES.user));
+    check('yaml：骨架判据拦下宿主错误正文（顶格散文行出局）',
+        !isSchemaSkeleton('[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。\n\n请检查网络连接、VPN、代理或自定义接口地址，然后重试。\n\n请求地址: https://api.commandcode.ai/provider/v1/chat/completions'));
+    check('yaml：骨架判据拦下空响应与纯散文',
+        !isSchemaSkeleton('') && !isSchemaSkeleton('   \n\t ')
+        && !isSchemaSkeleton('好的主人，您的骚母狗已经完全准备好了，请主人下达指令。'));
+    // 换皮形态：散言前导（带子句标点的句子）被宽松键正则认成顶层键时，
+    // 该键会被 profilePrefillFor 派生成第二段起手词＝把错误正文再送进去
+    // 一次。严格键名（排除子句标点）＋顶层键 ≥2 双条件拦下它。
+    check('yaml：骨架判据拦下散言前导+真骨架（换皮形态：prefill 首键不得落在散文句上）',
+        !isSchemaSkeleton('好的，以下是为您定制的骨架：\n基本信息:\n  年龄:\n外貌:\n  整体印象:')
+        && !isSchemaSkeleton('请求地址: https://api.example.com/v1')
+        && !isSchemaSkeleton('基本信息:\n  年龄:\n  性别:'),  // 单顶层键不足（真骨架至少两块）
+        '换皮形态与单键形态都应出局');
+    // 校验与切块必须共用同一「块界」定义：1 空格缩进、键名带标点的行
+    // 会被宽松切块当新顶层块，校验若把它当「缩进内容从宽」就出现
+    // 「判据说这是骨架、切块给出的却不是这个形状」的分歧（双复核实锤）。
+    // 该形态必须出局——它的块值会截断真骨架并多出空块进第二段注入。
+    check('yaml：骨架判据与切块共用块界定义（1 空格缩进的散言行不得放行）',
+        !isSchemaSkeleton('基本信息:\n 年龄:\n 备注，注意如下:\n外貌:\n  整体印象:'),
+        '该行会被切块当顶层块，校验必须同判');
 }
 
 // ---------------------------------------------------------------------------
@@ -443,8 +471,12 @@ function fakeSSEStream(chunks: string[]): Response {
         ok: true,
         status: 200,
         body: {
+            // 与宿主同构：ReadableStreamDefaultReader 带 cancel（被放弃的流由
+            // 传输层显式关闭）——桩缺 cancel 会让那条路径在桩上抛 TypeError
+            // 并盖掉原始错误，缺陷与误报两个方向都测不到
             getReader: () => ({
                 read: async () => queue.length > 0 ? { done: false, value: queue.shift() } : { done: true },
+                cancel: async () => undefined,
             }),
         },
     } as unknown as Response;
@@ -617,6 +649,68 @@ async function runApiChecks(): Promise<void> {
             errorThrown = (e as Error).message.includes('quota');
         }
         check('api：非流式 json.error 抛错（含上游错误信息）', errorThrown);
+
+        // 宿主错误信封：生成失败被宿主包装成 **HTTP 200 + 正常响应壳**
+        // （流式补一帧带 `tauritavern-error-chunk-` 前缀 id 的错误帧；
+        // 非流式回 `tauritavern-error-` 前缀 id 的 chat.completion）。
+        // 不认信封 id，错误正文就会冒充模型产出返回上层——实测事故：整段
+        // 错误文本被当成策展 schema 送进人设第二段、prefill 首键派生成
+        // 「连接目标服务失败:」。判据只认 id 前缀（不看正文标签）。
+        const HOST_ERROR_BODY = '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。';
+        globalThis.fetch = (async () => fakeSSEStream([
+            `data: ${JSON.stringify({ id: 'tauritavern-error-chunk-1791461520', choices: [{ delta: { content: HOST_ERROR_BODY } }] })}\n\n`,
+            'data: [DONE]\n\n',
+        ])) as typeof fetch;
+        let streamEnvelopeThrown = '';
+        try {
+            await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            );
+        } catch (e) {
+            streamEnvelopeThrown = (e as Error).message;
+        }
+        const streamEnvelopeRecord = useRunlogStore().records[useRunlogStore().records.length - 1];
+        check('api：流式宿主错误信封抛错（id 前缀判别、错误正文不冒充产出、runlog 记失败）',
+            streamEnvelopeThrown.includes('连接目标服务失败')
+            && !!streamEnvelopeRecord && streamEnvelopeRecord.ok === false
+            && (streamEnvelopeRecord.error ?? '').includes('连接目标服务失败'),
+            `thrown=${streamEnvelopeThrown.slice(0, 40)}`);
+
+        globalThis.fetch = (async () => ({
+            ok: true, status: 200,
+            json: async () => ({ id: 'tauritavern-error-1791461520', choices: [{ message: { content: HOST_ERROR_BODY }, finish_reason: 'stop' }] }),
+        })) as unknown as typeof fetch;
+        let plainEnvelopeThrown = '';
+        try {
+            await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+            );
+        } catch (e) {
+            plainEnvelopeThrown = (e as Error).message;
+        }
+        check('api：非流式宿主错误信封抛错（id 前缀判别）',
+            plainEnvelopeThrown.includes('连接目标服务失败'), `thrown=${plainEnvelopeThrown.slice(0, 40)}`);
+
+        // 反向守门：判据只认信封 id——正常产出即使正文恰好以错误标签开头
+        // 也必须照常收下（文本判别会在这里误杀）。
+        globalThis.fetch = (async () => fakeSSEStream([
+            `data: ${JSON.stringify({ id: 'chatcmpl-normal-1', choices: [{ delta: { content: '[API Error]\n这是我写的示例文本' } }] })}\n\n`,
+            'data: [DONE]\n\n',
+        ])) as typeof fetch;
+        let labelLookalike = '';
+        try {
+            const r = await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            );
+            labelLookalike = r.content;
+        } catch {
+            labelLookalike = '(误抛)';
+        }
+        check('api：正常产出正文以错误标签开头不被误杀（判据只认信封 id、不看正文文本）',
+            labelLookalike.includes('这是我写的示例文本'), `content=${labelLookalike.slice(0, 30)}`);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -649,7 +743,10 @@ async function runPersonaE2EChecks(): Promise<void> {
                     encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`),
                     encoder.encode('data: [DONE]\n\n'),
                 ];
-                return { read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true } };
+                return {
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    cancel: async () => undefined,
+                };
             },
         },
     } as unknown as Response);
@@ -668,6 +765,10 @@ async function runPersonaE2EChecks(): Promise<void> {
         const lastFirst = firstMessages[firstMessages.length - 1];
         const lastSecond = secondMessages[secondMessages.length - 1];
         check('端到端：统一端点请求形状（宿主路由、quiet、reverse_proxy=端点地址、温度 1、不发 max_tokens、流式恒开、思考强度 high）',
+            // chat_completion_source 恒 'openai' 是跨模块契约：宿主据此分派
+            // 错误帧形状，而只有 OpenAI 形态带 id 前缀（claude/makersuite 支
+            // 不带）——host/api-error.ts 的信封判据有效性系于此。改此处出站源
+            // 必须连同那边的判据与核实记录一起复核。
             calls.length === 2
             && calls[0].url === '/api/backends/chat-completions/generate'
             && calls[0].body.type === 'quiet' && calls[0].body.chat_completion_source === 'openai'
@@ -788,6 +889,49 @@ async function runPersonaE2EChecks(): Promise<void> {
                 `toast=${JSON.stringify(blankToastErrors)} result=${store.resultText}`);
         } finally {
             delete blankWindow.toastr;
+        }
+
+        // 宿主错误信封在 curator 段：必须抛错中断整条链——第二段不得发出。
+        // 事故原型实证：信封不认 → 错误正文当 schema → 第二段照发，prefill
+        // 首键派生成「连接目标服务失败:」。判据取「调用数只 +1」＝第二段
+        // 根本没发（只断言 toast 会在「发了但第二段也失败」时假绿）。
+        const envelopeToastErrors: string[] = [];
+        const envelopeWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
+        envelopeWindow.toastr = { error: message => { envelopeToastErrors.push(message); } };
+        const callsBeforeEnvelope = calls.length;
+        const resultBeforeEnvelope = store.resultText;
+        store.requestText = '宿主错误信封试验';
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            const encoder = new TextEncoder();
+            const frames = [
+                encoder.encode(`data: ${JSON.stringify({
+                    id: 'tauritavern-error-chunk-1791461520',
+                    choices: [{ delta: { content: '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。' } }],
+                })}\n\n`),
+                encoder.encode('data: [DONE]\n\n'),
+            ];
+            return {
+                ok: true,
+                status: 200,
+                body: { getReader: () => ({
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    cancel: async () => undefined,
+                }) },
+            } as unknown as Response;
+        }) as typeof fetch;
+        try {
+            await store.generate();
+            const secondStageSent = calls.length > callsBeforeEnvelope + 1;
+            check('端到端：curator 段遇宿主错误信封即中断（第二段不发出、错误 toast 在场、结果框与互斥态干净）',
+                calls.length === callsBeforeEnvelope + 1
+                && !secondStageSent
+                && envelopeToastErrors.length === 1 && envelopeToastErrors[0].includes('连接目标服务失败')
+                && store.resultText === resultBeforeEnvelope
+                && store.isProcessing === false && store.processingLabel === '',
+                `calls=${calls.length - callsBeforeEnvelope} toast=${JSON.stringify(envelopeToastErrors).slice(0, 60)}`);
+        } finally {
+            delete envelopeWindow.toastr;
         }
     } finally {
         globalThis.fetch = originalFetch;

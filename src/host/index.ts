@@ -27,7 +27,7 @@ export type { MovingUIStateEntry, WandMenuEntry } from './dom';
 // host 层保留请求头装配（@sillytavern 导入面不变）
 export { getTavernRequestHeaders } from './headers';
 export { writeExtensionPromptSlot } from './extension-prompt';
-export { getHostApiErrorLabel } from './i18n';
+export { HostApiError, isHostErrorEnvelopeId, isHostErrorText } from './api-error';
 export {
     EXTRA_NAMESPACE_KEY,
     getChatHistory,

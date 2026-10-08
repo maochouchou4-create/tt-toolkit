@@ -38,7 +38,7 @@
  * - 请求头：script.js:1041 getRequestHeaders()（宿主适配层
  *   src/host/headers.ts 三级降级装配）。
  */
-import { getTavernRequestHeaders } from '@/host';
+import { getTavernRequestHeaders, HostApiError, isHostErrorEnvelopeId } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { useRunlogStore } from '@/modules/runlog/store';
 import type { RunTask } from '@/modules/runlog/types';
@@ -253,8 +253,53 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
  * 的尾帧也消费掉（fork 骨架会静默丢弃残留在缓冲里的尾行）。
  * 宿主契约语义不变：`data: {json}\n\n` / `data: [DONE]\n\n`，delta 在
  * choices[0].delta.content。
+ *
+ * 帧级错误判别：宿主在流中途失败时补的错误帧**伪装成正常 chunk**
+ * （HTTP 仍是 200，正文位置照旧），只有信封 id 前缀是结构化标志——不认
+ * 它，错误正文就会被当成模型产出返回给上层（实测后果：整段错误文本被
+ * 当成策展 schema 送进人设第二段）。畸形帧仍静默跳过（重帧/心跳）。
  */
 const SSE_FRAME_TERMINATOR = '\n\n';
+
+/** 单帧解析结果：正文增量 + 截断信号 + 宿主错误帧（isHostError 为真即错误帧）。 */
+interface SseFrameOutcome {
+    delta: string;
+    finishReason: string | null;
+    isHostError: boolean;
+    hostErrorText: string;
+}
+
+function parseSseFrame(frame: string): SseFrameOutcome {
+    const outcome: SseFrameOutcome = { delta: '', finishReason: null, isHostError: false, hostErrorText: '' };
+    for (const field of frame.split('\n')) {
+        if (!field.startsWith('data:')) continue;
+        const data = field.slice('data:'.length).trim();
+        if (data === '[DONE]') continue;
+        let json: {
+            id?: unknown;
+            choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+        };
+        try {
+            json = JSON.parse(data) as typeof json;
+        } catch {
+            // 单帧畸形不推翻整次读取（重帧/心跳帧等）
+            continue;
+        }
+        const delta = json?.choices?.[0]?.delta?.content ?? '';
+        const reason = json?.choices?.[0]?.finish_reason;
+        if (typeof reason === 'string' && reason) outcome.finishReason = reason;
+        // 错误帧判定只认信封 id（宿主契约的唯一结构化标志）；正文文本只作
+        // 报告载体。反过来说：正常产出即使正文以该标签开头也照常收下——
+        // 判据不看文本就不会误杀（文本判别只留给拿不到信封的落盘楼层场景）。
+        if (isHostErrorEnvelopeId(json?.id)) {
+            outcome.isHostError = true;
+            outcome.hostErrorText += delta;
+        } else {
+            outcome.delta += delta;
+        }
+    }
+    return outcome;
+}
 
 async function readStream(response: Response): Promise<{ content: string; finishReason: string | null }> {
     if (!response.body) throw new Error('流式响应无 body');
@@ -267,35 +312,34 @@ async function readStream(response: Response): Promise<{ content: string; finish
     let finishReason: string | null = null;
 
     const consumeFrame = (frame: string): void => {
-        for (const field of frame.split('\n')) {
-            if (!field.startsWith('data:')) continue;
-            const data = field.slice('data:'.length).trim();
-            if (data === '[DONE]') continue;
-            try {
-                const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }> };
-                full += json?.choices?.[0]?.delta?.content ?? '';
-                const reason = json?.choices?.[0]?.finish_reason;
-                if (typeof reason === 'string' && reason) finishReason = reason;
-            } catch {
-                // 单帧畸形不推翻整次读取（重帧/心跳帧等）
-            }
-        }
+        const outcome = parseSseFrame(frame);
+        if (outcome.isHostError) throw new HostApiError(outcome.hostErrorText || '生成端点返回宿主错误信封');
+        full += outcome.delta;
+        if (outcome.finishReason !== null) finishReason = outcome.finishReason;
     };
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // \r\n 归一成 \n：上游个别代理会改写换行风格，帧边界探测只认 \n\n
-        pending += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
-        let cut = pending.indexOf(SSE_FRAME_TERMINATOR);
-        while (cut !== -1) {
-            consumeFrame(pending.slice(0, cut));
-            pending = pending.slice(cut + SSE_FRAME_TERMINATOR.length);
-            cut = pending.indexOf(SSE_FRAME_TERMINATOR);
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // \r\n 归一成 \n：上游个别代理会改写换行风格，帧边界探测只认 \n\n
+            pending += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+            let cut = pending.indexOf(SSE_FRAME_TERMINATOR);
+            while (cut !== -1) {
+                consumeFrame(pending.slice(0, cut));
+                pending = pending.slice(cut + SSE_FRAME_TERMINATOR.length);
+                cut = pending.indexOf(SSE_FRAME_TERMINATOR);
+            }
         }
+        // 尾帧可能没有终止符就断流：一并消费（丢它会少最后一段 delta）
+        consumeFrame(pending);
+    } catch (err) {
+        // 兜底关闭被放弃的流（宿主错误帧抛出的路径）：不关则宿主侧连接与
+        // 解码器要等 GC 才回收，而这里已经确定不会再读一帧。cancel 失败
+        // 不覆盖原始错误（cancel 的语义是「不再需要」，失败无补救动作）。
+        await reader.cancel().catch(() => undefined);
+        throw err;
     }
-    // 尾帧可能没有终止符就断流：一并消费（丢它会少最后一段 delta）
-    consumeFrame(pending);
     return { content: full, finishReason };
 }
 
@@ -389,9 +433,15 @@ export async function callGenerateEndpoint(
             }
         } else {
             const data = (await response.json()) as {
+                id?: unknown;
                 choices?: Array<{ message?: { content?: string }; finish_reason?: string | null }>;
                 error?: { message?: string };
             };
+            // 错误信封先判（宿主把失败包装成 200 + 正常 chat.completion 壳，
+            // 与非流式成功响应同形——id 前缀是唯一结构化标志）
+            if (isHostErrorEnvelopeId(data?.id)) {
+                throw new HostApiError(data?.choices?.[0]?.message?.content || '生成端点返回宿主错误信封');
+            }
             if (data?.error) throw new Error(data.error.message || '生成端点返回错误');
             const content = data?.choices?.[0]?.message?.content ?? '';
             if (data?.choices?.[0]?.finish_reason === 'length') {

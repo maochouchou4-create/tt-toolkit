@@ -996,7 +996,10 @@ async function runRunlogChecks(): Promise<void> {
                         partialEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: PARTIAL_MID_CUT_RAW } }] })}\n\n`),
                         partialEncoder.encode('data: [DONE]\n\n'),
                     ];
-                    return { read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true } };
+                    return {
+                        read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                        cancel: async () => undefined,
+                    };
                 },
             },
         })) as unknown as typeof fetch;

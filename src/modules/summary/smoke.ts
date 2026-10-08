@@ -276,7 +276,10 @@ async function runGenerationChecks(): Promise<void> {
             body: { getReader: () => {
                 const encoder = new TextEncoder();
                 const frames = [encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '  \n\t ' } }] })}\n\n`), encoder.encode('data: [DONE]\n\n')];
-                return { read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true } };
+                return {
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    cancel: async () => undefined,
+                };
             } },
         })) as unknown as typeof fetch;
         seedChat(10);
@@ -409,15 +412,45 @@ async function runAutoWiringChecks(): Promise<void> {
         await stubs.eventSource.emit(event_types.CHAT_CHANGED);
         check('接线：CHAT_CHANGED 自愈重隐藏＋按聊天态重挂槽',
             stubs.getContext().chat[0]?.is_system === true && (slotState()?.value ?? '').includes('【小总结·近期】'));
-        // fire 成功路径：达标场景经事件守卫触发 → fire-and-forget → 完成后互斥与 running 镜像归位
-        delete (stubs.chat_metadata as { ttToolkit?: Record<string, unknown> }).ttToolkit?.summary;
+        // 接线路径用的端点在本段起点就位：守卫链里端点检查排在错误正文检查
+        // 之后，若端点缺失，下面的断言会因端点被拦而恒真（测不到错误正文判据）
         const endpoint = createEndpoint('接线冒烟端点');
         endpoint.url = 'https://wiring-smoke.example.com/v1';
         endpoint.key = 'sk-wiring';
         endpoint.model = 'wiring-model';
         writeApiDomain([endpoint]);
         setActiveEndpointId(endpoint.id);
-        seedChat(14); // raw 14 楼，keep 3 轮 → aged 8 楼 ≥ interval 3 轮（达标）
+
+        // 错误楼层跳过（宿主把生成失败伪装成正常回复落地，判据见 host/api-error.ts）：
+        // 入口守卫拦「错误楼到达时触发」，源文本过滤拦「存量错误楼被后来某次批扫进来」。
+        // 判别性：同配置（14 楼／keep 3／interval 3＝算术达标）下，错误楼在索引 2
+        // 必被拦下，而本段末尾「达标场景」用例用同样的算术配置且返回 true——
+        // 两者对照才证明拦下的原因确实是错误正文，而非算术/开关/端点巧合。
+        seedChat(14);
+        const errChat = stubs.getContext().chat as Array<Record<string, unknown>>;
+        errChat[2] = { mes: '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。', is_user: true };
+        const errFloorTriggered = handleSummaryMessageReceived(2);
+        check('接线：错误正文楼层到达时自动触发被拦下（不把错误当剧情摘要）', errFloorTriggered === false);
+
+        // 存量面：错误楼落在批次内时只折叠、不进摘要源文本
+        stubs.generateCalls.length = 0;
+        const errRun = await runSmallSummary({ auto: false });
+        const errCall = stubs.generateCalls[stubs.generateCalls.length - 1];
+        const errSource = ((errCall?.body.messages ?? []) as Array<{ content: string }>).map(m => m.content).join('\n');
+        check('守卫：批次内错误正文楼不进摘要源文本（仍随批折叠，不产出假摘要）',
+            errRun.kind === 'small-done'
+            && !errSource.includes('连接目标服务失败')
+            && errSource.includes('用户第0楼'),
+            `kind=${errRun.kind} 含错误正文=${String(errSource.includes('连接目标服务失败'))}`);
+        restoreAllFloors();
+        // 本段落账会污染后续「达标触发」用例的起点（它断言 smallSummaries
+        // 恰 1 条、折叠恰 8 楼）——按本文件既有纪律把 chat 域还原成缺席态，
+        // 而非留个空壳键（写空值会把键建出来，污染 boot2 重跑起点）
+        delete (stubs.chat_metadata as { ttToolkit?: Record<string, unknown> }).ttToolkit?.summary;
+        clearSummarySlot();
+
+        // fire 成功路径：达标场景经事件守卫触发 → fire-and-forget → 完成后互斥与 running 镜像归位
+        seedChat(14); // raw 14 楼，keep 3 轮 → aged 8 楼 ≥ interval 3 轮（达标；同上面的算术配置）
         check('接线：达标场景事件入口返回 true 并启动后台生成', handleSummaryMessageReceived(13) === true);
         const settled = await waitFor(() => !isSummaryRunning());
         check('接线：自动生成完成后互斥归位＋楼层折叠落账＋running 镜像清位',
