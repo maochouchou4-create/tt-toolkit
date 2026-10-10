@@ -282,12 +282,13 @@ function runPromptsChecks(): void {
     // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）
     prompts.$patch({ revision: prompts.revision + 1 });
 
-    // 默认配置版本化重建：旧默认快照（无 defaultsVersion）启动后被整键
-    // 重建为新版并盖版本号（id!=='default' 的定制键不覆盖——防御分支）
+    // 默认配置版本化重建：版本落后的默认快照（defaultsVersion 落后于当前
+    // ——真实升级存量的形态）启动后被整键重建为新版并盖新版本号
+    // （id!=='default' 的定制键不覆盖——防御分支）
     const withStale = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
     setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, {
         ...withStale,
-        persona_gen: { id: 'default', name: '默认', modules: [] },
+        persona_gen: { id: 'default', name: '默认', defaultsVersion: DEFAULTS_VERSION - 1, modules: [] },
     });
     ensurePromptConfigs();
     prompts.$patch({ revision: prompts.revision + 1 });
@@ -315,16 +316,19 @@ function runPromptsChecks(): void {
         `blocks=${keys.join('/')}`);
 
     // 骨架双源机判：回退骨架（DEFAULT_TEMPLATES.user）的性格叶键名与
-    // 策展清单 <reference_modules> 性格行声明一致——两处原文包含性比对，
-    // 改策展清单漏改回退骨架在此翻红（对齐不再靠注释纪律）
+    // 策展清单 <reference_modules> 性格行声明一致——两侧集合对称相等
+    // （单向包含＋手抄叶数组都会漏改静默通过：换叶同数时长度不变、检测器
+    // 自身的数组忘了同步时断言恒真），改任一侧漏改另一侧即翻红
     const personaLeaves = (templateBlocks.get('性格') ?? '')
         .split('\n').map(l => l.trim().replace(/:$/, '')).filter(Boolean);
     const curatorLine = curatorText.split('\n').find(l => l.startsWith('性格——')) ?? '';
-    check('prompts：骨架双源机判（回退骨架性格三叶＝策展清单性格行声明）',
-        curatorLine !== ''
-        && personaLeaves.length === 3
-        && ['核心矛盾', '情绪反应', '说话风格'].every(k => personaLeaves.includes(k) && curatorLine.includes(k)),
-        `骨架叶=${personaLeaves.join('/')} 清单行=${curatorLine}`);
+    const curatorLeaves = (curatorLine.split('；')[0]?.split('——')[1] ?? '')
+        .split('/').map(s => s.trim()).filter(Boolean);
+    const leavesAligned = personaLeaves.length === curatorLeaves.length
+        && personaLeaves.every(k => curatorLeaves.includes(k));
+    check('prompts：骨架双源机判（回退骨架性格叶＝策展清单性格行声明，集合对称相等）',
+        curatorLine !== '' && leavesAligned,
+        `骨架叶=${personaLeaves.join('/')} 清单叶=${curatorLeaves.join('/')}`);
 }
 
 // ---------------------------------------------------------------------------
