@@ -17,10 +17,12 @@
  *   invokeChatCompletionWithAbort（:356）整体转发 Rust 侧
  *   generate_chat_completion（dto 原样），翻译发生在
  *   tt-application chat_completion_service：
- *   - source=openai：payload/openai.rs:63-67 → openai::build → 上游
- *     endpoint `/chat/completions`（:103）；
- *   - 密钥路由：config.rs:244-252——source 非 custom 且 reverse_proxy
- *     非空 → base_url=reverse_proxy、api_key=proxy_password（直连密钥）；
+ *   - source=custom（custom_api_format 缺省＝openai_compat）：
+ *     payload/custom.rs:16-26 → openai::build → 上游 endpoint
+ *     `/chat/completions`（:103）；
+ *   - 密钥路由：config.rs:221-229/343-344——custom 源 custom_url 为空
+ *     且 reverse_proxy 非空 → base_url=reverse_proxy、
+ *     api_key=proxy_password（直连密钥）；
  *   - response_format 通路：payload/openai.rs:222-224
  *     resolve_response_format——`response_format` 字段存在则原样透传
  *     （:288-293），否则 `json_schema:{name,strict,value}` 转换为
@@ -202,8 +204,14 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     const body: Record<string, unknown> = {
         // quiet：不占宿主生成状态/通知（见文件头）；语义＝后台旁路生成
         type: 'quiet',
-        chat_completion_source: 'openai',
-        // 密钥经 reverse_proxy 通道直达上游（config.rs:251-252），不落宿主 secret
+        // custom 源＝OpenAI 兼容直连（custom_api_format 缺省 openai_compat，
+        // 经 openai::build 同一构建路径）：密钥路由与 openai 源相同
+        // （reverse_proxy＋proxy_password），但 reasoning_effort 原样透传
+        // ——openai 源按模型名白名单转发、白名单外静默丢弃（openai.rs:
+        // 182-199），本扩展端点的模型名全在白名单外，走 openai 源等于
+        // 思考强度永远发不出去。
+        chat_completion_source: 'custom',
+        // 密钥经 reverse_proxy 通道直达上游（config.rs:223-224），不落宿主 secret
         reverse_proxy: normalizeApiUrl(config.baseUrl),
         proxy_password: config.apiKey ?? '',
         model: config.model,
@@ -226,18 +234,21 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
     }
     if (config.reasoningEffort && config.reasoningEffort !== 'off') {
         // 思考强度（G3）：值域对齐 OpenAI reasoning_effort（low/medium/high）。
-        // 宿主侧两级语义（复核 D:\code\repos\TauriTavern\src-tauri 施工 HEAD）：
+        // 宿主侧语义（复核 D:\code\repos\TauriTavern\src-tauri 施工 HEAD）：
         // ①入站捕获：chat_completion_dto.rs ChatCompletionGenerateRequestDto
         //   payload 用 `#[serde(flatten)] Map<String,Value>`（:41-45），未知
         //   字段（含 reasoning_effort）整包进 Rust payload map；
-        // ②出站双通路（openai.rs build_chat_completion_payload）：
-        //   - source=="custom" 时 reasoning_effort 原样透传（openai.rs:
-        //     182-186）；
-        //   - source=="openai" 且模型名命中推理系白名单（o1/o3/gpt-5.x，
-        //     openai.rs:188-199 → openai_reasoning.rs:41-46）时经
-        //     normalize 后转发，其余 openai 原生源静默丢弃（本客户端走
-        //     openai 源——与 UI「仅部分端点支持，发错档会被端点忽略或
-        //     报错，默认不发」说明口径一致）。
+        // ②出站：本客户端走 custom 源＝原样透传（openai.rs:182-186）；若换
+        //   回 openai 源则仅模型名白名单（o1/o3/gpt-5.x 系，openai.rs:
+        //   188-199 → openai_reasoning.rs:41-46）转发、其余静默丢弃——
+        //   端点模型名不在白名单时字段等于没发，换源前必读；
+        // ③ds 系模型名（deepseek-v4*/deepseek-flash）在 custom 源下命中
+        //   宿主兼容网关分支：补 thinking:{type:"enabled"} 并透传
+        //   reasoning_effort（deepseek.rs:58-81/184-189）——deepseek-flash
+        //   不带 thinking 时本就默认思考，语义无翻转。
+        // 上游接受度（带字段全 200 无错，四端点实测）：glm-5.3／
+        // glm-5.3-flash／deepseek-flash／gemini 中转（中转是否消费字段
+        // 由其自决，不报错即无害）。
         body.reasoning_effort = config.reasoningEffort;
     }
     // prompt_only：不发 response_format——纯提示词契约＋客户端解析兜底

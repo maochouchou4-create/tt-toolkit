@@ -501,8 +501,8 @@ async function runApiChecks(): Promise<void> {
         [{ role: 'user', content: 'hi' }],
         { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off' },
     );
-    check('api：buildGenerateBody 基础形状（quiet/openai/reverse_proxy/proxy_password/tool_choice；缺省温度与 max_tokens 不发）',
-        body.type === 'quiet' && body.chat_completion_source === 'openai'
+    check('api：buildGenerateBody 基础形状（quiet/custom/reverse_proxy/proxy_password/tool_choice；缺省温度与 max_tokens 不发）',
+        body.type === 'quiet' && body.chat_completion_source === 'custom'
         && body.reverse_proxy === 'https://api.example.com/v1' && body.proxy_password === 'sk-test'
         && body.model === 'm1' && Array.isArray(body.messages) && body.tool_choice === 'none'
         && body.stream === false
@@ -768,14 +768,14 @@ async function runPersonaE2EChecks(): Promise<void> {
         const secondJoined = secondMessages.map(m => m.content).join('\n');
         const lastFirst = firstMessages[firstMessages.length - 1];
         const lastSecond = secondMessages[secondMessages.length - 1];
-        check('端到端：统一端点请求形状（宿主路由、quiet、reverse_proxy=端点地址、温度 1、不发 max_tokens、流式恒开、思考强度 high）',
-            // chat_completion_source 恒 'openai' 是跨模块契约：宿主据此分派
-            // 错误帧形状，而只有 OpenAI 形态带 id 前缀（claude/makersuite 支
-            // 不带）——host/api-error.ts 的信封判据有效性系于此。改此处出站源
-            // 必须连同那边的判据与核实记录一起复核。
+        check('端到端：统一端点请求形状（宿主路由、quiet、custom 源透传、reverse_proxy=端点地址、温度 1、不发 max_tokens、流式恒开、思考强度 high）',
+            // chat_completion_source 恒 'custom' 是跨模块契约：宿主按源分派
+            // 错误帧形状，只有 OpenAI 形态带 id 前缀（claude/makersuite 等
+            // 支不带，custom 不在其列）——host/api-error.ts 的信封判据有效
+            // 性系于此。改此处出站源必须连同那边的判据与核实记录一起复核。
             calls.length === 2
             && calls[0].url === '/api/backends/chat-completions/generate'
-            && calls[0].body.type === 'quiet' && calls[0].body.chat_completion_source === 'openai'
+            && calls[0].body.type === 'quiet' && calls[0].body.chat_completion_source === 'custom'
             && calls[0].body.reverse_proxy === 'https://smoke.example.com/v1' && calls[0].body.proxy_password === 'sk-smoke'
             && calls[0].body.model === 'smoke-model' && calls[0].body.temperature === 1
             && !('max_tokens' in calls[0].body) && calls[0].body.stream === true

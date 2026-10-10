@@ -19,10 +19,12 @@
  * （落盘楼层——信封已不存在，文本前缀是唯一可用判据）。
  *
  * 形态 A 的帧形状分派值得记一笔：宿主按 chat_completion_source 分派错误
- * 帧（ai-routes.js:288-327），claude/vertexai-claude/makersuite 三支**不带
- * id**；本扩展的请求恒为 source=openai（apis/client 的 buildGenerateBody
- * 硬编码 chat_completion_source='openai'），故恒走带 id 的 OpenAI 形态。
- * 若将来扩展改成多源出站，这里的信封判据必须连同出站源一起复核。
+ * 帧（ai-routes.js:288-327），不带 id 的是 claude／vertexai（claude 与
+ * makersuite 两支）／cohere 及 opencode 的 claude/gemini 格式；本扩展的
+ * 请求恒为 source=custom（apis/client 的 buildGenerateBody 硬编码
+ * chat_completion_source='custom'），不命中任何非 id 支，恒走带 id 的
+ * OpenAI 形态。若将来扩展改成多源出站，这里的信封判据必须连同出站源
+ * 一起复核。
  *
  * 核实记录（D:\code\repos\TauriTavern\src）：
  *   - tauri/main/routes/ai-routes.js:232-240 buildErrorAssistantText——

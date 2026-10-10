@@ -4,7 +4,7 @@
  * - temperature 1.0：选项＝剧情可能性枚举，多样性是价值（贴合由人设锚定
  *   与 few-shot 承担）；显式发保证跨中转站一致（服务端默认值参差）。
  * - stream true：假流式端点硬需求，正常端点开了无害；用户对过程无感。
- * - reasoningEffort 'high'：本扩展请求恒 source=openai——宿主仅对白名单模型名（o1/o3/gpt-5.x 系）转发 reasoning_effort，其余**静默丢弃**（tt-application/src/services/chat_completion_service/payload/openai.rs:182-199；claude 等原生源会报错但不适用于本扩展的请求形态）；当前端点集无副作用；o 系端点自动高档（max 太费、低档思考不足）。
+ * - reasoningEffort 'high'：请求走宿主 custom 源＝reasoning_effort 原样透传（openai.rs:182-186；openai 源按模型名白名单转发、白名单外静默丢弃，故出站源必须是 custom——口径见 apis/client.ts）；选项/人设要贴合人设与上下文，档位从高。
  * - personaTimeoutSec 600：超时是逃生阀不是性能旋钮；推理模型长思维链
  *   分钟级常见，宁长勿掐（生成中有取消通道）。
  * - choiceOutputContract 'json_object'：三家端点通吃；json_schema 档 ds
@@ -13,8 +13,8 @@
  *   显式上限会掐断正文。
  * - summaryTemperature 0.7：总结＝信息压缩，保真优先于多样性（choice 1.0
  *   是枚举多样性场景，两值不共用）。
- * - summaryReasoningEffort 'low'：机械压缩不需深推理；仅 o 系端点消费该
- *   字段（同上 reasoningEffort 的宿主转发口径）。
+ * - summaryReasoningEffort 'high'：全任务同档（用户拍板）——低档省的
+ *   时长有限，高档换摘要保真（转发口径同上 reasoningEffort）。
  */
 export const TASK_DEFAULTS = {
     temperature: 1.0,
@@ -23,5 +23,5 @@ export const TASK_DEFAULTS = {
     personaTimeoutSec: 600,
     choiceOutputContract: 'json_object',
     summaryTemperature: 0.7,
-    summaryReasoningEffort: 'low',
+    summaryReasoningEffort: 'high',
 } as const;

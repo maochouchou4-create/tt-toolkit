@@ -75,7 +75,7 @@ export function buildBigSourceText(state: { bigSummary: string; smallSummaries: 
 
 /**
  * 单段总结生成（组装→请求）。任务参数固化在 TASK_DEFAULTS（temperature
- * 0.7 保真优先、reasoningEffort low 机械压缩；outputContract prompt_only
+ * 0.7 保真优先、reasoningEffort high 全任务同档；outputContract prompt_only
  * ——纯文本压缩无 JSON 契约）。端点缺席抛错（守卫链已先行归类 skipped，
  * 这里是 Fail Fast 兜底）。
  */

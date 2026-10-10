@@ -314,13 +314,13 @@ async function runGenerationChecks(): Promise<void> {
             && !(slotState()?.value ?? '').includes('【大总结】'),
             `value=${JSON.stringify(slotState()?.value.slice(0, 60) ?? '')}`);
         check('e2e：hide 落盘走 saveCurrentChat 通道（计数 +1）', stubs.saveChatCalls === saveBefore + 1, `delta=${stubs.saveChatCalls - saveBefore}`);
-        check('e2e：请求形状（宿主路由、quiet、端点身份、temperature 0.7、reasoning_effort low 按 client 实发形态、流式、prompt_only 无契约键、无 max_tokens）',
+        check('e2e：请求形状（宿主路由、quiet、custom 源、端点身份、temperature 0.7、reasoning_effort high 按 client 实发形态、流式、prompt_only 无契约键、无 max_tokens）',
             call?.url === '/api/backends/chat-completions/generate'
-            && call?.body.type === 'quiet' && call?.body.chat_completion_source === 'openai'
+            && call?.body.type === 'quiet' && call?.body.chat_completion_source === 'custom'
             && call?.body.reverse_proxy === 'https://summary-smoke.example.com/v1' && call?.body.proxy_password === 'sk-summary'
             && call?.body.model === 'summary-model'
             && call?.body.temperature === 0.7
-            && call?.body.reasoning_effort === 'low'
+            && call?.body.reasoning_effort === 'high'
             && call?.body.stream === true
             && !('response_format' in (call?.body ?? {})) && !('max_tokens' in (call?.body ?? {})),
             `body=${JSON.stringify(call?.body ?? {})}`);
@@ -483,5 +483,5 @@ export async function runSummarySmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[summary-smoke] OK：触发算术（agedCount/取偶/上限留池/roundsToTrigger 同源）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动）、normalize 钳制、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort low→落账→隐藏→槽重挂）、事件接线（守卫分支＋CHAT_CHANGED 自愈重挂）全部通过。');
+    console.info('[summary-smoke] OK：触发算术（agedCount/取偶/上限留池/roundsToTrigger 同源）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动）、normalize 钳制、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort high→落账→隐藏→槽重挂）、事件接线（守卫分支＋CHAT_CHANGED 自愈重挂）全部通过。');
 }
