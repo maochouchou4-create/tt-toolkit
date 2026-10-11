@@ -50,7 +50,6 @@ function currentCharacter(): CharacterCardLike | null {
  */
 export async function collectAssemblySources(params: {
     storyDirection: StoryDirection | null;
-    contextRounds: number;
     count: number;
     minChars: number;
     maxChars: number;
@@ -59,7 +58,7 @@ export async function collectAssemblySources(params: {
     const ch = currentCharacter();
     const card = ch?.data ?? {};
     const persona = getPersonaDescription();
-    const history = getChatHistory(params.contextRounds);
+    const history = getChatHistory();
 
     // 世界书扫描：chat 需倒序（最新在前，宿主契约）；喂已过滤隐藏楼层
     // 的正文——与主生成激活范围一致（隐藏楼层关键词不触发绿灯条目）。

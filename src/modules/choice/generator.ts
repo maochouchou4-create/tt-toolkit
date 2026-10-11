@@ -97,7 +97,6 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
     const poolInjection: PoolInjectionSupply = drawPoolInjection();
     const sources = await collectAssemblySources({
         storyDirection: useStoryDirectionStore().storyDirection,
-        contextRounds: gen.contextRounds,
         count: gen.count,
         minChars: gen.minChars,
         maxChars: gen.maxChars,

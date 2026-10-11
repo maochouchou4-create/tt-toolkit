@@ -551,7 +551,7 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 仍放行询问＝纪元作废承重/作废后询问仍是判断请求）＋judge 落回竞态 4
 // （判断挂起前置/手动镜像前置/落回 true 不抢镜像/手动正常落地）＋状态机
 // foldEpoch 1（折叠/还原各推进、selfHeal 不推进）＝ 81。
-const SUMMARY_PASS_EXPECTED = 81;
+const SUMMARY_PASS_EXPECTED = 82;
 const summaryPassLines = outputLines.filter(l => l.startsWith('[summary-smoke] PASS'));
 const summaryFailLines = outputLines.filter(l => l.startsWith('[summary-smoke] FAIL'));
 if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {

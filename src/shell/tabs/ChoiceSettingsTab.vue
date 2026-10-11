@@ -24,9 +24,6 @@
         <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" min="0" max="500" step="10" @change="settings.updateGen({ oversamplePct: clampInt($event, 0, 500, 100) })">
       </TTField>
       <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
-      <TTField label="上下文轮数（一轮＝一问一答）">
-        <input class="tt-ctrl" :value="settings.gen.contextRounds" type="number" min="1" max="50" @change="settings.updateGen({ contextRounds: clampInt($event, 1, 50, 6) })">
-      </TTField>
       <TTField label="选项字数下限">
         <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, 10) })">
       </TTField>

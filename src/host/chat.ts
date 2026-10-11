@@ -179,16 +179,16 @@ export async function sendInputMessage(): Promise<void> {
 }
 
 /**
- * 取 N 轮聊天历史（role 三态消息）：过滤隐藏楼层（is_system——宿主
- * 隐藏真实字段，fork 实证 is_hidden 是死字段），rounds>0 取末 N*2 条
- * （一轮＝一问一答；隐藏楼层不占窗口槽位，口径对齐宿主主生成 coreChat）。
+ * 取可见楼层全量（role 三态消息）：过滤隐藏楼层（is_system——宿主隐藏
+ * 真实字段，fork 实证 is_hidden 是死字段）。窗口策略对齐宿主主生成：
+ * 可见即全文——老楼层的收纳归总结折叠（隐藏楼层不在此列），旁路请求
+ * 不再另设轮数截窗（双窗口策略已退役，choice 上下文与主聊天同构）。
  */
-export function getChatHistory(rounds: number): Array<{ role: 'user' | 'assistant'; content: string }> {
+export function getChatHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
     const chat: ChatMessage[] = getChatMessages();
-    const visible = chat.filter(m => !m.is_system);
-    const picked = rounds > 0 ? visible.slice(-rounds * 2) : visible;
     const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-    for (const m of picked) {
+    for (const m of chat) {
+        if (m.is_system) continue;
         const content = String(m.mes ?? '');
         if (!content.trim()) continue;
         // 角色按消息来源（is_user）：实测统一 system 后 flash 模型不适配

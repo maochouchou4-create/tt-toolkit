@@ -510,6 +510,23 @@ async function runGenerationChecks(): Promise<void> {
         check('级联：手动大总结同判（合并后替换清空）',
             manualBig.kind === 'big-done' && readSummaryChatState().bigSummary === SUMMARY_TEXT && readSummaryChatState().smallSummaries.length === 0,
             `kind=${manualBig.kind}`);
+        // ---- 传输层 think 剥离集成：破限前缀对总结任务（prompt_only）下达
+        // think 指令，模型依令先吐思维链再写正文——存储与槽注入前必须剥净；
+        // runlog 保留原始 wire 正文（排障设施如实记端点返回）----
+        seedChat(10);
+        const thinkPrefixed = `<think>先梳理剧情要点。</think>\n${SUMMARY_TEXT}`;
+        globalThis.fetch = (async () => new Response(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: thinkPrefixed } }] })}\n\ndata: [DONE]\n\n`,
+            { headers: { 'Content-Type': 'text/event-stream' } },
+        )) as unknown as typeof fetch;
+        const thinkRun = await runSmallSummary({ auto: false });
+        const thinkRecord = useRunlogStore().records[useRunlogStore().records.length - 1];
+        check('think 剥离：前导思维链存储前剥净（落账与槽干净、runlog 保留原始 wire 正文）',
+            thinkRun.kind === 'small-done'
+            && readSummaryChatState().smallSummaries[0]?.text === SUMMARY_TEXT
+            && (slotState()?.value ?? '').includes(SUMMARY_TEXT) && !(slotState()?.value ?? '').includes('<think')
+            && thinkRecord?.ok === true && (thinkRecord?.responseText ?? '').includes('<think>'),
+            `kind=${thinkRun.kind} stored=${JSON.stringify(readSummaryChatState().smallSummaries[0]?.text)}`);
         // 源文本构造纯函数（导出面直测）
         check('源文本：buildSmallSourceText 逐楼标注＋buildBigSourceText 分节（引擎侧零占位符转发）',
             buildSmallSourceText([msg('你好', { is_user: true }), msg('嗯。', { name: '阿樟' }), msg('（无名楼层）')]) === '【王玉】\n你好\n\n【阿樟】\n嗯。\n\n【林霜】\n（无名楼层）'

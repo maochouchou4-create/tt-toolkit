@@ -25,8 +25,6 @@ export const GLOBAL_CHOICE_KEY = 'choice';
 export interface ChoiceGenParams extends PoolGenParams {
     /** 每次生成选项条数（语义＝pinned+drawn 的目标基数） */
     count: number;
-    /** 上下文历史轮数（一轮＝一问一答） */
-    contextRounds: number;
     /** 选项正文字数下/上限 */
     minChars: number;
     maxChars: number;
@@ -44,7 +42,6 @@ export interface ChoiceDomain {
 
 export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     count: 4,
-    contextRounds: 6,
     minChars: 10,
     maxChars: 60,
     clickBehavior: 'fill',
@@ -52,13 +49,31 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     ...DEFAULT_POOL_GEN_PARAMS,
 };
 
+/**
+ * gen 域逐字段重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
+ * 事实源——退役旋钮（如 contextRounds）在旧档里的残留随任一写通道
+ * 自然清除。池参数部分的值域钳制由 normalizePoolGenParams 承担
+ * （泛型透传多余字段）。
+ */
+function normalizeGenParams(raw: Partial<ChoiceGenParams>): ChoiceGenParams {
+    const merged = normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...raw });
+    return {
+        ...merged,
+        count: merged.count,
+        minChars: merged.minChars,
+        maxChars: merged.maxChars,
+        clickBehavior: merged.clickBehavior,
+        debugForceRaw: merged.debugForceRaw,
+    };
+}
+
 function readDomain(): ChoiceDomain {
     const raw = getGlobal<Partial<ChoiceDomain>>(GLOBAL_CHOICE_KEY);
     return {
-        // 池参数缺省合并＋值域钳制（raw 里的历史值不可信：oversample 越界/
-        // overflow 拼错都钳回合法域，旧存档无字段不崩）；旧档 task 键随
-        // 未知字段纪律丢弃（任务参数固化拍板）
-        gen: normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...(raw?.gen ?? {}) }),
+        // 缺省合并＋逐字段重建＋池参数值域钳制（raw 里的历史值不可信：
+        // oversample 越界/overflow 拼错都钳回合法域，旧存档无字段不崩）；
+        // 旧档 task 键等未知字段随字段清单纪律丢弃（任务参数固化拍板）
+        gen: normalizeGenParams(raw?.gen ?? {}),
         pool: normalizePoolData(raw?.pool),
     };
 }
@@ -66,10 +81,10 @@ function readDomain(): ChoiceDomain {
 function writeDomain(mutate: (domain: ChoiceDomain) => void): void {
     const domain = readDomain();
     mutate(domain);
-    // 写侧同样过值域钳制（双复核 P3）：导入/备份等 mutate 路径写入的 gen
+    // 写侧同样过字段重建（双复核 P3）：导入/备份等 mutate 路径写入的 gen
     // 不经 readDomain 的合并防线——落盘前统一归一化，坏值（oversample
-    // 越界/overflow 拼错）不会经写通道持久化
-    domain.gen = normalizePoolGenParams(domain.gen);
+    // 越界/overflow 拼错）与未知键不会经写通道持久化
+    domain.gen = normalizeGenParams(domain.gen);
     setGlobal(GLOBAL_CHOICE_KEY, domain);
 }
 

@@ -367,6 +367,26 @@ export function isBlankResponseContent(text: string): boolean {
 }
 
 /**
+ * 剥掉模型正文前导的 <think>…</think> 思维链包裹。
+ * 为什么在传输层单点剥：破限前缀对所有散文任务（总结等 prompt_only）
+ * 下达 think 指令，模型依令先吐思维链再写正文——若各任务层自剥，口径
+ * 会漂移（同一份 wire 正文在不同任务里时有时无）。仅剥前导完整块；
+ * 前导 <think> 未闭合＝整段思维链被 token 上限掐断的形态，返回空串
+ * 交 isBlankResponseContent 守门（下游零特判）。正文中段的 <think>
+ * 不动（罕见，且可能是正文本身引用标签）。
+ */
+function stripReasoningWrapper(content: string): string {
+    let rest = content;
+    for (;;) {
+        const lead = rest.trimStart();
+        if (!lead.startsWith('<think>')) return rest;
+        const end = lead.indexOf('</think>');
+        if (end === -1) return '';
+        rest = lead.slice(end + '</think>'.length);
+    }
+}
+
+/**
  * 调用宿主生成端点。非流式：json.choices[0].message.content；
  * 流式：SSE delta 拼接。HTTP 非 2xx / json.error 均抛错（错误文本
  * 供上层提示与排障，Fail Fast 不吞）。
@@ -427,7 +447,9 @@ export async function callGenerateEndpoint(
             if (finishReason === 'length') {
                 truncated = { content };
             } else {
-                return { content, streamed: true, runId: commitRun(true, content) };
+                // commitRun 记原始 wire 正文（runlog 是排障设施，如实记端点
+                // 返回）；返回给任务层的是剥净思维链后的正文
+                return { content: stripReasoningWrapper(content), streamed: true, runId: commitRun(true, content) };
             }
         } else {
             const data = (await response.json()) as {
@@ -445,7 +467,7 @@ export async function callGenerateEndpoint(
             if (data?.choices?.[0]?.finish_reason === 'length') {
                 truncated = { content };
             } else {
-                return { content, streamed: false, runId: commitRun(true, content) };
+                return { content: stripReasoningWrapper(content), streamed: false, runId: commitRun(true, content) };
             }
         }
     } catch (e) {
@@ -454,7 +476,7 @@ export async function callGenerateEndpoint(
     }
     // 截断：内容收到但被服务端 token 上限掐断——不捕它会伪装成下游解析失败。
     // 记录保留半截正文（排障可见掐在哪里），报错指名真因
-    const message = '输出被截断（finish_reason=length，达到服务端 token 上限）——推理模型的思维链与正文共享上限；请调小上下文轮数或更换输出上限更高的端点';
+    const message = '输出被截断（finish_reason=length，达到服务端 token 上限）——推理模型的思维链与正文共享上限；请更换输出上限更高的端点，或先总结折叠更早楼层压缩输入';
     commitRun(false, truncated.content, message);
     throw new Error(message);
 }
