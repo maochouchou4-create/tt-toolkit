@@ -1,9 +1,5 @@
 /**
- * 池抽取纯函数：Efraimidis–Spirakis 加权无放回抽取。
- *
- * 算法出处：Efraimidis & Spirakis, "Weighted Random Sampling over Data Streams"（2005），
- * 加权无放回抽样经典做法——为每个候选计算 key = rand^(1/w)，取 key 最大的前 K 个。
- * 本文件为独立重写实现，仅引用该算法思想（AFPL：不逐行翻译 fork 代码）。
+ * 池抽取纯函数：等权无放回抽取（Fisher–Yates 洗牌取前 K）。
  *
  * 为什么 RNG 必须可注入：冒烟的分布断言需要种子 PRNG（mulberry32）确定性复现，
  * 运行时默认 Math.random。
@@ -14,19 +10,6 @@ import type { DrawResult, PoolEntry, PinnedOverflow } from './types';
 /** 可注入随机源（冒烟注种子 PRNG；运行时默认 Math.random）。 */
 export type RandomSource = () => number;
 
-/** 压到近零权的权重回退值（0/负权走此值——fork Math.max 垫底同语义）。 */
-const SAFE_WEIGHT_FLOOR = 1e-9;
-
-export function safeWeight(w: unknown): number {
-    const n = typeof w === 'number' ? w : Number(w);
-    // 双复核 P3 修复（fork 语义对齐）：非数值（NaN）＝坏数据回等权 1；
-    // 0/负＝显式压到近零权（fork 的 Math.max(w, 0.0001) 垫底——0 权条目
-    // 几乎抽不中＝「实质禁用」意图，而不是等权参与）
-    if (!Number.isFinite(n)) return 1;
-    if (n <= 0) return SAFE_WEIGHT_FLOOR;
-    return n;
-}
-
 /** Fisher–Yates 洗牌（原地）。数组顺序本身就是输入的一部分，不可省。 */
 function shuffle<T>(arr: T[], random: RandomSource): T[] {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -36,19 +19,10 @@ function shuffle<T>(arr: T[], random: RandomSource): T[] {
     return arr;
 }
 
-/**
- * Efraimidis–Spirakis 加权无放回抽 K 条：key = random^(1/max(w,ε))，降序取前 K。
- * 先洗牌是必须的：同 key 并列或输入有序时，前缀条目会被系统性偏向。
- */
-function weightedSample<T extends { weight: number }>(items: T[], amount: number, random: RandomSource): T[] {
+/** 等权无放回抽 K 条：洗牌副本取前 K——每条被抽中的概率严格均等。 */
+function sampleWithoutReplacement<T>(items: T[], amount: number, random: RandomSource): T[] {
     if (amount <= 0 || items.length === 0) return [];
-    const pool = shuffle([...items], random);
-    const keyed = pool.map((it) => ({
-        it,
-        key: Math.pow(random(), 1 / Math.max(safeWeight(it.weight), SAFE_WEIGHT_FLOOR)),
-    }));
-    keyed.sort((a, b) => b.key - a.key);
-    return keyed.slice(0, Math.min(amount, items.length)).map((k) => k.it);
+    return shuffle([...items], random).slice(0, Math.min(amount, items.length));
 }
 
 /**
@@ -62,7 +36,7 @@ export function drawAmount(remaining: number, oversamplePct: number, poolSize: n
 }
 
 /**
- * 核心抽取：pinned 全发（trim 策略=打乱后截 count）；非 pinned 加权抽取（可超额、可分桶轮询）。
+ * 核心抽取：pinned 全发（trim 策略=打乱后截 count）；非 pinned 等权抽取（可超额、可分桶轮询）。
  * shuffleFinal 时分别打乱两区（不打乱则保持输入顺序，分桶轮询时桶序本身随机）。
  */
 export function resolvePool(input: {
@@ -94,7 +68,7 @@ export function resolvePool(input: {
     if (categoriesEnabled) {
         drawn = drawByCategories(candidates, amount, random);
     } else {
-        drawn = weightedSample(candidates, amount, random);
+        drawn = sampleWithoutReplacement(candidates, amount, random);
     }
 
     if (shuffleFinal) {
@@ -105,8 +79,8 @@ export function resolvePool(input: {
 }
 
 /**
- * 分桶轮询：按 category 分桶、桶序随机，逐桶轮转抽一条（桶内加权抽 1）。
- * 保证覆盖多个桶——单一重权桶不能垄断候选区。
+ * 分桶轮询：按 category 分桶、桶序随机，逐桶轮转抽一条（桶内随机抽 1）。
+ * 保证覆盖多个桶——单一大桶不能垄断候选区。
  */
 function drawByCategories(candidates: PoolEntry[], amount: number, random: RandomSource): PoolEntry[] {
     if (amount <= 0 || candidates.length === 0) return [];
@@ -124,7 +98,7 @@ function drawByCategories(candidates: PoolEntry[], amount: number, random: Rando
         const bucket = bucketList[cursor % bucketList.length];
         cursor++;
         if (bucket.length === 0) continue;
-        const [picked] = weightedSample(bucket, 1, random);
+        const [picked] = sampleWithoutReplacement(bucket, 1, random);
         if (!picked) continue;
         out.push(picked);
         const idx = bucket.indexOf(picked);

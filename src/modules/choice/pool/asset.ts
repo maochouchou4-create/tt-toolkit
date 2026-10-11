@@ -10,7 +10,6 @@
 import assetJson from './default-pool.json';
 import type { PoolEntry } from './types';
 import type { PoolDomainData } from './normalize';
-import { safeWeight } from './resolver';
 import { choiceStorage } from '../api';
 
 /** default-pool.json 的静态形状（构建产物，自身可信；normalize 只为防御）。 */
@@ -21,7 +20,6 @@ interface PoolAsset {
         content: string;
         category: string;
         pinned?: boolean;
-        weight?: number;
     }>;
 }
 
@@ -41,7 +39,6 @@ export function buildAssetPool(): Pick<PoolDomainData, 'masterPool'> {
         content: e.content,
         category: e.category,
         pinned: e.pinned ?? false,
-        weight: safeWeight(e.weight),
     }));
     return { masterPool };
 }

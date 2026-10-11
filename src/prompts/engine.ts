@@ -65,7 +65,7 @@ export interface AssemblySources {
 /**
  * 池注入供给形状。字段取 PoolEntry 的子集（结构兼容：PoolEntry
  * 可直接赋进来）——prompts 层只关心渲染所需的两个文本字段，不知道池的
- * id/weight/绑定概念，保持两层解耦。
+ * id 等概念，保持两层解耦。
  */
 export interface PoolEntryLine {
     type: string;
@@ -75,7 +75,7 @@ export interface PoolEntryLine {
 export interface PoolInjectionSupply {
     /** 必发区（pinned，每轮必须在场的条目） */
     pinned: PoolEntryLine[];
-    /** 候选区（加权抽取，数量可多于实际所需——菜单模式） */
+    /** 候选区（等权抽取，数量可多于实际所需——菜单模式） */
     drawn: PoolEntryLine[];
 }
 

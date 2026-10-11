@@ -432,7 +432,8 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 只改本行等式右侧总数与该批 +N）。
 // ＝ v1.9.0 任务模型卡新增 8（任务路由 fail fast 三态 3＋写档带出 1＋
 // 缺席默认档 1＋normalize 钳制/剔除 3）
-const CHOICE_PASS_EXPECTED = 139;
+// ＝ v1.14.1 删权重死代码：E-S 加权分布/safeWeight/无停用条目 −3，等权均摊断言 +1
+const CHOICE_PASS_EXPECTED = 137;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -658,4 +659,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板六任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 fixed 相位回归＋adaptive 三相位＋askNow 节流/normalize 钳制含触发模式三字段/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状 temperature 0.7＋reasoning_effort high/判断器解析三级＋破限豁免＋失败面判 null＋窗口错误楼过滤）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写五行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板六任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 fixed 相位回归＋adaptive 三相位＋askNow 节流/normalize 钳制含触发模式三字段/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状 temperature 0.7＋reasoning_effort high/判断器解析三级＋破限豁免＋失败面判 null＋窗口错误楼过滤）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写五行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

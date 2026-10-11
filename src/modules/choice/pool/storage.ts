@@ -16,7 +16,7 @@ export function readPoolData(): { masterPool: PoolEntry[] } {
 }
 
 /**
- * 生成管线现场抽取：全池为候选（条目自身 pinned/weight 为真值）。
+ * 生成管线现场抽取：全池为候选（条目自身 pinned 为真值）。
  * 每次生成重新抽（pinned 恒在）；RNG 用 Math.random（冒烟直接调 resolvePool 注种子）。
  */
 export function drawPoolInjection(): PoolInjection {

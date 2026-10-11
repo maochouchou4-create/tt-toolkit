@@ -7,7 +7,6 @@
  */
 
 import type { PoolEntry, PoolGenParams } from './types';
-import { safeWeight } from './resolver';
 
 /** choice 域下的池子对象形状。 */
 export interface PoolDomainData {
@@ -45,7 +44,7 @@ function asArray(v: unknown): unknown[] {
     return Array.isArray(v) ? v : [];
 }
 
-/** 单条池条目规范化：id trim（旧档部分 id 尾部带 \r）、缺字段补缺省、weight 走 safeWeight。 */
+/** 单条池条目规范化：id trim（旧档部分 id 尾部带 \r）、缺字段补缺省。 */
 export function normalizePoolEntry(raw: unknown): PoolEntry | null {
     if (typeof raw !== 'object' || raw === null) return null;
     const r = raw as Record<string, unknown>;
@@ -58,7 +57,6 @@ export function normalizePoolEntry(raw: unknown): PoolEntry | null {
         content: asString(r.content),
         category: asString(r.category),
         pinned: asBool(r.pinned, false),
-        weight: safeWeight(r.weight),
     };
 }
 

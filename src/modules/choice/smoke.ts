@@ -17,7 +17,7 @@ import { choiceStorage } from './api';
 import { generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
-import { drawAmount, resolvePool, safeWeight } from './pool/resolver';
+import { drawAmount, resolvePool } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 
@@ -80,32 +80,27 @@ function mulberry32(seed: number): () => number {
     };
 }
 
-function makeEntry(id: string, weight: number, pinned: boolean, category = '默认'): PoolEntry {
-    return { id, type: `选项${id}`, content: `${id}的行动正文`, category, pinned, weight };
+function makeEntry(id: string, pinned: boolean, category = '默认'): PoolEntry {
+    return { id, type: `选项${id}`, content: `${id}的行动正文`, category, pinned };
 }
 
 /** 1) 抽取分布与数学（种子 PRNG 驱动 resolvePool 纯函数）。 */
 function runPoolChecks(): void {
-    // E-S 加权分布：1 条重权（5）对 7 条轻权（1），每轮抽 4。重权命中
-    // 频次应显著高于任何单条轻权（每轮换种子——300 轮聚合抹平单轮波动）
-    const heavy = makeEntry('heavy', 5, false);
-    const lights = Array.from({ length: 7 }, (_, i) => makeEntry(`light${i}`, 1, false));
-    const distPool = [heavy, ...lights];
+    // 等权分布：8 条同权条目，每轮抽 4。每条命中频次应大致均摊
+    // （每轮换种子——300 轮聚合抹平单轮波动；期望 150/条，100-200 为安全带）
+    const distPool = Array.from({ length: 8 }, (_, i) => makeEntry(`e${i}`, false));
     const ROUNDS = 300;
-    let heavyHits = 0;
-    const lightHits = new Array<number>(7).fill(0);
+    const hits = new Array<number>(8).fill(0);
     for (let i = 0; i < ROUNDS; i++) {
         const result = resolvePool({ pool: distPool, count: 4, categoriesEnabled: false, pinnedOverflow: 'send_all', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0xc0ffee + i) });
-        if (result.drawn.some(e => e.id === heavy.id)) heavyHits++;
-        lights.forEach((l, j) => {
-            if (result.drawn.some(e => e.id === l.id)) lightHits[j]++;
+        result.drawn.forEach(e => {
+            hits[Number(e.id.slice(1))]++;
         });
     }
-    const maxLight = Math.max(...lightHits);
-    check('抽取分布：重权条目命中频次显著高于轻权（E-S 加权，300 轮）', heavyHits > maxLight * 1.6 && heavyHits > ROUNDS * 0.6, `heavy=${heavyHits} maxLight=${maxLight}`);
+    check('抽取分布：等权条目命中频次大致均摊（300 轮）', hits.every(h => h >= 100 && h <= 200), `hits=${hits.join('/')}`);
 
     // pinned 恒在：send_all 策略下每轮必含全部 pinned
-    const pinnedPool = [makeEntry('p1', 1, true), makeEntry('p2', 1, true), makeEntry('c1', 1, false), makeEntry('c2', 1, false)];
+    const pinnedPool = [makeEntry('p1', true), makeEntry('p2', true), makeEntry('c1', false), makeEntry('c2', false)];
     let pinnedOk = true;
     for (let i = 0; i < 100; i++) {
         const result = resolvePool({ pool: pinnedPool, count: 4, categoriesEnabled: false, pinnedOverflow: 'send_all', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0x1234 + i) });
@@ -114,7 +109,7 @@ function runPoolChecks(): void {
     check('抽取分布：pinned 恒在结果（send_all 全发）', pinnedOk);
 
     // trim：pinned 超过 count 时打乱后截到 count
-    const overPool = Array.from({ length: 5 }, (_, i) => makeEntry(`p${i}`, 1, true));
+    const overPool = Array.from({ length: 5 }, (_, i) => makeEntry(`p${i}`, true));
     let trimOk = true;
     for (let i = 0; i < 50; i++) {
         const result = resolvePool({ pool: overPool, count: 3, categoriesEnabled: false, pinnedOverflow: 'trim', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0x5678 + i) });
@@ -131,9 +126,9 @@ function runPoolChecks(): void {
 
     // 分桶轮询：3 桶各 2 条、抽 6 → 覆盖桶数 ≥2（单桶垄断被轮询打散）
     const catPool = [
-        makeEntry('a1', 5, false, '甲'), makeEntry('a2', 1, false, '甲'),
-        makeEntry('b1', 1, false, '乙'), makeEntry('b2', 1, false, '乙'),
-        makeEntry('c1', 1, false, '丙'), makeEntry('c2', 1, false, '丙'),
+        makeEntry('a1', false, '甲'), makeEntry('a2', false, '甲'),
+        makeEntry('b1', false, '乙'), makeEntry('b2', false, '乙'),
+        makeEntry('c1', false, '丙'), makeEntry('c2', false, '丙'),
     ];
     let catOk = true;
     for (let i = 0; i < 10; i++) {
@@ -142,9 +137,6 @@ function runPoolChecks(): void {
         if (buckets.size < 2) catOk = false;
     }
     check('分组轮询：候选覆盖多个 category 桶（≥2 桶）', catOk);
-
-    // safeWeight 双复核 P3 回归：0/负权＝近零权（fork「实质禁用」语义），坏数据回等权
-    check('safeWeight：0/负权压到近零、非数值回等权（fork 语义）', safeWeight(0) === safeWeight(-1) && safeWeight(0) < 1e-6 && safeWeight('x') === 1);
 }
 
 /**
@@ -158,7 +150,6 @@ function runAssetPoolChecks(): void {
     check('asset：42 个分类（扩池后）', cats.size === 42, `实际 ${cats.size}`);
     const transition = masterPool.find(e => e.type === '转场推进');
     check('asset：转场推进转固定（pinned）', !!transition && transition.pinned, `pinned=${String(transition?.pinned)}`);
-    check('asset：无停用条目（引用层已删，条目自身 pinned/weight 即真值）', masterPool.every(e => e.weight > 0), `零/负权条目 ${masterPool.filter(e => e.weight <= 0).length}`);
     const ids = new Set(masterPool.map(e => e.id));
     check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
     // 条目级 rule 字段已弃（v2 起移除，v3 连数据形状都不带）
@@ -184,7 +175,7 @@ function runAssetPoolChecks(): void {
     check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
     choiceStorage.writeDomain(d => {
-        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false, weight: 1 });
+        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false });
         d.pool.assetVersion = 0;
     });
     syncAssetPool();

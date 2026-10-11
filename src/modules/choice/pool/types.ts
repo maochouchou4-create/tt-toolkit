@@ -1,7 +1,7 @@
 /**
  * 条目池类型定义。
  *
- * 池是单层结构：masterPool 即全部内容（type/content/category/pinned/weight
+ * 池是单层结构：masterPool 即全部内容（type/content/category/pinned
  * 都在条目自身），唯一样式随 default-pool.json 资产发布、用户只读。
  * 规则概念已整体删除（条目级 v2 弃、池级 v3 弃）——反 OOC
  * 约束并入提示词模板 core_rules，池数据不再携带任何规则字段。
@@ -19,8 +19,6 @@ export interface PoolEntry {
     category: string;
     /** 固定条目（每轮必发，不参与抽签）。 */
     pinned: boolean;
-    /** 抽取权重。 */
-    weight: number;
 }
 
 /** pinned 条目数超出 gen.count 时的处理策略。 */
@@ -30,7 +28,7 @@ export type PinnedOverflow = 'send_all' | 'trim';
 export interface PoolGenParams {
     /** 候选条目超额抽取百分比（0-300）。菜单模式：多抽候选让 AI 挑。 */
     oversamplePct: number;
-    /** 按 category 分桶轮询（桶序随机、桶内加权）。 */
+    /** 按 category 分桶轮询（桶序随机、桶内等权）。 */
     categoriesEnabled: boolean;
     /** pinned 超发策略。 */
     pinnedOverflow: PinnedOverflow;
@@ -44,7 +42,7 @@ export interface PoolGenParams {
 export interface DrawResult {
     /** 必发区（pinned，全部保留或按策略截断）。 */
     pinned: PoolEntry[];
-    /** 候选区（加权抽取，数量受 oversamplePct 影响）。 */
+    /** 候选区（等权抽取，数量受 oversamplePct 影响）。 */
     drawn: PoolEntry[];
 }
 
