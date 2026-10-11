@@ -6,6 +6,7 @@ let uid = 0;
 <template>
   <!--
     可输可选单控件原语：输入即值本体，右侧钮开合候选浮层。
+    开浮层（钮/方向键）＝浏览意图：候选从全表起步、激活项落当前值；键入才转过滤意图。
     弹层 Teleport 到 body：一是 .tt-tab-host 是滚动容器，宿内弹层会被裁剪
     或撑出滚动区；二是宿主给 .drawer-content（壳复用的类）设了
     backdrop-filter，带它的祖先会成为 fixed 后代的包含块——壳内弹层的
@@ -101,16 +102,22 @@ const open = ref(false);
 const activeIndex = ref(-1);
 const composing = ref(false);
 const popupStyle = ref<Record<string, string>>({});
-/** 输入文本影子：input DOM 值是真相，这里只供过滤等响应式场景。 */
-const query = ref(props.modelValue);
+/** 过滤针：只认本次浮层会话内用户实际键入的文本——开浮层≠过滤（openPopup 重置）。 */
+const query = ref('');
 
 const filtered = computed(() => {
     const needle = query.value.toLowerCase();
     return props.options.filter(option => option.toLowerCase().includes(needle));
 });
 
-watch(filtered, list => {
-    activeIndex.value = list.length > 0 ? 0 : -1;
+/** 激活项落位：当前值在候选表内则续览当前值，否则回首项；空表无激活。 */
+function resetActive(): void {
+    const current = filtered.value.indexOf(props.modelValue);
+    activeIndex.value = current >= 0 ? current : (filtered.value.length > 0 ? 0 : -1);
+}
+
+watch(filtered, () => {
+    resetActive();
 });
 
 watch(() => props.disabled, disabled => {
@@ -218,8 +225,10 @@ function toggle(): void {
 
 function openPopup(): void {
     if (props.disabled) return;
+    // 开浮层＝浏览意图：针清空显全表，激活项落当前值（过滤只认会话内键入）
+    query.value = '';
     open.value = true;
-    activeIndex.value = filtered.value.length > 0 ? 0 : -1;
+    resetActive();
     positionPopup();
     nextTick(flipPopupIfClipped);
 }
