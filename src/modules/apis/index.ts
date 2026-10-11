@@ -25,3 +25,4 @@ export function initApis(): ApisInitReport {
 }
 
 export { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';
+export { runApisSmoke } from './smoke';

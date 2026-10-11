@@ -14,7 +14,8 @@
  * → initApis() → initPersonaMinimal() → wipeLegacyKeysOnce() ＋
  * runLegacyWipeSmoke()（机判须先于 runPersonaSmoke——后者会中途回收旧键
  * 并重置 persona 域）→ runPersonaSmoke() → initSummaryMinimal()（总结
- * 设置缺席键回填落盘）→ runSummarySmoke()（算术/状态机/槽/守卫/端到端）。
+ * 设置缺席键回填落盘）→ runSummarySmoke()（算术/状态机/槽/守卫/端到端）
+ * → runApisSmoke()（apis 域机判收尾：批量设置行五断言，夹具自持清场）。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
  * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
@@ -32,7 +33,7 @@ import { initStorage } from '@/storage';
 import { runLegacyWipeSmoke, wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
-import { initApis } from '@/modules/apis';
+import { initApis, runApisSmoke } from '@/modules/apis';
 import { initPersona, initPersonaMinimal, runPersonaSmoke } from '@/modules/persona';
 import { initSummary, initSummaryMinimal, runSummarySmoke } from '@/modules/summary';
 import { version } from '@/version';
@@ -78,6 +79,8 @@ async function runNodeSmoke(): Promise<void> {
     // summary 最小初始化（设置缺席键回填落盘）＋冒烟（算术/状态机/槽/守卫/端到端）
     initSummaryMinimal();
     await runSummarySmoke();
+    // apis 域机判收尾（批量设置行五断言；夹具自持清场，置于末位不扰动前序域）
+    runApisSmoke();
 }
 
 async function main(): Promise<void> {

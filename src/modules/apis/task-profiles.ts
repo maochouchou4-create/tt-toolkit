@@ -124,3 +124,16 @@ export function resetTaskProfilesForProvider(providerId: string): void {
         }
     });
 }
+
+/**
+ * 批量设置行的存储写口：一次性把五行档案指到同一服务商与模型。
+ * 值照写（含空串），非空 gate 由调用侧把关；调参档（温度/思考）不在
+ * 写面上——缺席即默认档是档案语义的一部分，批量换路由不应改动它。
+ */
+export function setRouteForAllTasks(providerId: string, model: string): void {
+    mutateTaskProfiles(profiles => {
+        for (const id of TASK_IDS) {
+            profiles[id] = { ...profiles[id], providerId, model };
+        }
+    });
+}

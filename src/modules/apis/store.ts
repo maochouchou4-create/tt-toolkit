@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia';
 import { createEndpoint, deleteEndpoint, readApiDomain, readJailbreakPreset, upsertEndpoint, writeJailbreakPreset } from './storage';
-import { mutateTaskProfiles, readTaskProfiles, type TaskProfile, type TaskProfilesDomain } from './task-profiles';
+import { mutateTaskProfiles, readTaskProfiles, setRouteForAllTasks, type TaskProfile, type TaskProfilesDomain } from './task-profiles';
 import type { TaskId } from '@/tasks';
 import type { ApiProvider } from './types';
 import { fetchModels } from './client';
@@ -57,6 +57,11 @@ export const useApisStore = defineStore('tt-apis', {
             mutateTaskProfiles(profiles => {
                 profiles[task] = { ...profiles[task], ...patch };
             });
+            this.revision += 1;
+        },
+        /** 批量设置行的写通道（五行同换服务商＋模型；调参档不动）。 */
+        applyRouteToAllTasks(providerId: string, model: string) {
+            setRouteForAllTasks(providerId, model);
             this.revision += 1;
         },
         /** 选择破限预设（''＝关闭；下次请求即生效）。 */

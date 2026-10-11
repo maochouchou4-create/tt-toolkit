@@ -37,6 +37,30 @@
           <span class="tt-task-grid-cell" role="columnheader">温度</span>
           <span class="tt-task-grid-cell" role="columnheader">思考</span>
         </div>
+        <div class="tt-task-grid-row tt-task-batch" role="presentation">
+          <span class="tt-task-grid-cell tt-task-grid-cell--name">
+            <span class="tt-task-label">批量设置</span>
+          </span>
+          <span class="tt-task-grid-cell">
+            <select class="tt-ctrl" :value="batchProviderId" aria-label="批量服务商" @change="onBatchProviderChange">
+              <option value="">（未选择）</option>
+              <option v-for="p in apis.endpoints" :key="p.id" :value="p.id">{{ p.name || p.url }}</option>
+            </select>
+          </span>
+          <span class="tt-task-grid-cell">
+            <TTCombobox
+              :model-value="batchModel"
+              :options="modelsOf(batchProviderId)"
+              :empty-text="modelEmptyText(batchProviderId)"
+              placeholder="模型 ID（可从所选服务商清单选）"
+              aria-label="批量模型"
+              @update:model-value="onBatchModelInput"
+            />
+          </span>
+          <span class="tt-task-grid-cell tt-task-batch-actions">
+            <button type="button" class="tt-btn" :disabled="!batchReady" @click="applyBatch">应用到全部任务</button>
+          </span>
+        </div>
         <div v-for="t in TASKS" :key="t.id" class="tt-task-grid-row" role="row">
           <span class="tt-task-grid-cell tt-task-grid-cell--name" role="rowheader">
             <span class="tt-task-label">{{ t.label }}</span>
@@ -57,8 +81,8 @@
           <span class="tt-task-grid-cell" role="cell">
             <TTCombobox
               :model-value="apis.taskProfiles[t.id].model"
-              :options="providerModels(t.id)"
-              :empty-text="modelEmptyText(t.id)"
+              :options="modelsOf(apis.taskProfiles[t.id].providerId)"
+              :empty-text="modelEmptyText(apis.taskProfiles[t.id].providerId)"
               placeholder="模型 ID（可从所选服务商清单选）"
               aria-label="模型"
               @update:model-value="onModelInput(t.id, $event)"
@@ -208,16 +232,13 @@ function profileStatus(task: TaskId): 'empty' | 'dangling' | 'ready' {
     return apis.endpoints.some(p => p.id === profile.providerId) ? 'ready' : 'dangling';
 }
 
-function providerModels(task: TaskId): string[] {
-    const providerId = apis.taskProfiles[task].providerId;
+function modelsOf(providerId: string): string[] {
     return apis.endpoints.find(p => p.id === providerId)?.models ?? [];
 }
 
 /** 模型候选空态文案：区分「没选服务商」与「选了但没清单」两种指引。 */
-function modelEmptyText(task: TaskId): string {
-    return apis.taskProfiles[task].providerId
-        ? '该服务商暂无模型清单，可直接手填'
-        : '请先选择服务商，或直接手填模型 ID';
+function modelEmptyText(providerId: string): string {
+    return providerId ? '该服务商暂无模型清单，可直接手填' : '请先选择服务商，或直接手填模型 ID';
 }
 
 function onProviderChange(task: TaskId, event: Event): void {
@@ -228,6 +249,27 @@ function onProviderChange(task: TaskId, event: Event): void {
 /** 模型值唯一写通道（手填与候选选中同路），trim 语义在此收口。 */
 function onModelInput(task: TaskId, value: string): void {
     apis.updateTaskProfile(task, { model: value.trim() });
+}
+
+// 批量设置行：瞬态输入不落盘（落盘的只有「应用到全部任务」的写穿）
+const batchProviderId = ref('');
+const batchModel = ref('');
+const batchReady = computed(() => batchProviderId.value !== '' && batchModel.value.trim() !== '');
+
+function onBatchProviderChange(event: Event): void {
+    // 模型属于服务商：换批量服务商即清空模型，同任务行 onProviderChange 语义
+    batchProviderId.value = (event.target as HTMLSelectElement).value;
+    batchModel.value = '';
+}
+
+function onBatchModelInput(value: string): void {
+    batchModel.value = value;
+}
+
+function applyBatch(): void {
+    if (!batchReady.value) return;
+    // 保留所填（行上所见即所应用）；trim 在此收口，ref 存原始输入
+    apis.applyRouteToAllTasks(batchProviderId.value, batchModel.value.trim());
 }
 
 function onTemperatureInput(task: TaskId, event: Event): void {
@@ -383,6 +425,11 @@ function onSave(): void {
     font-size: var(--tt-fs-aux);
 }
 
+/* 批量行按钮占温度＋思考两列（该行没有这两个数据格） */
+.tt-task-batch-actions {
+    grid-column: 4 / -1;
+}
+
 /* 窄壳回退：任务名整行、四控件两列两行（程序化关联靠 aria-label 兜底） */
 @media (max-width: 480px) {
     .tt-task-grid-row {
@@ -391,6 +438,11 @@ function onSave(): void {
 
     .tt-task-grid-cell--name {
         grid-column: 1 / -1;
+    }
+
+    /* 4/-1 在两列模板下＝线 3，起点 4>终点触发 Grid 纠错交换挤进隐式第三列——显式回 auto 随两列意图换行 */
+    .tt-task-batch-actions {
+        grid-column: auto;
     }
 }
 

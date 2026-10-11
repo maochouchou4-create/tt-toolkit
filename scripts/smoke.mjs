@@ -348,16 +348,16 @@ try {
 // 等 node 冒烟分支收尾再断言：入口 `void main()` 是 fire-and-forget，动态
 // import 的解析先于后台异步链完成。自动生成断言含 setTimeout 轮询（宏任务），
 // 断言会抢在轮询前执行——截断输出。改为显式等收尾行（OK/FAIL）或超时；
-// summary 冒烟排在 choice/persona 之后——收尾判据盯末段 [summary-smoke]
-// OK 行（choice/persona 的 FAIL 行同样提前触发收口）。
+// apis 冒烟排在 choice/persona/summary 之后——收尾判据盯末段 [apis-smoke]
+// OK 行（choice/persona/summary 的 FAIL 行同样提前触发收口）。
 // ---------------------------------------------------------------------------
-const SMOKE_DONE_RE = l => l.startsWith('[summary-smoke] OK：') || l.includes('项 FAIL：');
+const SMOKE_DONE_RE = l => l.startsWith('[apis-smoke] OK：') || l.includes('项 FAIL：');
 const deadline = Date.now() + 15000;
 while (!outputLines.some(SMOKE_DONE_RE) && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 50));
 }
 if (!outputLines.some(SMOKE_DONE_RE)) {
-    console.error('[smoke] FAIL: node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke 挂起？）');
+    console.error('[smoke] FAIL: node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）');
     process.exit(1);
 }
 
@@ -579,6 +579,19 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 }
 
 // ---------------------------------------------------------------------------
+// apis 机判：批量设置行写通道（[apis-smoke] 行收口，runNodeSmoke 末位——
+// 见 src/main.ts runNodeSmoke 接线）
+// ---------------------------------------------------------------------------
+// PASS 行数精确断言（同上纪律）＝ v1.12.0 批量设置行新增 5（批量写五行
+// 齐换/调参档保留/出站路由跟随/store 写穿 revision/删服务商联动收尾）。
+const APIS_PASS_EXPECTED = 5;
+const apisPassLines = outputLines.filter(l => l.startsWith('[apis-smoke] PASS'));
+const apisFailLines = outputLines.filter(l => l.startsWith('[apis-smoke] FAIL'));
+if (apisPassLines.length !== APIS_PASS_EXPECTED || apisFailLines.length > 0) {
+    failures.push(`apis 机判异常：期望恰好 ${APIS_PASS_EXPECTED} 条 PASS，实际 ${apisPassLines.length} 条 / FAIL ${apisFailLines.length} 条${apisFailLines.length ? `（首条：${apisFailLines[0]}）` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
 // 退休符号清零：generateRaw（宿主主 API 通道）整体删除——dist
 // 产物出现任何一处都说明退休不彻底。apiSource/apiProfiles 不做字符串计
 // 数：迁移收编必须按旧键名读旧档（「旧字段只读不写」纪律的读侧合法残
@@ -610,7 +623,7 @@ while (!outputLines.slice(segmentStart).some(SMOKE_DONE_RE) && Date.now() < dead
 }
 const seg2 = outputLines.slice(segmentStart);
 if (!seg2.some(SMOKE_DONE_RE)) {
-    failures.push('boot2：node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke 挂起？）');
+    failures.push('boot2：node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）');
 }
 if (seg2.some(l => l.includes('项 FAIL：'))) {
     failures.push(`boot2：出现 FAIL 收尾行（首条：${seg2.find(l => l.includes('项 FAIL：'))}）`);
@@ -626,8 +639,9 @@ if (!firstWipe2Log || !firstWipe2Log.includes('跳过')) {
 const seg2ChoicePass = seg2.filter(l => l.startsWith('[choice-smoke] PASS')).length;
 const seg2PersonaPass = seg2.filter(l => l.startsWith('[persona-smoke] PASS')).length;
 const seg2SummaryPass = seg2.filter(l => l.startsWith('[summary-smoke] PASS')).length;
-if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2SummaryPass !== SUMMARY_PASS_EXPECTED) {
-    failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、summary ${seg2SummaryPass}/${SUMMARY_PASS_EXPECTED}`);
+const seg2ApisPass = seg2.filter(l => l.startsWith('[apis-smoke] PASS')).length;
+if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2SummaryPass !== SUMMARY_PASS_EXPECTED || seg2ApisPass !== APIS_PASS_EXPECTED) {
+    failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、summary ${seg2SummaryPass}/${SUMMARY_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
 }
 // 末态：一次性标记置位＋遗留键全清（直查存根 Map，不依赖日志）
 const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
@@ -644,4 +658,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板六任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 fixed 相位回归＋adaptive 三相位＋askNow 节流/normalize 钳制含触发模式三字段/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状 temperature 0.7＋reasoning_effort high/判断器解析三级＋破限豁免＋失败面判 null＋窗口错误楼过滤）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned/weight 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板六任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 fixed 相位回归＋adaptive 三相位＋askNow 节流/normalize 钳制含触发模式三字段/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状 temperature 0.7＋reasoning_effort high/判断器解析三级＋破限豁免＋失败面判 null＋窗口错误楼过滤）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写五行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
