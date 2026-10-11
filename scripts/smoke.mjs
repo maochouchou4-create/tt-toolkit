@@ -432,7 +432,7 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 只改本行等式右侧总数与该批 +N）。
 // ＝ v1.9.0 任务模型卡新增 8（任务路由 fail fast 三态 3＋写档带出 1＋
 // 缺席默认档 1＋normalize 钳制/剔除 3）
-const CHOICE_PASS_EXPECTED = 138;
+const CHOICE_PASS_EXPECTED = 139;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

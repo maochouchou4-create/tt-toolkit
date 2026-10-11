@@ -573,6 +573,10 @@ function runAssemblyChecks(): string {
     check('写作规则＝同一刻的平行分支（各走一路、不互为前情）',
         allText.includes('此刻同时摆开') && allText.includes('不互为因果') && allText.includes('不得被当成另一条的前情'),
         `平行口径=${allText.includes('此刻同时摆开')}`);
+    // galgame 选项铁律：同一拍覆盖不同性格倾向的玩家——每条面向一种玩家心态
+    check('选项面向不同玩家心态（同一拍覆盖不同性格倾向）',
+        allText.includes('面向一种玩家心态') && allText.includes('不同心情的玩家都有顺手的一条'),
+        `心态覆盖=${allText.includes('面向一种玩家心态')}`);
     check('平行口径三层同锁（规则/示例/指令）且旧措辞清零',
         allText.includes('各走一路') && allText.includes('并排的') && !allText.includes('角度错开'),
         `示例层=${allText.includes('各走一路')} 指令层=${allText.includes('并排的')}`);
