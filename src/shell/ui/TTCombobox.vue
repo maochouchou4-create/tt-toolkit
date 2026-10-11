@@ -167,7 +167,12 @@ function onInput(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-    if (composing.value) return;
+    if (composing.value) {
+        // 组词期 Enter/Escape 归输入法（确认候选/取消组词），不进导航分支；
+        // 但要拦冒泡——宿主全局快捷键（Enter 发送等）不得抢组词键
+        event.stopPropagation();
+        return;
+    }
     switch (event.key) {
         case 'ArrowDown':
             event.preventDefault();
