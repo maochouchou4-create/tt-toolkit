@@ -29,7 +29,7 @@
     </TTCard>
 
     <TTCard title="任务模型" :sub="TASKS_SUB">
-      <div class="tt-task-grid" role="grid">
+      <div class="tt-task-grid" role="table">
         <div class="tt-task-grid-row tt-task-grid-head" role="row">
           <span class="tt-task-grid-cell tt-task-grid-cell--name" role="presentation" />
           <span class="tt-task-grid-cell" role="columnheader">服务商</span>
@@ -43,7 +43,7 @@
             <TTStatus v-if="profileStatus(t.id) === 'dangling'" tone="err">所选服务商已删除，请重新选择</TTStatus>
             <TTStatus v-else-if="profileStatus(t.id) === 'empty'" tone="muted">未配置</TTStatus>
           </span>
-          <span class="tt-task-grid-cell" role="gridcell">
+          <span class="tt-task-grid-cell" role="cell">
             <select
               class="tt-ctrl"
               :value="apis.taskProfiles[t.id].providerId"
@@ -54,7 +54,7 @@
               <option v-for="p in apis.endpoints" :key="p.id" :value="p.id">{{ p.name || p.url }}</option>
             </select>
           </span>
-          <span class="tt-task-grid-cell" role="gridcell">
+          <span class="tt-task-grid-cell" role="cell">
             <TTCombobox
               :model-value="apis.taskProfiles[t.id].model"
               :options="providerModels(t.id)"
@@ -64,7 +64,7 @@
               @update:model-value="onModelInput(t.id, $event)"
             />
           </span>
-          <span class="tt-task-grid-cell" role="gridcell">
+          <span class="tt-task-grid-cell" role="cell">
             <input
               class="tt-ctrl"
               :value="apis.taskProfiles[t.id].temperature ?? ''"
@@ -77,7 +77,7 @@
               @change="onTemperatureInput(t.id, $event)"
             >
           </span>
-          <span class="tt-task-grid-cell" role="gridcell">
+          <span class="tt-task-grid-cell" role="cell">
             <select
               class="tt-ctrl"
               :value="apis.taskProfiles[t.id].reasoningEffort ?? ''"
@@ -153,8 +153,8 @@ const modelsLoading = ref(false);
 const draftError = ref('');
 
 // 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写
-const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
-const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。模型下拉来自所选服务商的清单缓存，也可直接手填模型 ID。';
+const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。 密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
+const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。 模型下拉来自所选服务商的清单缓存，也可直接手填模型 ID。';
 const JB_SUB = '选中宿主预设的「启用文本条目」会插到创作类任务每次请求的最前，人设两段链每段都带；预设不存在或无启用条目时生成不带注入（运行日志有记录）。';
 const JB_DETAILS = '按原角色插入（assistant 开场就还是 assistant）。预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）。';
 
@@ -298,12 +298,13 @@ function onSave(): void {
     gap: var(--tt-sp-3);
     min-width: 0;
     flex: 1;
-    font-size: var(--tt-fs-aux);
+    /* 字号不落本容器（父链须恒基准防 em 嵌套），各 span 平级自落档 */
 }
 
 .tt-api-name {
     font-weight: 600;
     min-width: 5em;
+    font-size: var(--tt-fs-aux);
 }
 
 .tt-api-url {
@@ -312,10 +313,12 @@ function onSave(): void {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--tt-fs-aux);
 }
 
 .tt-api-model {
     opacity: 0.85;
+    font-size: var(--tt-fs-aux);
 }
 
 .tt-api-key {

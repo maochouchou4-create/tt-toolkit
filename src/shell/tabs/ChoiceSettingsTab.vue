@@ -4,67 +4,57 @@
     参数归一处）＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
     输出契约/流式按任务固化（TASK_PARAMS），温度/思考强度与模型选择唯一
     入口＝「API」页「任务模型」卡——本页不再有生成通道卡。
-    视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系）。
+    页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn，
+    本样式只余走向指引区私有布局与信息行。
   -->
   <div class="tt-choice-settings-tab">
-    <div class="tt-card">
-      <div class="tt-card-title">生成参数</div>
-      <label class="tt-choice-switch">
+    <TTCard title="生成参数">
+      <label class="tt-check-row">
         <input :checked="settings.gen.autoGenerate" type="checkbox" @change="onAutoToggle">
         <span>AI 回复后自动生成选项（生成中 / 未配 API 自动跳过）</span>
       </label>
-      <label class="tt-choice-switch">
+      <label class="tt-check-row">
         <input :checked="settings.gen.categoriesEnabled" type="checkbox" @change="onCategoriesToggle">
         <span>按分类轮询（每轮选项尽量来自不同分类，保证多样性）</span>
       </label>
-      <label class="tt-choice-field">
-        <span>每次生成条数</span>
-        <input :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, 4) })">
-      </label>
-      <label class="tt-choice-field">
-        <span>上下文轮数（一轮＝一问一答）</span>
-        <input :value="settings.gen.contextRounds" type="number" min="1" max="50" @change="settings.updateGen({ contextRounds: clampInt($event, 1, 50, 6) })">
-      </label>
-      <label class="tt-choice-field">
-        <span>选项字数下限</span>
-        <input :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, 10) })">
-      </label>
-      <label class="tt-choice-field">
-        <span>选项字数上限</span>
-        <input :value="settings.gen.maxChars" type="number" min="10" max="500" @change="settings.updateGen({ maxChars: clampInt($event, 10, 500, 60) })">
-      </label>
-      <label class="tt-choice-field">
-        <span>点击选项后</span>
-        <select :value="settings.gen.clickBehavior" @change="onBehaviorChange">
+      <TTField label="每次生成条数">
+        <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, 4) })">
+      </TTField>
+      <TTField label="上下文轮数（一轮＝一问一答）">
+        <input class="tt-ctrl" :value="settings.gen.contextRounds" type="number" min="1" max="50" @change="settings.updateGen({ contextRounds: clampInt($event, 1, 50, 6) })">
+      </TTField>
+      <TTField label="选项字数下限">
+        <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, 10) })">
+      </TTField>
+      <TTField label="选项字数上限">
+        <input class="tt-ctrl" :value="settings.gen.maxChars" type="number" min="10" max="500" @change="settings.updateGen({ maxChars: clampInt($event, 10, 500, 60) })">
+      </TTField>
+      <TTField label="点击选项后">
+        <select class="tt-ctrl" :value="settings.gen.clickBehavior" @change="onBehaviorChange">
           <option value="fill">填入输入框（可编辑后手动发送）</option>
           <option value="append">追加到输入框末尾</option>
           <option value="send">直接发送</option>
         </select>
-      </label>
-    </div>
+      </TTField>
+    </TTCard>
 
     <!-- 剧情走向卡（提示词 tab 整页删除后，这里是唯一
          存留的提示词入口——用户拍板「走向指引」卡保留；数据域（chat 域
          storyDirection）与写入通道零改动，老用户的走向文本/预设不丢） -->
-    <div class="tt-card">
-      <div class="tt-card-title">走向指引</div>
-      <div class="tt-card-sub">
-        走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）；
-        留空＝不注入走向。
-      </div>
-      <label class="tt-prompt-field--block">
-        <span>自由文本（主位）</span>
+    <TTCard title="走向指引" :sub="DIRECTION_SUB">
+      <TTField label="自由文本（主位）" block>
         <textarea
+          class="tt-ctrl tt-ctrl--area"
           :value="direction.storyDirection.freeText"
           rows="3"
           placeholder="如：让林霜主动坦白昨夜去向的真相，并暴露她与斗篷人的旧关联"
           @input="onDirectionTextInput"
         />
-      </label>
+      </TTField>
       <div class="tt-prompt-presets">
         <div class="tt-prompt-presets-head">
           <span>我的预设</span>
-          <button type="button" :disabled="!direction.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
+          <button type="button" class="tt-btn" :disabled="!direction.storyDirection.freeText.trim()" title="把当前走向指引文本存为预设（全局保存，所有聊天可用）" @click="saveCurrentTextAsPreset">存为预设</button>
         </div>
         <div v-if="direction.directionPresets.length === 0" class="tt-choice-empty">
           还没有预设——写好走向指引后点「存为预设」，以后一条点击应用
@@ -74,7 +64,7 @@
             v-for="preset in direction.directionPresets"
             :key="preset.id"
             type="button"
-            class="tt-prompt-tag"
+            class="tt-btn"
             :class="{ 'tt-prompt-tag--active': direction.storyDirection.presetText === preset.text }"
             :title="preset.text"
             @click="togglePreset(preset)"
@@ -87,7 +77,7 @@
           已应用预设：{{ direction.storyDirection.presetText }}（再点同一预设可取消应用）
         </div>
       </div>
-    </div>
+    </TTCard>
   </div>
 </template>
 
@@ -96,9 +86,14 @@ import { onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
 import type { ChoiceGenParams } from '@/modules/choice/api';
+import { TTCard, TTField } from '@/shell/ui';
 
 const settings = useChoiceSettingsStore();
 const direction = useStoryDirectionStore();
+
+// 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写；
+// 「；」后的半角空格＝原模板换行折叠的渲染产物，原样保留保渲染文本不变
+const DIRECTION_SUB = '走向答「剧情往哪走」：写一两句话告诉 AI 这轮剧情往哪个方向推进（随当前聊天保存）； 留空＝不注入走向。';
 
 function targetValue(event: Event): string {
     return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
@@ -175,110 +170,36 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* 选项生成设置 tab（scoped 样式对本 tab 独立维护；卡片壳复用壳层 .tt-card） */
-.tt-choice-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-}
-
-.tt-choice-field > span {
-    min-width: 9em;
-    opacity: 0.8;
-    flex-shrink: 0;
-}
-
-.tt-choice-switch {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-    cursor: pointer;
-}
-
-.tt-choice-field input,
-.tt-choice-field select,
-.tt-choice-field textarea {
-    flex: 1;
-    min-width: 0;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 3px 6px;
-    font-size: 0.95em;
-}
-
+/* 选项生成设置 tab：卡片/字段/开关行/按钮走原语层（TTCard/TTField/
+   .tt-check-row/.tt-btn/.tt-ctrl），此处只余走向指引区私有布局与信息行 */
 .tt-choice-empty {
-    font-size: 0.8em;
+    font-size: var(--tt-fs-aux);
     opacity: 0.7;
-    padding: 6px 0;
+    padding: var(--tt-sp-2) 0;
 }
 
-/* 剧情走向卡（从 PromptEditorTab 搬回）：类名沿用 tt-prompt- 前缀自持
-   （原宿主文件已删，无冲突——别与上面 .tt-choice- 系列互串语义） */
-.tt-prompt-field--block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 6px;
-    font-size: 0.85em;
-}
-
-.tt-prompt-field--block textarea {
-    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 18%, transparent);
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 4px 6px;
-    font-family: inherit;
-    font-size: 0.9em;
-    resize: vertical;
-}
+/* 剧情走向区（从 PromptEditorTab 搬回）：tt-prompt- 前缀自持，
+   别与 .tt-choice- 系列互串语义；块级字段与编辑区皮肤已归 TTField block／.tt-ctrl--area */
 
 .tt-prompt-presets-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.85em;
+    margin-bottom: var(--tt-sp-1);
+}
+
+.tt-prompt-presets-head > span {
+    font-size: var(--tt-fs-aux);
     opacity: 0.8;
-    margin-bottom: 4px;
-}
-
-.tt-prompt-presets-head button {
-    background: transparent;
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 2px 10px;
-    font-size: 0.85em;
-    cursor: pointer;
-}
-
-.tt-prompt-presets-head button:disabled {
-    opacity: 0.4;
-    cursor: default;
 }
 
 .tt-prompt-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--tt-sp-1);
 }
 
-.tt-prompt-tag {
-    background: color-mix(in srgb, var(--SmartThemeBorderColor, #666) 25%, transparent);
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 0.8em;
-    cursor: pointer;
-}
-
+/* 预设应用态：.tt-btn 之上的状态修饰（非皮肤） */
 .tt-prompt-tag--active {
     border-color: var(--SmartThemeQuoteColor, #c58a36);
 }
@@ -286,8 +207,8 @@ onBeforeUnmount(() => {
 .tt-prompt-tag-del {
     /* 删除叉与标签文本同为按钮内容——独立悬浮态只归删除叉 */
     display: inline-block;
-    margin-left: 6px;
-    padding: 0 2px;
+    margin-left: var(--tt-sp-2);
+    padding: 0 var(--tt-sp-1);
     opacity: 0.55;
 }
 
@@ -297,8 +218,8 @@ onBeforeUnmount(() => {
 }
 
 .tt-prompt-note {
-    font-size: 0.75em;
+    font-size: var(--tt-fs-hint);
     opacity: 0.6;
-    padding: 4px 0 0;
+    padding: var(--tt-sp-1) 0 0;
 }
 </style>

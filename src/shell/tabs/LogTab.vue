@@ -7,7 +7,7 @@
   <div class="tt-runlog">
     <div class="tt-runlog-head">
       <span class="tt-runlog-title">日志</span>
-      <button type="button" class="tt-runlog-clear" :disabled="store.records.length === 0" @click="store.clear()">
+      <button type="button" class="tt-btn" :disabled="store.records.length === 0" @click="store.clear()">
         清空
       </button>
     </div>
@@ -27,7 +27,7 @@
         </button>
         <div v-if="r.ok === false && r.error" class="tt-runlog-error">{{ r.error }}</div>
         <div v-if="expanded === r.id" class="tt-runlog-body">
-          <button type="button" class="tt-runlog-copy" @click="copyRecord(r)">复制全文</button>
+          <button type="button" class="tt-btn" @click="copyRecord(r)">复制全文</button>
           <div class="tt-runlog-section">请求（{{ r.endpointUrl }} · {{ r.contract }} · {{ r.stream ? '流式' : '非流式' }}）</div>
           <pre class="tt-runlog-pre">{{ r.requestText }}</pre>
           <div class="tt-runlog-section">响应</div>
@@ -89,48 +89,30 @@ async function copyRecord(r: RunRecord): Promise<void> {
 .tt-runlog {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--tt-sp-2);
 }
 
 .tt-runlog-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--tt-sp-2);
 }
 
 .tt-runlog-title {
     font-weight: bold;
-    font-size: 0.9em;
     opacity: 0.85;
     user-select: none;
 }
 
-.tt-runlog-clear,
-.tt-runlog-copy {
+/* 头行清空钮靠右；.tt-btn 只管皮肤，布局挂容器 */
+.tt-runlog-head > .tt-btn {
     margin-left: auto;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.15));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 0.8em;
-    cursor: pointer;
-}
-
-.tt-runlog-clear:hover,
-.tt-runlog-copy:hover {
-    filter: brightness(1.15);
-}
-
-.tt-runlog-clear:disabled {
-    opacity: 0.4;
-    cursor: default;
 }
 
 .tt-runlog-empty {
-    font-size: 0.85em;
+    font-size: var(--tt-fs-aux);
     opacity: 0.6;
-    padding: 6px 0;
+    padding: var(--tt-sp-2) 0;
 }
 
 .tt-runlog-list {
@@ -139,7 +121,7 @@ async function copyRecord(r: RunRecord): Promise<void> {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--tt-sp-1);
     max-height: 60dvh;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -148,20 +130,21 @@ async function copyRecord(r: RunRecord): Promise<void> {
 .tt-runlog-item {
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 6px;
-    padding: 2px 6px;
+    padding: var(--tt-sp-1) var(--tt-sp-2);
 }
 
+/* 行即按钮特化形态：整行点击展开排障正文（保留，只走令牌） */
 .tt-runlog-row {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--tt-sp-2);
     width: 100%;
     text-align: left;
     background: transparent;
     color: var(--SmartThemeBodyColor, inherit);
     border: none;
-    padding: 3px 0;
-    font-size: 0.82em;
+    padding: var(--tt-sp-1) 0;
+    font-size: var(--tt-fs-aux);
     cursor: pointer;
 }
 
@@ -201,8 +184,8 @@ async function copyRecord(r: RunRecord): Promise<void> {
 
 .tt-runlog-error {
     color: var(--SmartThemeQuoteColor, #c58a36);
-    font-size: 0.78em;
-    padding: 2px 0 4px;
+    font-size: var(--tt-fs-hint);
+    padding: var(--tt-sp-1) 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -210,19 +193,18 @@ async function copyRecord(r: RunRecord): Promise<void> {
 
 .tt-runlog-body {
     border-top: 1px solid var(--SmartThemeBorderColor, #666);
-    padding: 4px 0;
+    padding: var(--tt-sp-1) 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--tt-sp-1);
 }
 
-.tt-runlog-copy {
+.tt-runlog-body > .tt-btn {
     align-self: flex-end;
-    margin-left: 0;
 }
 
 .tt-runlog-section {
-    font-size: 0.78em;
+    font-size: var(--tt-fs-hint);
     font-weight: bold;
     opacity: 0.7;
     user-select: none;
@@ -230,10 +212,10 @@ async function copyRecord(r: RunRecord): Promise<void> {
 
 .tt-runlog-pre {
     margin: 0;
-    padding: 4px 6px;
+    padding: var(--tt-sp-1) var(--tt-sp-2);
     background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
     border-radius: 4px;
-    font-size: 0.78em;
+    font-size: var(--tt-fs-hint);
     max-height: 12em;
     overflow-y: auto;
     /* 折行防线（choice-bar 同款）：pre-wrap 保留原文换行，anywhere 强制断长串 */

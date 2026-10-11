@@ -1,11 +1,12 @@
 <template>
   <!--
-    卡片容器原语：tab 页分组容器的唯一形态。视觉完全 scoped 自持
-    （壳层全局 .tt-card* 是其余 tab 的过渡期样式，批 2 收编删除）；
+    卡片容器原语：tab 页分组容器的唯一形态。视觉完全 scoped 自持；
     规格级长文走 details slot 折叠，不铺在设置面。
+    title 可选：整页单卡的页面天然无卡内标题（页面名由 tab 纽扣承载），
+    无 title 不渲染标题行，避免空洞占位。
   -->
   <section class="tt-ui-card">
-    <div class="tt-ui-card-title">{{ title }}</div>
+    <div v-if="title" class="tt-ui-card-title">{{ title }}</div>
     <div v-if="sub" class="tt-ui-card-sub">{{ sub }}</div>
     <details v-if="$slots.details" class="tt-ui-card-details">
       <summary>详细说明</summary>
@@ -17,7 +18,7 @@
 
 <script setup lang="ts">
 defineProps<{
-    title: string;
+    title?: string;
     sub?: string;
 }>();
 </script>

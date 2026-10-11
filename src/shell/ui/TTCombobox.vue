@@ -56,7 +56,7 @@ let uid = 0;
         <template v-else>
           <div
             v-for="(option, index) in filtered"
-            :key="option"
+            :key="`${index}-${option}`"
             :id="optionId(index)"
             class="tt-combobox-option"
             :class="{ 'tt-combobox-option--active': index === activeIndex }"
