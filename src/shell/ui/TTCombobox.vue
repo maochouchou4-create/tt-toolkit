@@ -335,6 +335,8 @@ function setGlobalListeners(on: boolean): void {
     z-index: 30001;
     max-height: 240px;
     overflow-y: auto;
+    /* 滚动到边界不再链传页面：链传会被 onDocScroll 判成宿主滚动而收起浮层 */
+    overscroll-behavior: contain;
     background: var(--SmartThemeChatTintColor, rgba(42, 42, 46, 0.98));
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 5px;
