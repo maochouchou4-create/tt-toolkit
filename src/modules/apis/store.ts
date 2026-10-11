@@ -68,9 +68,10 @@ export const useApisStore = defineStore('tt-apis', {
         refreshPresetNames() {
             this.presetNames = listOpenAIPresetNames();
         },
-        /** 新建或复制服务商骨架进编辑区。 */
+        /** 新建或复制服务商骨架进编辑区（拉取状态随会话清零——上一次拉取的结果文案不属于新编辑会话）。 */
         startDraft(base?: ApiProvider) {
             this.draft = base ? { ...base, models: [...base.models] } : createEndpoint('新服务商');
+            this.fetchStatus = null;
         },
         updateDraft(patch: Partial<ApiProvider>) {
             if (!this.draft) return;
@@ -78,15 +79,19 @@ export const useApisStore = defineStore('tt-apis', {
         },
         cancelDraft() {
             this.draft = null;
+            this.fetchStatus = null;
         },
         /**
          * 拉模型清单（直连 Bearer；结果写进草稿的 models 缓存，保存落档——
-         * 拉取本身即 url+key 的健康检查）。
+         * 拉取本身即 url+key 的健康检查）。返回本次清单：updateDraft 整体
+         * 替换 draft 对象，调用方 await 前捕获的旧引用读不到新值——结果
+         * 一律走返回值，不回读可变状态。
          */
-        async fetchModelList(): Promise<void> {
-            if (!this.draft) return;
+        async fetchModelList(): Promise<string[]> {
+            if (!this.draft) return [];
             const models = await fetchModels(this.draft.url, this.draft.key);
             this.updateDraft({ models });
+            return models;
         },
     },
 });

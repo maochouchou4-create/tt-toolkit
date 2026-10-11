@@ -139,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useApisStore } from '@/modules/apis/store';
 import { TASKS, type TaskId } from '@/tasks';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
@@ -151,6 +151,12 @@ const apis = useApisStore();
 
 const modelsLoading = ref(false);
 const draftError = ref('');
+
+// 编辑会话切换即清保存侧错误：startDraft/cancelDraft/拉取更新都会替换
+// draft 对象，旧会话的报错文案不进新会话（fetchStatus 的清理在 store 侧同款语义）
+watch(() => apis.draft, () => {
+    draftError.value = '';
+});
 
 // 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写
 const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。 密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
@@ -250,9 +256,11 @@ async function onFetchModels(): Promise<void> {
     draftError.value = '';
     modelsLoading.value = true;
     try {
-        await apis.fetchModelList();
-        apis.fetchStatus = draft.models.length > 0
-            ? { ok: true, message: `已拉取 ${draft.models.length} 个模型（保存后各任务模型行可直接选）` }
+        // 结果走返回值：store 的 updateDraft 会整体替换 draft 对象，
+        // 本函数开头捕获的引用在 await 后已过期
+        const models = await apis.fetchModelList();
+        apis.fetchStatus = models.length > 0
+            ? { ok: true, message: `已拉取 ${models.length} 个模型（保存后各任务模型行可直接选）` }
             : { ok: false, message: '清单为空——请检查地址与密钥（部分站点不开放模型清单接口）' };
     } catch (err) {
         apis.fetchStatus = { ok: false, message: `拉取失败：${err instanceof Error ? err.message : String(err)}` };

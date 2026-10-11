@@ -6,9 +6,11 @@ let uid = 0;
 <template>
   <!--
     可输可选单控件原语：输入即值本体，右侧钮开合候选浮层。
-    弹层 Teleport 到壳根 #ttToolkitShell 走 fixed 定位——.tt-tab-host 是
-    滚动容器，宿内弹层会被裁剪或撑出滚动区；fixed 坐标取触发器 rect，
-    下方放不下翻转到上方，滚动/缩放即收起（fixed 不随滚动跟随）。
+    弹层 Teleport 到 body：一是 .tt-tab-host 是滚动容器，宿内弹层会被裁剪
+    或撑出滚动区；二是宿主给 .drawer-content（壳复用的类）设了
+    backdrop-filter，带它的祖先会成为 fixed 后代的包含块——壳内弹层的
+    fixed 会锚到壳自身坐标系而 viewport 坐标全部错位（真机实测：浮层开
+    了但落在面板外）。body 直挂对宿主任何主题层的 transform/filter 免疫。
     外部 attrs（如 aria-label）经 $attrs 落到输入框——可访问性属性归输入框。
   -->
   <div ref="rootRef" class="tt-combobox">
@@ -43,7 +45,7 @@ let uid = 0;
       @mousedown.prevent
       @click="toggle"
     >▾</button>
-    <Teleport v-if="open" to="#ttToolkitShell">
+    <Teleport v-if="open" to="body">
       <div
         ref="popupRef"
         :id="listboxId"
@@ -319,18 +321,22 @@ function setGlobalListeners(on: boolean): void {
 
 .tt-combobox-popup {
     position: fixed;
-    z-index: 10;
+    /* 挂 body 须越过宿主 #movingDivs>div 的 4000 层叠上下文（工具箱壳
+       深处其中），取 30001 与壳自身的 30000 同量级再压一头 */
+    z-index: 30001;
     max-height: 240px;
     overflow-y: auto;
     background: var(--SmartThemeChatTintColor, rgba(42, 42, 46, 0.98));
     border: 1px solid var(--SmartThemeBorderColor, #666);
     border-radius: 5px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-    padding: var(--tt-sp-1) 0;
+    /* 挂 body 后脱离 .tt-shell 的令牌继承域，兜底值与令牌定义同值
+       （em 兜底对 body 字号解析，与壳根继承链同源） */
+    padding: var(--tt-sp-1, 4px) 0;
 }
 
 .tt-combobox-option {
-    padding: var(--tt-sp-1) var(--tt-sp-2);
+    padding: var(--tt-sp-1, 4px) var(--tt-sp-2, 8px);
     cursor: pointer;
 }
 
@@ -339,8 +345,8 @@ function setGlobalListeners(on: boolean): void {
 }
 
 .tt-combobox-empty {
-    padding: var(--tt-sp-1) var(--tt-sp-2);
-    font-size: var(--tt-fs-hint);
+    padding: var(--tt-sp-1, 4px) var(--tt-sp-2, 8px);
+    font-size: var(--tt-fs-hint, 0.75em);
     opacity: 0.65;
 }
 </style>
