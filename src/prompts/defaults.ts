@@ -1,6 +1,6 @@
 /**
- * 任务默认模板（五任务：choice 选项生成＋persona 两段——策展/填充＋
- * summary 两段——小总结压缩/大总结合并）。
+ * 任务默认模板（六任务：choice 选项生成＋persona 两段——策展/填充＋
+ * summary 两段——小总结压缩/大总结合并＋summary_judge 总结时机判断）。
  * choice 部分＝唯一的任务模板（fork 出厂模板是上游猫娘 RP 特化演化，
  * 文本不搬不抄，按「通用 RP + flash 级模型」制版原则重写）；persona
  * 部分＝PersonaWeaver fork 默认提示词原样平移（见文末分节注释）。
@@ -23,7 +23,7 @@ import type { PromptConfig, TaskKey } from './types';
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
-export const DEFAULTS_VERSION = 12;
+export const DEFAULTS_VERSION = 13;
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -409,11 +409,14 @@ export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
             return summaryTaskConfig(SUMMARY_SMALL_PROMPT);
         case 'summary_big':
             return summaryTaskConfig(SUMMARY_BIG_PROMPT);
+        case 'summary_judge':
+            return summaryTaskConfig(SUMMARY_JUDGE_PROMPT);
     }
 }
 
 // ---------------------------------------------------------------------------
-// summary 任务默认模板（小总结压缩＋大总结合并）。任务指令正文为拍板定稿
+// summary 任务默认模板（小总结压缩＋大总结合并＋总结时机判断）。任务指令
+// 正文为拍板定稿
 // 文本，一字不差——压缩口径（事件一句话/伏笔必记/亲密情节只记结果/纯文本
 // 输出）是对多份同类总结提示词实测口径的收敛，改写＝破坏定稿。管线形态
 // 与 persona 同构：一个文本模块（任务指令）＋一个注入模块（源文本）。
@@ -447,7 +450,23 @@ const SUMMARY_BIG_PROMPT = [
     '7. 篇幅以覆盖全部关键信息为准（通常 300 到 600 字），纯文本输出：不使用 markdown 格式，分节只用一行空行分隔。',
 ].join('\n');
 
-/** summary 两任务共用模板骨架：任务指令（system）＋前情源文本注入（user）。 */
+/**
+ * 总结时机判断指令（summary_judge）。正文为拍板定稿文本，一字不差：
+ * 好/坏时机对照式（借鉴 NVWA 预设脚本的判断提示词概念，表达自写）＋
+ * JSON 输出契约。user 侧窗口上下文由判断器运行时拼装（非模板），
+ * 经 summary_source 注入模块进管线（role user）。
+ */
+const SUMMARY_JUDGE_PROMPT = [
+    'You are the summary timing judge for a story in progress. Decide whether the story has just reached a natural point at which to compile a story summary.',
+    '',
+    'Good moments to summarize: a scene or passage has just wrapped up; time or place has clearly changed; an important event has reached its outcome; a change in the relationship between characters has settled; an important agreement that needs to be remembered has been made.',
+    '',
+    'Poor moments to summarize: a dialogue or an action is still halfway through; a conflict or a suspense has just begun to unfold; what just happened is about to continue developing right away.',
+    '',
+    'Output only a JSON object in the form {"should_summarize": true or false, "reason": "one sentence"} and nothing else. Write the reason in the same language as the story.',
+].join('\n');
+
+/** summary 任务默认模板骨架：任务指令（system）＋前情源文本注入（user）。 */
 function summaryTaskConfig(prompt: string): PromptConfig {
     return {
         id: 'default',

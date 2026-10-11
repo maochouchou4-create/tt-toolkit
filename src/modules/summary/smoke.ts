@@ -8,18 +8,20 @@
  * 自清理：stub 单例跨段共享（boot2 重跑同段），不留 fixture 残留。
  */
 import { event_types, extension_settings, type ChatMessage } from '@/host';
+import { serializeOutbound } from '@/modules/apis/client';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { mutateTaskProfiles, readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { handleSummaryMessageReceived, installSummaryAuto } from './auto';
 import { useSummaryStore } from './store';
-import { MAX_FLOORS_PER_RUN, planAutoSmallSummary, planManualSmallSummary, roundsToTrigger, shouldRunBigSummary } from './arithmetic';
+import { parseJudgeResponse, runSummaryJudge } from './judge';
+import { MAX_FLOORS_PER_RUN, planAutoPhase, planManualSmallSummary, roundsToTrigger, shouldRunBigSummary } from './arithmetic';
 import { buildBigSourceText, buildSmallSourceText, cancelSummaryGeneration, isSummaryRunning, restoreAllSummaries, runBigSummary, runSmallSummary } from './generator';
 import { DEFAULT_SUMMARY_SETTINGS, normalizeSummaryChatState, normalizeSummarySettings, readSummaryChatState, writeSummaryChatState, writeSummarySettings } from './settings';
 import { clearSummarySlot, SLOT_KEY } from './slot';
 import { composeSlotValue } from './slot-compose';
-import { hiddenFloorCount, hideFloors, isRawFloor, isSummaryHiddenFloor, rawFloorIndices, restoreAllFloors, selfHealSummaryState } from './state';
+import { currentFoldEpoch, hiddenFloorCount, hideFloors, isRawFloor, isSummaryHiddenFloor, rawFloorIndices, restoreAllFloors, selfHealSummaryState } from './state';
 
 const failures: string[] = [];
 
@@ -88,26 +90,139 @@ async function waitFor(pred: () => boolean, tries = 100): Promise<boolean> {
     return pred();
 }
 
+/** 判断请求桩响应：SSE 流式帧形态与 client.ts 流式消费契约对齐。 */
+function judgeSseResponse(content: string): Response {
+    const encoder = new TextEncoder();
+    return {
+        ok: true,
+        status: 200,
+        body: {
+            getReader: () => {
+                const frames = [encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`), encoder.encode('data: [DONE]\n\n')];
+                return {
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    cancel: async () => undefined,
+                };
+            },
+        },
+    } as unknown as Response;
+}
+
+// ---------------------------------------------------------------------------
+// 5.5) 判断器：解析三级＋破限豁免＋端到端（stub 回包）＋窗口错误楼过滤
+// ---------------------------------------------------------------------------
+
+async function runJudgeChecks(): Promise<void> {
+    const stubs = smokeStubs();
+    const savedEndpoints = readApiDomain();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    const baseFetch = globalThis.fetch;
+    let savedName1: unknown;
+    let savedName2: unknown;
+    try {
+        // speaker 名直配 stubContext（上一段 finally 已还原成缺席——【王玉】断言依赖它）
+        savedName1 = stubs.getContext().name1;
+        savedName2 = stubs.getContext().name2;
+        stubs.getContext().name1 = '王玉';
+        stubs.getContext().name2 = '林霜';
+        check('judge 解析①：整体 JSON 采信（should_summarize 布尔＋reason 透传）',
+            (() => { const r = parseJudgeResponse('{"should_summarize": true, "reason": "场景收尾。"}'); return r.shouldSummarize === true && r.reason === '场景收尾。'; })()
+            && (() => { const r = parseJudgeResponse('{"should_summarize": false}'); return r.shouldSummarize === false && r.reason === ''; })());
+        check('judge 解析②：宽松文本退正则首个命中',
+            parseJudgeResponse('模型输出：{"should_summarize" : false}——以上。').shouldSummarize === false
+            && parseJudgeResponse('前言 {"x":1} {"should_summarize": true} 后语').shouldSummarize === true);
+        check('judge 解析③：全坏 → null（非 JSON／JSON 缺布尔字段）',
+            parseJudgeResponse('我觉得还不到时候。').shouldSummarize === null
+            && parseJudgeResponse('{"reason": "没给字段"}').shouldSummarize === null);
+        check('judge：serializeOutbound 无破限前缀（summary_judge 豁免，日志与实发同源）',
+            serializeOutbound([{ role: 'user', content: '正文' }], 'summary_judge') === '[user]\n正文');
+
+        const endpoint = createEndpoint('judge冒烟服务商');
+        endpoint.url = 'https://judge-smoke.example.com/v1';
+        endpoint.key = 'sk-judge';
+        endpoint.models = ['judge-model'];
+        writeApiDomain([endpoint]);
+        mutateTaskProfiles(profiles => {
+            profiles.summary_judge = { providerId: endpoint.id, model: 'judge-model' };
+        });
+        // 端到端：好 JSON → 判 true；窗口内错误正文楼被过滤
+        seedChat(8);
+        const errChat = stubs.getContext().chat as Array<Record<string, unknown>>;
+        errChat[2] = { mes: '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。', is_user: true };
+        stubs.generateCalls.length = 0;
+        globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+            stubs.generateCalls.push({ url: String(_url), body });
+            return judgeSseResponse(JSON.stringify({ should_summarize: true, reason: '一场争执刚收尾。' }));
+        }) as typeof fetch;
+        const verdict = await runSummaryJudge();
+        const call = stubs.generateCalls[0];
+        const judgeMessages = (call?.body.messages ?? []) as Array<{ role: string; content: string }>;
+        const judgeUserText = judgeMessages.find(m => m.role === 'user')?.content ?? '';
+        check('judge e2e：好 JSON → 判 true＋reason 透传；请求温度 0.2、json_object 契约、流式',
+            verdict.kind === 'judged' && verdict.shouldSummarize === true && verdict.reason === '一场争执刚收尾。'
+            && call?.body.temperature === 0.2 && (call?.body.response_format as { type?: string } | undefined)?.type === 'json_object'
+            && call?.body.stream === true && call?.body.model === 'judge-model',
+            `kind=${verdict.kind}`);
+        check('judge e2e：user 消息带距上次总结楼数与窗口楼层文本（speaker 标注形态）、system 即判断模板',
+            judgeUserText.startsWith('8 messages have passed since the last summary.')
+            && judgeUserText.includes('【王玉】') && !judgeUserText.includes('连接目标服务失败')
+            && judgeMessages[0]?.role === 'system' && judgeMessages[0]?.content.startsWith('You are the summary timing judge')
+            && judgeMessages.length === 2,
+            `messages=${judgeMessages.length}`);
+        // 空白窗口（全部楼层都是错误正文）与传输失败：都按判 null 静默收口
+        const errOnly = stubs.getContext().chat as Array<Record<string, unknown>>;
+        for (let i = 0; i < errOnly.length; i++) errOnly[i] = { mes: `[API 错误]\n失败${i}`, is_user: i % 2 === 0 };
+        const blankWindow = await runSummaryJudge();
+        globalThis.fetch = (async () => { throw new Error('网络断开'); }) as typeof fetch;
+        const failed = await runSummaryJudge();
+        check('judge 失败面：空白窗口不白发请求、传输失败/垃圾回包 → 判 null（不重试不抛）',
+            blankWindow.kind === 'judged' && blankWindow.shouldSummarize === null
+            && failed.kind === 'judged' && failed.shouldSummarize === null,
+            `blank=${blankWindow.kind}/${blankWindow.kind === 'judged' ? String(blankWindow.shouldSummarize) : ''} failed=${failed.kind === 'judged' ? String(failed.shouldSummarize) : failed.kind}`);
+    } finally {
+        globalThis.fetch = baseFetch;
+        writeApiDomain(savedEndpoints);
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
+        stubs.getContext().name1 = savedName1;
+        stubs.getContext().name2 = savedName2;
+        stubs.getContext().chat = [];
+        stubs.generateCalls.length = 0;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 1) 触发算术（纯函数：多组 interval/keep＋取偶＋上限＋级联条件＋同源换算）
 // ---------------------------------------------------------------------------
 
 function runArithmeticChecks(): void {
-    const cases: Array<{ raw: number; interval: number; keep: number; eat: number; batch: number }> = [
-        { raw: 14, interval: 3, keep: 3, eat: 8, batch: 8 },
-        { raw: 12, interval: 3, keep: 3, eat: 6, batch: 6 },
-        { raw: 10, interval: 3, keep: 3, eat: 4, batch: 0 }, // 4 < 2×3 不达标
-        { raw: 13, interval: 1, keep: 3, eat: 6, batch: 6 }, // aged 7 向下取偶→6
-        { raw: 4, interval: 3, keep: 3, eat: 0, batch: 0 },  // 全部在保留窗口内
-        { raw: 200, interval: 3, keep: 3, eat: 194, batch: MAX_FLOORS_PER_RUN }, // 单次批上限，超出留池下次继续
-        { raw: 30, interval: 1, keep: 1, eat: 28, batch: 28 },
-    ];
-    const allOk = cases.every(c => {
-        const plan = planAutoSmallSummary(c.raw, c.interval, c.keep);
-        return plan.eatCount === c.eat && plan.batchSize === c.batch;
-    });
-    check('算术：多组 interval/keep 下 agedCount/向下取偶/达标线/单次批上限留池', allOk,
-        `实得=${JSON.stringify(cases.map(c => planAutoSmallSummary(c.raw, c.interval, c.keep)))}`);
+    // fixed 模式回归（行为保真红线）：现行语义「aged ≥ interval×2 → force，否则 wait」原样
+    const fixed = { intervalRounds: 3, keepRounds: 3, triggerMode: 'fixed' as const, maxIntervalRounds: 8, judgeEveryRounds: 1 };
+    check('算术：fixed 相位映射回归（达标 force／未达标 wait，与改版前算术逐例同判）',
+        planAutoPhase(14, fixed, null).phase === 'force'
+        && planAutoPhase(12, fixed, null).phase === 'force'
+        && planAutoPhase(10, fixed, null).phase === 'wait'
+        && planAutoPhase(13, { ...fixed, intervalRounds: 1 }, null).phase === 'force'
+        && planAutoPhase(4, fixed, null).phase === 'wait',
+        `样本=${JSON.stringify([14, 12, 10, 13, 4].map(raw => planAutoPhase(raw, fixed, null)))}`);
+    // adaptive 三相位：最少间隔内 wait → 区间内 judge（askNow 按 lastAskedAged 节流）→ 强制线 force
+    const adaptive = { intervalRounds: 3, keepRounds: 3, triggerMode: 'adaptive' as const, maxIntervalRounds: 8, judgeEveryRounds: 1 };
+    const phaseName = (raw: number, lastAsked: number | null) => planAutoPhase(raw, adaptive, lastAsked).phase;
+    const askNowOf = (raw: number, lastAsked: number | null): boolean => {
+        const p = planAutoPhase(raw, adaptive, lastAsked);
+        return p.phase === 'judge' && p.askNow;
+    };
+    check('算术：adaptive 三相位（不足最少间隔 wait／区间 judge／达强制线 force）',
+        phaseName(10, null) === 'wait' && phaseName(4, null) === 'wait'
+        && phaseName(12, null) === 'judge' && askNowOf(12, null) === true
+        && phaseName(22, null) === 'force' && phaseName(200, null) === 'force');
+    check('算术：askNow 节流（从未询问即问；距上次询问满 judgeEvery 轮才再问，半轮不算满）',
+        askNowOf(12, null) === true
+        && askNowOf(12, 6) === false
+        && askNowOf(13, 6) === false
+        && askNowOf(14, 6) === true
+        && (() => { const p = planAutoPhase(12, { ...adaptive, judgeEveryRounds: 2 }, 6); return p.phase === 'judge' && !p.askNow; })()
+        && (() => { const p = planAutoPhase(16, { ...adaptive, judgeEveryRounds: 2 }, 6); return p.phase === 'judge' && p.askNow; })());
     check('算术：手动只要求 aged≥2（无间隔门槛、上限同封顶）',
         planManualSmallSummary(8, 3).batchSize === 2 && planManualSmallSummary(6, 3).batchSize === 0 && planManualSmallSummary(200, 1).batchSize === MAX_FLOORS_PER_RUN);
     check('算术：大总结级联条件（未折叠小总结攒满 bigEvery 即触发）',
@@ -149,6 +264,7 @@ function runSlotComposeChecks(): void {
 
 function runStateChecks(): void {
     const stubs = smokeStubs();
+    const epochBase = currentFoldEpoch();
     seedChat(6);
     check('状态：raw 判定含开场白 floor 0（全部新楼层皆 raw）',
         rawFloorIndices().length === 6 && rawFloorIndices()[0] === 0);
@@ -184,6 +300,10 @@ function runStateChecks(): void {
         && JSON.stringify(readSummaryChatState()) === emptyStateJson()
         && slotState()?.value === '' && slotState()?.position === -1,
         `kind=${restored.kind}`);
+    // 本段折叠/还原共四落地（hide×2＋restore×2），selfHeal 两次零推进——
+    // 纪元是判断询问锚点的作废信号，漏推进＝跨周期锚点失准
+    check('状态：折叠/还原各推进 foldEpoch、selfHeal 不推进（aged 锚点作废信号）',
+        currentFoldEpoch() === epochBase + 4, `epoch=${currentFoldEpoch()} base=${epochBase}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +317,18 @@ function runNormalizeChecks(): void {
     const s2 = normalizeSummarySettings({ intervalRounds: 21, keepRounds: 7, bigEvery: 99, autoEnabled: true });
     check('normalize：上界钳制＋合法值保真',
         s2.intervalRounds === 20 && s2.keepRounds === 7 && s2.bigEvery === 10 && s2.autoEnabled === true);
+    check('normalize：triggerMode 枚举外回 fixed、合法 adaptive 保真',
+        normalizeSummarySettings({ triggerMode: 'junk' }).triggerMode === 'fixed'
+        && normalizeSummarySettings({ triggerMode: 'adaptive' }).triggerMode === 'adaptive'
+        && normalizeSummarySettings(undefined).triggerMode === 'fixed');
+    const s3 = normalizeSummarySettings({ intervalRounds: 10, maxIntervalRounds: 8, judgeEveryRounds: 0 });
+    check('normalize：强制线下界随 interval 抬动（interval 10 时 8 抬到 12）、judgeEvery 下界钳 1',
+        s3.maxIntervalRounds === 12 && s3.judgeEveryRounds === 1, JSON.stringify(s3));
+    const s4 = normalizeSummarySettings({ maxIntervalRounds: 99, judgeEveryRounds: 11 });
+    check('normalize：强制线上界 40、judgeEvery 上界 10、缺席默认 8/1（强制线 8≥3+2 不抬）',
+        s4.maxIntervalRounds === 40 && s4.judgeEveryRounds === 10
+        && normalizeSummarySettings(undefined).maxIntervalRounds === 8
+        && normalizeSummarySettings(undefined).judgeEveryRounds === 1, JSON.stringify(s4));
     check('normalize：缺席键回默认 3/3/3（开关默认关）',
         JSON.stringify(normalizeSummarySettings(undefined)) === JSON.stringify(DEFAULT_SUMMARY_SETTINGS));
     const junk = normalizeSummaryChatState({ smallSummaries: [{ text: '好', fromFloor: 0, toFloor: 1 }, '垃圾', null], bigSummary: 5 });
@@ -408,11 +540,12 @@ async function runAutoWiringChecks(): Promise<void> {
     const savedSettings = ttDomain.summary;
     const savedEndpoints = readApiDomain();
     const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    const baseFetch = globalThis.fetch;
     try {
         // 守卫分支（事件入口侧与 generator 守卫同判；基线设置缺席＝autoEnabled false）
         seedChat(10);
         check('接线：自动总结未开启时事件入口不触发', handleSummaryMessageReceived(9) === false);
-        writeSummarySettings({ autoEnabled: true, intervalRounds: 3, keepRounds: 3, bigEvery: 3 });
+        writeSummarySettings({ ...DEFAULT_SUMMARY_SETTINGS, autoEnabled: true, intervalRounds: 3, keepRounds: 3, bigEvery: 3 });
         check('接线：分组 chat_id（非数字 messageId）不当楼层触发', handleSummaryMessageReceived('12345') === false);
         seedChat(4); // raw 4 楼全在保留窗口内（keep 3 轮）
         check('接线：算术不达标时事件入口不触发', handleSummaryMessageReceived(3) === false);
@@ -469,6 +602,159 @@ async function runAutoWiringChecks(): Promise<void> {
         const settled = await waitFor(() => !isSummaryRunning());
         check('接线：自动生成完成后互斥归位＋楼层折叠落账＋running 镜像清位',
             settled && hiddenFloorCount() === 8 && readSummaryChatState().smallSummaries.length === 1 && useSummaryStore().runningKind === null);
+
+        // ---- adaptive 事件感知：三相位接线＋askNow 节流＋CHAT_CHANGED 重置＋judge 缺席判否不崩＋强制线 ----
+        restoreAllFloors();
+        delete (stubs.chat_metadata as { ttToolkit?: Record<string, unknown> }).ttToolkit?.summary;
+        clearSummarySlot();
+        writeSummarySettings({ autoEnabled: true, intervalRounds: 3, keepRounds: 3, bigEvery: 3, triggerMode: 'adaptive', maxIntervalRounds: 8, judgeEveryRounds: 1 });
+        seedChat(10); // aged 4 < 2×3：wait 相位
+        stubs.generateCalls.length = 0;
+        check('adaptive：不足最少间隔不询问也不总结',
+            handleSummaryMessageReceived(9) === false && hiddenFloorCount() === 0 && stubs.generateCalls.length === 0);
+        // 判断请求桩工厂：0.2/json_object 形状分发 → 回「否」；其余走原分发桩
+        // （末段多周期复测要重装同款桩）
+        const judgeStubFetch = (): typeof fetch => (async (_url: string | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+            stubs.generateCalls.push({ url: String(_url), body });
+            if (body.temperature === 0.2 && (body.response_format as { type?: string } | undefined)?.type === 'json_object') {
+                return judgeSseResponse(JSON.stringify({ should_summarize: false, reason: '对话仍在同一场景中推进。' }));
+            }
+            return baseFetch(_url, init);
+        }) as typeof fetch;
+        globalThis.fetch = judgeStubFetch();
+        seedChat(12); // aged 6：进入 judge 相位，本会话从未询问 → askNow
+        check('adaptive：达最少间隔发判断请求而非直接总结（入口 true、无小总结启动）',
+            handleSummaryMessageReceived(11) === true && !isSummaryRunning());
+        await waitFor(() => stubs.generateCalls.length > 0);
+        await waitFor(() => useRunlogStore().records[useRunlogStore().records.length - 1]?.task === 'summary_judge');
+        const judgeCall = stubs.generateCalls[stubs.generateCalls.length - 1];
+        const judgeMessages = (judgeCall?.body.messages ?? []) as Array<{ role: string; content: string }>;
+        check('adaptive：judge 请求形状（温度 0.2、json_object 契约、custom 源、首条 system 即判断模板、无破限前缀混入）',
+            judgeCall?.body.temperature === 0.2
+            && (judgeCall?.body.response_format as { type?: string } | undefined)?.type === 'json_object'
+            && judgeCall?.body.chat_completion_source === 'custom'
+            && judgeMessages[0]?.role === 'system' && judgeMessages[0]?.content.startsWith('You are the summary timing judge')
+            && judgeMessages.length === 2,
+            `messages=${JSON.stringify(judgeMessages.map(m => m.role))}`);
+        const judgeRecord = useRunlogStore().records[useRunlogStore().records.length - 1];
+        check('adaptive：判断答否不总结（runlog task=summary_judge、楼层零折叠）',
+            judgeRecord?.task === 'summary_judge' && judgeRecord?.ok === true
+            && hiddenFloorCount() === 0 && readSummaryChatState().smallSummaries.length === 0);
+        stubs.generateCalls.length = 0;
+        check('adaptive：askNow 节流——judgeEvery 轮内不重问',
+            handleSummaryMessageReceived(11) === false && stubs.generateCalls.length === 0);
+        seedChat(14); // aged 8：距上次询问恰满 1 轮 → 再问
+        stubs.generateCalls.length = 0;
+        check('adaptive：隔满 judgeEvery 轮后重新询问',
+            handleSummaryMessageReceived(13) === true);
+        await waitFor(() => stubs.generateCalls.length > 0);
+        // CHAT_CHANGED 重置询问节奏：同一询问点在切聊天后重新放行
+        await stubs.eventSource.emit(event_types.CHAT_CHANGED);
+        stubs.generateCalls.length = 0;
+        check('adaptive：CHAT_CHANGED 重置询问节奏（同询问点重新放行）',
+            handleSummaryMessageReceived(13) === true && !isSummaryRunning());
+        await waitFor(() => stubs.generateCalls.length > 0);
+        // judge 档案缺席：静默跳过本轮（不发请求、不崩）；force 路径不受影响由下段证明
+        mutateTaskProfiles(profiles => {
+            profiles.summary_judge = { providerId: '', model: '' };
+        });
+        await stubs.eventSource.emit(event_types.CHAT_CHANGED);
+        stubs.generateCalls.length = 0;
+        check('adaptive：judge 档案缺席判否不崩（静默跳过、不发请求）',
+            handleSummaryMessageReceived(13) === false && stubs.generateCalls.length === 0);
+        mutateTaskProfiles(profiles => {
+            profiles.summary_judge = { providerId: endpoint.id, model: 'wiring-model' };
+        });
+        // force：达强制线不再询问直接总结
+        globalThis.fetch = baseFetch;
+        seedChat(22); // aged 16 ≥ 8×2：force 相位
+        stubs.generateCalls.length = 0;
+        check('adaptive：达强制线直接总结（不再询问）', handleSummaryMessageReceived(21) === true);
+        const forceSettled = await waitFor(() => !isSummaryRunning());
+        check('adaptive：强制总结落地（折叠 16 楼＋落账一条）',
+            forceSettled && hiddenFloorCount() === 16 && readSummaryChatState().smallSummaries.length === 1,
+            `hidden=${hiddenFloorCount()}`);
+
+        // ---- 多周期复测：锚点跨折叠的纪元作废（Lead 修复的承重面） ----
+        // 周期①（null 路径）：前段 CHAT_CHANGED 已清锚点，force 折叠后新
+        // 周期首个询问点放行——证明折叠本身不禁问（非承重，承重在周期②）。
+        globalThis.fetch = judgeStubFetch();
+        seedChat(12); // aged 6：新周期 judge 相位
+        stubs.generateCalls.length = 0;
+        check('adaptive：折叠后新周期重新询问（null 锚点路径，judge 不静默）',
+            handleSummaryMessageReceived(11) === true && !isSummaryRunning());
+        await waitFor(() => stubs.generateCalls.length > 0);
+        const cycleCall = stubs.generateCalls[stubs.generateCalls.length - 1];
+        check('adaptive：新周期首问仍是判断请求（0.2/json_object 形状、无小总结折叠）',
+            cycleCall?.body.temperature === 0.2
+            && (cycleCall?.body.response_format as { type?: string } | undefined)?.type === 'json_object'
+            && hiddenFloorCount() === 0,
+            `temp=${String(cycleCall?.body.temperature)}`);
+        // 周期①的询问已记账（锚点＝aged 6），答否不折叠——锚点带着进周期②。
+        // 周期②（承重）：带锚点再 force 折叠一次（纪元推进、aged 归零）后
+        // 攒回同一 aged 6——若锚点不随纪元作废，aged-lastAskedAged＝0 恒小于
+        // judgeEvery×2，judge 永久静默；作废则按未询问放行（突变测试：删
+        // auto.ts 纪元校验行本组必红）。
+        seedChat(22); // aged 16 ≥ 8×2：force 相位
+        stubs.generateCalls.length = 0;
+        check('多周期②前置：带锚点场景下强制总结再次落地（纪元推进）',
+            handleSummaryMessageReceived(21) === true && await waitFor(() => !isSummaryRunning())
+            && hiddenFloorCount() === 16,
+            `hidden=${hiddenFloorCount()}`);
+        seedChat(12); // aged 6：回到与锚点相同的 aged 数值
+        stubs.generateCalls.length = 0;
+        check('adaptive：锚点跨折叠随纪元作废（同 aged 数值下仍放行询问，judge 不静默）',
+            handleSummaryMessageReceived(11) === true && !isSummaryRunning());
+        await waitFor(() => stubs.generateCalls.length > 0);
+        const staleCall = stubs.generateCalls[stubs.generateCalls.length - 1];
+        check('adaptive：锚点作废后的询问仍是判断请求（形状＋无新增折叠）',
+            staleCall?.body.temperature === 0.2
+            && (staleCall?.body.response_format as { type?: string } | undefined)?.type === 'json_object'
+            && hiddenFloorCount() === 0,
+            `temp=${String(staleCall?.body.temperature)}`);
+
+        // ---- judge 落回竞态：询问挂起期间手动总结启动，落回 true 不得抢/清手动镜像 ----
+        // 两条门（judgeGate/manualGate）把两个异步链精确卡住：判断请求挂起 →
+        // 手动经 store 启动（镜像置位）→ 放行判断（答 true）→ 自动路径须被
+        // fireSmallSummary 的 isSummaryRunning 防线拦下（无防线时 busy 立返
+        // 后 finally endRun 会把手动镜像提前清位——突变测试的判别点）。
+        let releaseJudge!: (r: Response) => void;
+        const judgeGate = new Promise<Response>(resolve => { releaseJudge = resolve; });
+        let releaseManual!: () => void;
+        const manualGate = new Promise<void>(resolve => { releaseManual = resolve; });
+        globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+            stubs.generateCalls.push({ url: String(_url), body });
+            if (body.temperature === 0.2 && (body.response_format as { type?: string } | undefined)?.type === 'json_object') {
+                return judgeGate;
+            }
+            await manualGate; // 手动生成的请求挂起，等竞态窗口摆好再放
+            return baseFetch(_url, init);
+        }) as typeof fetch;
+        seedChat(14); // aged 8：距锚点（aged 6）满 1 轮 → askNow
+        stubs.generateCalls.length = 0;
+        check('竞态前置：判断请求已发出并挂起（judgeGate 未放行）',
+            handleSummaryMessageReceived(13) === true && !isSummaryRunning());
+        await waitFor(() => stubs.generateCalls.length > 0);
+        const store = useSummaryStore();
+        const manual = store.runManualSmall();
+        check('竞态前置：手动小总结经 store 置 running 镜像（判断仍在挂起）',
+            store.runningKind === 'small' && isSummaryRunning());
+        releaseJudge(judgeSseResponse(JSON.stringify({ should_summarize: true, reason: '段落收束。' })));
+        for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); // 放行整条判断落回微任务链
+        check('竞态：判断落回 true 不抢不动手动镜像（自动触发被防线拦下）',
+            store.runningKind === 'small' && isSummaryRunning(),
+            `runningKind=${String(store.runningKind)}`);
+        releaseManual();
+        await manual;
+        // 手动落账恰使 smalls 攒满 bigEvery=3 → 级联大总结合并清空（既有
+        // 行为，级联段已单测）；收口断言按级联后终态：镜像清位、折叠 8 楼、
+        // 小总结并入大总结且无多余自动总结（多一场会 hidden>8 或镜像错乱）
+        check('竞态收口：手动小总结正常落地并级联合并（镜像清位、折叠 8 楼、smalls 并入大总结）',
+            store.runningKind === null && hiddenFloorCount() === 8
+            && readSummaryChatState().smallSummaries.length === 0 && readSummaryChatState().bigSummary !== '',
+            `hidden=${hiddenFloorCount()} smalls=${readSummaryChatState().smallSummaries.length} big=${readSummaryChatState().bigSummary.length}字`);
     } finally {
         writeApiDomain(savedEndpoints);
         writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
@@ -491,11 +777,12 @@ export async function runSummarySmoke(): Promise<void> {
     runStateChecks();
     runNormalizeChecks();
     await runGenerationChecks();
+    await runJudgeChecks();
     await runAutoWiringChecks();
     if (failures.length > 0) {
         console.error(`[summary-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[summary-smoke] OK：触发算术（agedCount/取偶/上限留池/roundsToTrigger 同源）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动）、normalize 钳制、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort high→落账→隐藏→槽重挂）、事件接线（守卫分支＋CHAT_CHANGED 自愈重挂）全部通过。');
+    console.info('[summary-smoke] OK：触发算术（fixed 相位回归/adaptive 三相位/askNow 节流/roundsToTrigger 同源）、normalize 钳制（含 triggerMode/强制线/询问间隔）、槽组合四形态逐字、状态机（hide/restore/selfHeal 的 flag×is_system 联动＋foldEpoch 推进）、守卫链（互斥/autoEnabled/算术/端点/无可总结/空白输出/取消边界零改动）、级联（bigEvery 触发＋滚动替换清空）、端到端完整链（组装 speaker 标注→请求形状 temperature 0.7＋reasoning_effort high→落账→隐藏→槽重挂）、判断器（解析三级/破限豁免/端到端好 JSON→判 true/窗口错误楼过滤/失败面判 null）、事件接线（守卫分支＋CHAT_CHANGED 自愈重挂＋adaptive 三相位接线/askNow 节流/会话态重置/judge 档案缺席判否不崩/强制线直接总结/折叠后新周期锚点作废再询问）全部通过。');
 }
