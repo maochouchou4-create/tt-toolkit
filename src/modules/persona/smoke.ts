@@ -336,8 +336,8 @@ function runPromptsChecks(): void {
 
     const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
     const keys = [...templateBlocks.keys()];
-    check('prompts：默认用户人设模板五块（基本信息/外貌/性格/喜恶/背景）',
-        keys.length === 5 && ['基本信息', '外貌', '性格', '喜恶', '背景'].every(k => keys.includes(k)),
+    check('prompts：默认用户人设模板十二块（基本信息/外貌/性格/情绪光谱/自我认知/恐惧软肋/言谈习惯/喜恶/底线雷区/技能专长/前史/目标动机）',
+        keys.length === 12 && ['基本信息', '外貌', '性格', '情绪光谱', '自我认知', '恐惧软肋', '言谈习惯', '喜恶', '底线雷区', '技能专长', '前史', '目标动机'].every(k => keys.includes(k)),
         `blocks=${keys.join('/')}`);
 
     // 骨架双源机判：回退骨架（DEFAULT_TEMPLATES.user）的性格叶键名与
@@ -354,6 +354,19 @@ function runPromptsChecks(): void {
     check('prompts：骨架双源机判（回退骨架性格叶＝策展清单性格行声明，集合对称相等）',
         curatorLine !== '' && leavesAligned,
         `骨架叶=${personaLeaves.join('/')} 清单叶=${curatorLeaves.join('/')}`);
+
+    // 清单体量机判：行同时含「——」与「；」＝清单行形态（段标签与空行
+    // 不计）——55 行是策展清单扩容后的固定体量，漏行/多行即翻红
+    const refModuleText = curatorText.split('<reference_modules>')[1]?.split('</reference_modules>')[0] ?? '';
+    const refLineCount = refModuleText.split('\n').filter(l => l.includes('——') && l.includes('；')).length;
+    check('prompts：curator 参考清单体量（55 行）', refLineCount === 55, `lines=${refLineCount}`);
+    check('prompts：机制挂载开放段在场',
+        curatorText.includes('<mechanism_mounts>') && curatorText.includes('示例之外出现任何机制同样挂载'));
+    check('prompts：新口径生效（上限 16＋元层剥离）',
+        curatorText.includes('上限 16') && !curatorText.includes('扮演红线') && !curatorText.includes('呈现偏好'));
+    check('prompts：gen 值厚度与行为心理类传导',
+        genText.includes('≤40 个汉字') && genText.includes('长度上限 40 个汉字') && genText.includes('行为心理类')
+        && !genText.includes('≤20 个汉字') && !genText.includes('长度上限 30 个汉字'));
 }
 
 // ---------------------------------------------------------------------------

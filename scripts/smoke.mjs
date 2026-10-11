@@ -514,7 +514,9 @@ if (promptTaskKeys.length !== 6 || promptChoiceModules !== 18 || !personaKeyOk |
 // 正常产出以标签开头不误杀；端到端 1：curator 段遇信封即中断、第二段不发出）
 // 本批净 +1（v1.9.0：任务档案迁移 +2——五行初始化为旧活动端点＋model 收编删除/
 // 活动键退役 1、服务商删除联动重置档案行 1；测连断言随 testConnection 退役 -1）
-const PERSONA_PASS_EXPECTED = 80;
+// 本批 +4（v1.11.0 策展清单扩容：curator 参考清单体量 55 行/机制挂载开放段在场/
+// 新口径上限 16＋元层剥离/gen 值厚度与行为心理类传导；默认模板断言五块改十二块）
+const PERSONA_PASS_EXPECTED = 84;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
