@@ -90,7 +90,7 @@ export function normalizePoolGenParams<T extends PoolGenParams>(gen: T): T {
     const overflow = gen.pinnedOverflow;
     return {
         ...gen,
-        oversamplePct: Number.isFinite(rawPct) ? Math.min(Math.max(Math.trunc(rawPct), 0), 300) : DEFAULT_POOL_GEN_PARAMS.oversamplePct,
+        oversamplePct: Number.isFinite(rawPct) ? Math.min(Math.max(Math.trunc(rawPct), 0), 500) : DEFAULT_POOL_GEN_PARAMS.oversamplePct,
         categoriesEnabled: asBool(gen.categoriesEnabled, DEFAULT_POOL_GEN_PARAMS.categoriesEnabled),
         pinnedOverflow: overflow === 'send_all' || overflow === 'trim' ? overflow : DEFAULT_POOL_GEN_PARAMS.pinnedOverflow,
         shuffleFinal: asBool(gen.shuffleFinal, DEFAULT_POOL_GEN_PARAMS.shuffleFinal),

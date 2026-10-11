@@ -20,6 +20,10 @@
       <TTField label="每次生成条数">
         <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, 4) })">
       </TTField>
+      <TTField label="候选倍率（%）">
+        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" min="0" max="500" step="10" @change="settings.updateGen({ oversamplePct: clampInt($event, 0, 500, 100) })">
+      </TTField>
+      <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
       <TTField label="上下文轮数（一轮＝一问一答）">
         <input class="tt-ctrl" :value="settings.gen.contextRounds" type="number" min="1" max="50" @change="settings.updateGen({ contextRounds: clampInt($event, 1, 50, 6) })">
       </TTField>
@@ -82,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount } from 'vue';
+import { computed, onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
 import type { ChoiceGenParams } from '@/modules/choice/api';
@@ -116,6 +120,14 @@ function clampInt(event: Event, min: number, max: number, fallback: number): num
     if (!Number.isFinite(value)) return fallback;
     return Math.max(min, Math.min(max, Math.round(value)));
 }
+
+// 候选估算＝1 固定项＋(条数−1) 抽取基数×(1＋倍率)，与 resolver.drawAmount
+// 同式（条数≤10、倍率≤500 时恒小于池大小，无需封顶展示）
+const candidateEstimate = computed(() => {
+    const drawn = settings.gen.count - 1;
+    const pct = Number.isFinite(settings.gen.oversamplePct) && settings.gen.oversamplePct > 0 ? settings.gen.oversamplePct : 0;
+    return 1 + drawn + Math.ceil((drawn * pct) / 100);
+});
 
 // ---- 剧情走向卡（随提示词 tab 删除从 PromptEditorTab
 //      搬回本页；数据域与写入通道零改动） ----
@@ -176,6 +188,13 @@ onBeforeUnmount(() => {
     font-size: var(--tt-fs-aux);
     opacity: 0.7;
     padding: var(--tt-sp-2) 0;
+}
+
+/* 生成参数卡信息行：候选条数随设置的实时换算 */
+.tt-choice-hint {
+    font-size: var(--tt-fs-hint);
+    opacity: 0.6;
+    padding: var(--tt-sp-1) 0;
 }
 
 /* 剧情走向区（从 PromptEditorTab 搬回）：tt-prompt- 前缀自持，

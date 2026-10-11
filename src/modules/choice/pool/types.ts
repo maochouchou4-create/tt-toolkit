@@ -26,7 +26,7 @@ export type PinnedOverflow = 'send_all' | 'trim';
 
 /** 全局抽取参数（挂在 choice 域 gen 下，与 count 等生成参数同级）。 */
 export interface PoolGenParams {
-    /** 候选条目超额抽取百分比（0-300）。菜单模式：多抽候选让 AI 挑。 */
+    /** 候选条目超额抽取百分比（0-500）。菜单模式：多抽候选让 AI 挑。 */
     oversamplePct: number;
     /** 按 category 分桶轮询（桶序随机、桶内等权）。 */
     categoriesEnabled: boolean;
