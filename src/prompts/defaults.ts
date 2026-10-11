@@ -1,6 +1,6 @@
 /**
- * 任务默认模板（六任务：choice 选项生成＋persona 两段——策展/填充＋
- * summary 两段——小总结压缩/大总结合并＋summary_judge 总结时机判断）。
+ * 任务默认模板（五任务：choice 选项生成＋persona 两段——策展/填充＋
+ * summary 两段——小总结压缩/大总结合并）。
  * choice 部分＝唯一的任务模板（fork 出厂模板是上游猫娘 RP 特化演化，
  * 文本不搬不抄，按「通用 RP + flash 级模型」制版原则重写）；persona
  * 部分自 PersonaWeaver fork 默认提示词平移起步，v1.11.0 策展清单扩容批
@@ -24,7 +24,7 @@ import type { PromptConfig, TaskKey } from './types';
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
-export const DEFAULTS_VERSION = 14;
+export const DEFAULTS_VERSION = 15;
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -458,16 +458,14 @@ export function createTaskDefaultConfig(task: TaskKey): PromptConfig {
             return summaryTaskConfig(SUMMARY_SMALL_PROMPT);
         case 'summary_big':
             return summaryTaskConfig(SUMMARY_BIG_PROMPT);
-        case 'summary_judge':
-            return summaryTaskConfig(SUMMARY_JUDGE_PROMPT);
     }
 }
 
 // ---------------------------------------------------------------------------
-// summary 任务默认模板（小总结压缩＋大总结合并＋总结时机判断）。任务指令
-// 正文为拍板定稿
-// 文本，一字不差——压缩口径（事件一句话/伏笔必记/亲密情节只记结果/纯文本
-// 输出）是对多份同类总结提示词实测口径的收敛，改写＝破坏定稿。管线形态
+// summary 任务默认模板（小总结压缩＋大总结合并）。任务指令正文为拍板
+// 定稿文本，一字不差——压缩口径（事件一句话/伏笔必记/亲密情节只记结果/
+// 心理只记结论/篇幅以覆盖关键信息为准）是对多份同类总结提示词实测口径的
+// 收敛，改写＝破坏定稿。管线形态
 // 与 persona 同构：一个文本模块（任务指令）＋一个注入模块（源文本）。
 // 源文本不含引擎占位符，模块结构与 choice/persona 对齐保持单一管线形态。
 // ---------------------------------------------------------------------------
@@ -479,10 +477,10 @@ const SUMMARY_SMALL_PROMPT = [
     '要求：',
     '1. 用陈述句记录实际发生的事：不复述对白原文，不评价，不预测后续。',
     '2. 每个事件写一句话，包含时间（剧情内时间原文明示的照抄，未明示的按先后标注「第X幕」）、地点、在场人物。',
-    '3. 相关事件合并；忽略纯心理与氛围描写，只留情节事实与结果。',
+    '3. 相关事件合并；心理与氛围只记影响关系或剧情走向的结论，不照抄独白。',
     '4. 伏笔、承诺、约定、重要物品的得失、人物关系的每次变化必须记录，不得遗漏。',
     '5. 亲密情节只记录事实与结果（谁与谁发生了什么、关系如何变化），不展开过程细节。',
-    '6. 全文 150 到 250 字，纯文本输出：不使用任何标题、编号、标签或 markdown 格式。',
+    '6. 篇幅以覆盖全部关键信息为准，通常 400 到 800 字，纯文本输出：不使用任何标题、编号、标签或 markdown 格式。',
 ].join('\n');
 
 /** 大总结任务指令（summary_big）。 */
@@ -496,23 +494,7 @@ const SUMMARY_BIG_PROMPT = [
     '4. 合并重复信息：多份小总结里连续讲述的同一件事归并为一句话。',
     '5. 保留所有伏笔与未回收的线索、人物关系的每次变化、重要物品的流转；信息只增不减。',
     '6. 人物与专名以原文写法为准，不新造名字。',
-    '7. 篇幅以覆盖全部关键信息为准（通常 300 到 600 字），纯文本输出：不使用 markdown 格式，分节只用一行空行分隔。',
-].join('\n');
-
-/**
- * 总结时机判断指令（summary_judge）。正文为拍板定稿文本，一字不差：
- * 好/坏时机对照式（借鉴 NVWA 预设脚本的判断提示词概念，表达自写）＋
- * JSON 输出契约。user 侧窗口上下文由判断器运行时拼装（非模板），
- * 经 summary_source 注入模块进管线（role user）。
- */
-const SUMMARY_JUDGE_PROMPT = [
-    'You are the summary timing judge for a story in progress. Decide whether the story has just reached a natural point at which to compile a story summary.',
-    '',
-    'Good moments to summarize: a scene or passage has just wrapped up; time or place has clearly changed; an important event has reached its outcome; a change in the relationship between characters has settled; an important agreement that needs to be remembered has been made.',
-    '',
-    'Poor moments to summarize: a dialogue or an action is still halfway through; a conflict or a suspense has just begun to unfold; what just happened is about to continue developing right away.',
-    '',
-    'Output only a JSON object in the form {"should_summarize": true or false, "reason": "one sentence"} and nothing else. Write the reason in the same language as the story.',
+    '7. 篇幅以覆盖全部关键信息为准（通常 800 到 1600 字），纯文本输出：不使用 markdown 格式，分节只用一行空行分隔。',
 ].join('\n');
 
 /** summary 任务默认模板骨架：任务指令（system）＋前情源文本注入（user）。 */

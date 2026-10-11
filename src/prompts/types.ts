@@ -14,14 +14,13 @@ export type PromptRole = 'system' | 'user' | 'assistant';
 /**
  * 提示词任务键（引擎多任务化）。各生成管线各自持一套
  * PromptConfig——choice（选项生成）、persona 两段（策展 schema、按
- * schema 填充人设）、summary 两段（小总结压缩、大总结合并）与
- * summary_judge（事件感知的总结时机判断）。
+ * schema 填充人设）、summary 两段（小总结压缩、大总结合并）。
  * 存储形态 Record<taskKey, PromptConfig>。
  */
-export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'summary_small' | 'summary_big' | 'summary_judge';
+export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'summary_small' | 'summary_big';
 
 /** 全部任务键（读侧补缺/迁移遍历用）。 */
-export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen', 'summary_small', 'summary_big', 'summary_judge'];
+export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen', 'summary_small', 'summary_big'];
 
 /**
  * 注入源标识。每个注入模块绑定一个源；源内容由组装时的

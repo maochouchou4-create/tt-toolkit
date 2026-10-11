@@ -26,26 +26,25 @@ export function runApisSmoke(): void {
         choice: { providerId: P.id, model: 'm-strong', temperature: 1.3 },
         persona: { providerId: P.id, model: 'm-strong' },
         summary_small: emptyTaskProfile(),
-        summary_big: { providerId: P.id, model: 'm-strong' },
-        summary_judge: { providerId: 'p-gone', model: 'm-judge-old', reasoningEffort: 'low' },
+        summary_big: { providerId: P.id, model: 'm-strong', reasoningEffort: 'low' },
     });
 
     setRouteForAllTasks(P.id, 'm-cheap');
     const afterBatch = readTaskProfiles();
     check(
-        '批量写通道五行齐换',
+        '批量写通道四行齐换',
         TASK_IDS.every(id => afterBatch[id].providerId === P.id && afterBatch[id].model === 'm-cheap'),
         TASK_IDS.map(id => `${id}=${afterBatch[id].providerId}/${afterBatch[id].model}`).join('，'),
     );
 
     check(
         '调参档保留',
-        afterBatch.choice.temperature === 1.3 && afterBatch.summary_judge.reasoningEffort === 'low',
-        `choice.temperature=${afterBatch.choice.temperature}，summary_judge.reasoningEffort=${afterBatch.summary_judge.reasoningEffort}`,
+        afterBatch.choice.temperature === 1.3 && afterBatch.summary_big.reasoningEffort === 'low',
+        `choice.temperature=${afterBatch.choice.temperature}，summary_big.reasoningEffort=${afterBatch.summary_big.reasoningEffort}`,
     );
 
     const route = resolveTaskRoute('summary_small');
-    const judgeRoute = resolveTaskRoute('summary_judge');
+    const bigRoute = resolveTaskRoute('summary_big');
     check(
         '出站路由跟随批量行',
         route !== null
@@ -53,9 +52,9 @@ export function runApisSmoke(): void {
             && route.key === 'sk-apis-smoke'
             && route.model === 'm-cheap'
             && route.temperature === TASK_PARAMS.summary_small.defaultTemperature
-            && judgeRoute !== null
-            && judgeRoute.reasoningEffort === 'low',
-        `summary_small=${route ? `${route.model}@${route.url}，t=${route.temperature}` : 'null'}；summary_judge.effort=${judgeRoute?.reasoningEffort ?? 'null'}`,
+            && bigRoute !== null
+            && bigRoute.reasoningEffort === 'low',
+        `summary_small=${route ? `${route.model}@${route.url}，t=${route.temperature}` : 'null'}；summary_big.effort=${bigRoute?.reasoningEffort ?? 'null'}`,
     );
 
     const store = useApisStore();
@@ -81,5 +80,5 @@ export function runApisSmoke(): void {
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行五断言（五行齐换/调参档保留/出站跟随/写穿 revision/删站收尾）');
+    console.info('[apis-smoke] OK：批量设置行五断言（四行齐换/调参档保留/出站跟随/写穿 revision/删站收尾）');
 }

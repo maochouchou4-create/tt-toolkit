@@ -30,7 +30,7 @@ export const useApisStore = defineStore('tt-apis', {
             void this.revision;
             return readApiDomain();
         },
-        /** 任务档案五行（任务模型卡读写源）。 */
+        /** 任务档案各任务行（任务模型卡读写源）。 */
         taskProfiles(): TaskProfilesDomain {
             void this.revision;
             return readTaskProfiles();
@@ -59,7 +59,7 @@ export const useApisStore = defineStore('tt-apis', {
             });
             this.revision += 1;
         },
-        /** 批量设置行的写通道（五行同换服务商＋模型；调参档不动）。 */
+        /** 批量设置行的写通道（各行同换服务商＋模型；调参档不动）。 */
         applyRouteToAllTasks(providerId: string, model: string) {
             setRouteForAllTasks(providerId, model);
             this.revision += 1;

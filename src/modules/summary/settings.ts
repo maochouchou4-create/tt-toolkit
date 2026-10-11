@@ -28,12 +28,6 @@ export interface SummarySettings {
     keepRounds: number;
     /** 大总结攒批数（默认 3，钳制 2-10；未折叠小总结满 N 条触发） */
     bigEvery: number;
-    /** 触发模式：fixed＝攒满即总结（现行）；adaptive＝区间内问模型＋上限强制（默认 fixed） */
-    triggerMode: 'fixed' | 'adaptive';
-    /** adaptive 强制线：距上次总结超过该轮数不再询问直接总结（默认 8，钳制 intervalRounds+2 .. 40） */
-    maxIntervalRounds: number;
-    /** adaptive 询问间隔：模型答「否」后至少隔该轮数再问（默认 1，钳制 1-10） */
-    judgeEveryRounds: number;
 }
 
 /** 单条小总结（聊天域 smallSummaries 元素）。 */
@@ -57,9 +51,6 @@ export const DEFAULT_SUMMARY_SETTINGS: SummarySettings = {
     intervalRounds: 3,
     keepRounds: 3,
     bigEvery: 3,
-    triggerMode: 'fixed',
-    maxIntervalRounds: 8,
-    judgeEveryRounds: 1,
 };
 
 /** 整数钳制：非有限数回退缺省；越界值钳回合法域（旧存档值不可信）。 */
@@ -85,11 +76,6 @@ export function normalizeSummarySettings(raw: unknown): SummarySettings {
         intervalRounds: interval,
         keepRounds: clampInt(record.keepRounds, 1, 20, DEFAULT_SUMMARY_SETTINGS.keepRounds),
         bigEvery: clampInt(record.bigEvery, 2, 10, DEFAULT_SUMMARY_SETTINGS.bigEvery),
-        triggerMode: record.triggerMode === 'adaptive' ? 'adaptive' : 'fixed',
-        // 强制线不得落到最少间隔之内（否则 adaptive 永远跳不过问询直接强制）：
-        // 下界随归一后的 interval 抬动，非数回退默认 8 时同样被该下界接住
-        maxIntervalRounds: clampInt(record.maxIntervalRounds, interval + 2, 40, DEFAULT_SUMMARY_SETTINGS.maxIntervalRounds),
-        judgeEveryRounds: clampInt(record.judgeEveryRounds, 1, 10, DEFAULT_SUMMARY_SETTINGS.judgeEveryRounds),
     };
 }
 

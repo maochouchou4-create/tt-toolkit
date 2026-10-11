@@ -9,7 +9,6 @@
  *   JSON 转义面）。
  * - summary 0.7：信息压缩保真优先于多样性（choice 1.0 是枚举多样性场景，
  *   两值不共用）；思考高档（全任务同档的用户拍板口径）。
- * - summary_judge 0.2：二分类判断推荐低温减随机；json_object 结构化判定。
  * - stream true：假流式端点硬需求（GG 非流式挂死），正常端点开了无害。
  * - max_tokens 不发：服务端默认输出上限，思维链与正文共享显式上限会掐断
  *   正文（实测 deepseek-flash 2048 预算被思维链耗尽）。
@@ -29,7 +28,6 @@ export const TASK_PARAMS: Record<TaskId, {
     persona:       { defaultTemperature: 1.0, stream: true, outputContract: 'prompt_only', defaultReasoningEffort: 'high' },
     summary_small: { defaultTemperature: 0.7, stream: true, outputContract: 'prompt_only', defaultReasoningEffort: 'high' },
     summary_big:   { defaultTemperature: 0.7, stream: true, outputContract: 'prompt_only', defaultReasoningEffort: 'high' },
-    summary_judge: { defaultTemperature: 0.2, stream: true, outputContract: 'json_object', defaultReasoningEffort: 'high' },
 };
 
 /** persona 超时（逃生阀非性能旋钮）：推理模型长思维链分钟级常见，宁长勿掐（生成中有取消通道）。 */

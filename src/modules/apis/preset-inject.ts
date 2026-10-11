@@ -6,16 +6,12 @@
  * 预设的采样参数不生效——温度/思考强度在任务档案（API 页任务模型卡）
  * 配置，此处只注文本。
  *
- * 破限前缀服务创作类生成；总结判断是元任务，注入既浪费 token 又污染
- * 判断基准——summary_judge 豁免（原序列透传，不注前缀）。
- *
  * Fail-soft：预设被改名/删除/宿主通道缺席 → 空序列＋宿主日志 warn，
  * 生成照常（无注入）；悬空选中由 API 页「生成注入」卡显示提醒。
  */
 
 import { readPresetInjectMessages } from '@/host';
 import { createTtlog } from '@/host/ttlog';
-import type { RunTask } from '@/modules/runlog/types';
 import type { GenerateMessage } from './client';
 import { readJailbreakPreset } from './storage';
 
@@ -45,8 +41,7 @@ export function resolveJailbreakMessages(): GenerateMessage[] {
  * requestText、组装 dump 三面从同一实现派生，禁再有第二份拼装。
  * 空前缀原样透传（不复制数组）。
  */
-export function composeOutbound(messages: GenerateMessage[], task: RunTask): GenerateMessage[] {
-    if (task === 'summary_judge') return messages;
+export function composeOutbound(messages: GenerateMessage[]): GenerateMessage[] {
     const jb = resolveJailbreakMessages();
     return jb.length > 0 ? [...jb, ...messages] : messages;
 }

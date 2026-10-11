@@ -15,7 +15,7 @@ import { callGenerateEndpoint, isBlankResponseContent, type GenerateRequestConfi
 import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { assembleMessages, usePromptsStore } from '@/prompts';
-import { planAutoPhase, planManualSmallSummary, shouldRunBigSummary } from './arithmetic';
+import { autoTriggerDue, planManualSmallSummary, shouldRunBigSummary } from './arithmetic';
 import { readSummaryChatState, readSummarySettings, writeSummaryChatState, clearSummaryChatState } from './settings';
 import { clearSummarySlot, resyncSummarySlot } from './slot';
 import { hideFloors, rawFloorIndices, restoreAllFloors } from './state';
@@ -115,12 +115,11 @@ export async function runSmallSummary(options: { auto: boolean }): Promise<Summa
         const settings = readSummarySettings();
         if (options.auto && !settings.autoEnabled) return { kind: 'skipped', reason: '自动总结未开启' };
         const rawIdx = rawFloorIndices();
-        // 批界换算手动/自动共用（aged ≥ 2 即成批）；自动路径额外过相位门
-        // （与触发守卫同源；lastAskedAged 是 auto.ts 的询问节奏会话态，与
-        // 「能否总结」无关——传 null 只用 wait/非 wait 语义：judge/force
-        // 相位都代表算术已达标）。手动路径无间隔门槛（现行语义不变）。
+        // 批界换算手动/自动共用（aged ≥ 2 即成批）；自动路径额外过算术门
+        // （与触发守卫同源 autoTriggerDue——守卫后楼层又变化的窄窗内这里
+        // 再拦一次）。手动路径无间隔门槛（现行语义不变）。
         const plan = planManualSmallSummary(rawIdx.length, settings.keepRounds);
-        if (options.auto && planAutoPhase(rawIdx.length, settings, null).phase === 'wait') {
+        if (options.auto && !autoTriggerDue(rawIdx.length, settings.intervalRounds, settings.keepRounds)) {
             return { kind: 'skipped', reason: `算术不达标（aged ${plan.eatCount} 楼，间隔 ${settings.intervalRounds} 轮）` };
         }
         if (plan.batchSize < 2) {

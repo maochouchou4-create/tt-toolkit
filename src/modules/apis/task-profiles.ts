@@ -32,7 +32,7 @@ export interface TaskProfile {
     reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
 }
 
-/** 域形状：五行齐全（normalize 补缺行）。 */
+/** 域形状：全任务行齐全（normalize 补缺行）。 */
 export type TaskProfilesDomain = Record<TaskId, TaskProfile>;
 
 /** 未配置行的统一形状（迁移初始化与删除联动共用同一「回未配置态」语义）。 */
@@ -62,7 +62,7 @@ function normalizeProfile(value: unknown): TaskProfile {
     return profile;
 }
 
-/** 任务档案归一（纯函数：五行齐全，坏值钳制，未知键丢弃）。 */
+/** 任务档案归一（纯函数：全任务行齐全，坏值钳制，未知键丢弃）。 */
 export function normalizeTaskProfiles(value: unknown): TaskProfilesDomain {
     const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
     const domain = {} as TaskProfilesDomain;
@@ -126,7 +126,7 @@ export function resetTaskProfilesForProvider(providerId: string): void {
 }
 
 /**
- * 批量设置行的存储写口：一次性把五行档案指到同一服务商与模型。
+ * 批量设置行的存储写口：一次性把全部任务档案指到同一服务商与模型。
  * 值照写（含空串），非空 gate 由调用侧把关；调参档（温度/思考）不在
  * 写面上——缺席即默认档是档案语义的一部分，批量换路由不应改动它。
  */

@@ -22,7 +22,7 @@
  * 端点时重分配新 id 并记录 idRemaps。
  *
  * 通道二（migrateTaskProfiles，v1.9 任务档案化）：端点去模型化（url+key=
- * 服务商，model 收编进任务档案）＋五行档案初始化＋删除全局活动键。
+ * 服务商，model 收编进任务档案）＋任务档案初始化＋删除全局活动键。
  * 读侧走原始域（绕过 normalize——读侧会把 model 丢弃，而 model 正是
  * 本通道要收编的值），写侧同样原始域回写（通道一在同一次启动先行
  * 收编时落表的 model 字段要活到本通道消费）。
@@ -58,12 +58,12 @@ export interface ApiMigrationReport {
     activeEndpointPromoted: boolean;
 }
 
-/** 任务档案迁移报告（smoke 断言五行初始化与 model 收编零丢失用）。 */
+/** 任务档案迁移报告（smoke 断言任务档案初始化与 model 收编零丢失用）。 */
 export interface TaskProfileMigrationReport {
     skipped: boolean;
     /** model 非空字段被收编后删除的端点条数（服务商化）。 */
     providerized: number;
-    /** 五行档案初始化来源：旧活动端点命中／未选或悬空＝全空／档案已在场无需初始化。 */
+    /** 任务档案初始化来源：旧活动端点命中／未选或悬空＝全空／档案已在场无需初始化。 */
     initializedFrom: 'activeEndpoint' | 'empty' | 'absent';
 }
 
@@ -219,7 +219,7 @@ export function migrateApiDomain(): ApiMigrationReport {
     /**
      * 把一条旧端点并入表：去重命中＝记映射并入；id 撞车＝重分配。
      * model 字段随旧档携带（收编通道写原始域——写侧 normalize 会把它
-     * 丢弃，而任务档案迁移要在同一次启动消费它做五行初始化）。
+     * 丢弃，而任务档案迁移要在同一次启动消费它做任务档案初始化）。
      */
     const ingest = (entry: { id: string; name: string; url: string; key: string; model: string }, fromPersona: boolean): string => {
         const key = endpointKey(entry.url, entry.model);
@@ -304,7 +304,7 @@ export function migrateApiDomain(): ApiMigrationReport {
  * 字段，或任务档案键缺席（且 apis 域非空——空表新装无事可做）。
  *
  * 行为保真：迁移前后「旧全局活动端点解析」与「resolveTaskRoute()
- * 每任务」的 {url,key,model} 三元组逐一相等——旧活动端点的 model 进五行
+ * 每任务」的 {url,key,model} 三元组逐一相等——旧活动端点的 model 进任务档案
  * 档案；温度/思考强度两字段一律缺席落档（＝走各任务默认值，即现行为
  * 值——显式落档反而在改默认值时留死值）。
  */
@@ -345,7 +345,7 @@ export function migrateTaskProfiles(): TaskProfileMigrationReport {
         } satisfies ApiProvider];
     });
 
-    // 2) 任务档案初始化（五行同源：旧活动端点命中＝{该条 id, 该条 model}；
+    // 2) 任务档案初始化（各行同源：旧活动端点命中＝{该条 id, 该条 model}；
     //    未选/悬空＝未配置态）
     if (!profilesPresent) {
         const activeId = typeof rawDomain.activeEndpointId === 'string' ? rawDomain.activeEndpointId : '';

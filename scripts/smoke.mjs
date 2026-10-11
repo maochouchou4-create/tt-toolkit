@@ -477,18 +477,19 @@ if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('de
 
 // 提示词配置初始化：默认模板落进全局域 storage（choice
 // 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。
-// 存储形态 Record<taskKey, PromptConfig> 六任务键：choice 18 模块红线
+// 存储形态 Record<taskKey, PromptConfig> 五任务键：choice 18 模块红线
 // 不变，persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
 // 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
-// 读侧出局，写回自然清除），summary 三任务键在场（任务指令＋源文本注入；
-// summary_judge 为事件感知判断模板，随 v1.9.1 版本化重建补齐）。
+// 读侧出局，写回自然清除），summary 两任务键在场（任务指令＋源文本注入；
+// 已退休的 summary_judge 任务键不在期望清单——存量配置读侧出局，
+// DEFAULTS_VERSION 重建后写回自然清除）。
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
 const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
-const summaryKeyOk = ['summary_small', 'summary_big', 'summary_judge'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0 && promptDomain[k].modules.some(m => m?.source === 'summary_source'));
-if (promptTaskKeys.length !== 6 || promptChoiceModules !== 18 || !personaKeyOk || !summaryKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 六任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
+const summaryKeyOk = ['summary_small', 'summary_big'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0 && promptDomain[k].modules.some(m => m?.source === 'summary_source'));
+if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk || !summaryKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 五任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,30 +529,20 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // summary 机判：触发算术/状态机/槽组合/守卫链/端到端（[summary-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成＝触发算术 6（fixed 相位回归、adaptive 三相位、askNow 节流、
-// 手动门槛、级联条件、roundsToTrigger 同源）＋槽组合 4（空/只大/只小/
-// 双节逐字）＋状态机 8（raw 含 floor 0/hide 双写＋批量落盘/退出 raw/
-// 翻回 is_system 不当 raw/selfHeal 重隐藏＋落盘/幂等复跑/restoreAllFloors/
-// 一键还原三面）＋normalize 7（下界钳/上界钳/triggerMode/强制线下界随
-// interval 抬动/强制线与 judgeEvery 上界/缺省 3-3-3＋8-1/聊天态坏档剔除）
-// ＋守卫与端到端 21（busy/取消零改动/autoEnabled/算术不达标/端点缺席/
+// 期望构成＝触发算术 4（autoTriggerDue 判据回归、手动门槛、级联条件、
+// roundsToTrigger 同源）＋槽组合 4（空/只大/只小/双节逐字）＋状态机 8
+// （raw 含 floor 0/hide 双写＋批量落盘/退出 raw/翻回 is_system 不当
+// raw/selfHeal 重隐藏＋落盘/幂等复跑/restoreAllFloors/一键还原三面）
+// ＋normalize 4（下界钳/上界钳/缺省回默认＋退役字段丢弃/聊天态坏档剔除）
+// ＋守卫与端到端 22（busy/取消零改动/autoEnabled/算术不达标/端点缺席/
 // 无可总结/无可合并/空白输出 fail、e2e 完整链 7（落地/槽重挂/saveChat
-// 通道/请求形状 0.7＋high/组装 speaker/runlog task/落账后取消不回滚）、
+// 通道/请求形状/组装 speaker/runlog task/落账后取消不回滚）、
 // 级联 5（不满不触发/满触发替换清空/大总结源文本节/槽单节形态/手动同判）、
-// 源文本纯函数 1）＋判断器 7（解析三级/serializeOutbound 豁免/e2e 好 JSON
-// 判 true＋请求形状/e2e user 消息窗口＋speaker＋错误楼过滤/失败面判
-// null）＋事件接线 8（未开自动不触发/分组 chat_id 不当楼层/
-// 算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/错误正文楼层到达时
-// 触发被拦下/批次内错误正文楼不进摘要源文本/达标场景启动后台生成/
-// 完成后互斥归位＋折叠落账＋running 镜像清位）＋adaptive 接线 12（不足
-// 最少间隔不触发/达最少间隔发判断/judge 请求形状＋无破限前缀/答否不总结
-// ＋runlog task/askNow 节流/隔满再问/CHAT_CHANGED 重置节奏/judge 档案缺席
-// 判否不崩/达强制线直接总结/强制落地折叠/折叠后新周期重新询问 null 路径/
-// 新周期首问仍是判断请求）＋多周期承重 3（带锚点强制再落地/同 aged 数值
-// 仍放行询问＝纪元作废承重/作废后询问仍是判断请求）＋judge 落回竞态 4
-// （判断挂起前置/手动镜像前置/落回 true 不抢镜像/手动正常落地）＋状态机
-// foldEpoch 1（折叠/还原各推进、selfHeal 不推进）＝ 81。
-const SUMMARY_PASS_EXPECTED = 82;
+// think 剥离 1、源文本纯函数 1）＋事件接线 8（未开自动不触发/分组
+// chat_id 不当楼层/算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/
+// 错误正文楼层到达时触发被拦下/批次内错误正文楼不进摘要源文本/达标
+// 场景启动后台生成/完成后互斥归位＋折叠落账＋running 镜像清位）＝ 50。
+const SUMMARY_PASS_EXPECTED = 50;
 const summaryPassLines = outputLines.filter(l => l.startsWith('[summary-smoke] PASS'));
 const summaryFailLines = outputLines.filter(l => l.startsWith('[summary-smoke] FAIL'));
 if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {
@@ -659,4 +650,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板六任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 fixed 相位回归＋adaptive 三相位＋askNow 节流/normalize 钳制含触发模式三字段/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状 temperature 0.7＋reasoning_effort high/判断器解析三级＋破限豁免＋失败面判 null＋窗口错误楼过滤）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写五行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

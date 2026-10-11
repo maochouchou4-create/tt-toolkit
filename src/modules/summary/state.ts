@@ -39,19 +39,6 @@ export function hiddenFloorCount(): number {
     return getChatMessages().filter(isSummaryHiddenFloor).length;
 }
 
-/**
- * 折叠纪元：每次折叠/还原落地 +1（selfHeal 不推进——它不改变 raw 集合，
- * 只补盖效果）。aged 空间在折叠时归零、还原时暴涨，任何钉在 aged 数值上
- * 的会话锚点（如判断询问节奏 lastAskedAged）跨过一次落地即数值失准，
- * 须按纪元变化作废重锚。
- */
-let foldEpoch = 0;
-
-/** 当前折叠纪元（锚点作废判定用；单调递增不重置，比较语义而非计数值）。 */
-export function currentFoldEpoch(): number {
-    return foldEpoch;
-}
-
 /** extra 命名空间容器（缺则补建；容器对象为纯数据）。 */
 function ensureExtraNamespace(message: ChatMessage): Record<string, unknown> {
     const extra = (message.extra && typeof message.extra === 'object' ? message.extra : {}) as Record<string, unknown>;
@@ -76,7 +63,6 @@ export function hideFloors(indices: number[]): number {
         hidden++;
     }
     if (hidden > 0) {
-        foldEpoch++;
         saveCurrentChat();
     }
     return hidden;
@@ -97,7 +83,6 @@ export function restoreAllFloors(): number {
         restored++;
     }
     if (restored > 0) {
-        foldEpoch++;
         saveCurrentChat();
     }
     return restored;

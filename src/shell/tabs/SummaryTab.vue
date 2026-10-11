@@ -14,16 +14,10 @@
         <input type="checkbox" :checked="store.settings.autoEnabled" @change="onToggleAuto">
         自动总结
       </label>
-      <div class="tt-summary-hint">自动检查更早楼层：固定轮数＝攒满一轮间隔即折叠总结；事件感知＝区间内让判断模型识别剧情段落节点、到强制线不再询问直接总结，小总结攒够批数自动合并大总结</div>
+      <div class="tt-summary-hint">自动检查更早楼层：攒满小总结间隔即折叠成一批小总结；小总结攒够批数自动合并进大总结</div>
 
       <!-- 参数行（失焦钳制：写通道归一，显示值随 revision 回读归一化结果） -->
       <div class="tt-summary-params">
-        <TTField label="触发模式">
-          <select class="tt-ctrl" :value="store.settings.triggerMode" @change="onModeChange">
-            <option value="fixed">固定轮数</option>
-            <option value="adaptive">事件感知</option>
-          </select>
-        </TTField>
         <TTField label="小总结间隔（轮）">
           <input class="tt-ctrl" type="number" min="1" max="20" :value="store.settings.intervalRounds" @change="onNumberChange('intervalRounds', $event)">
         </TTField>
@@ -33,14 +27,6 @@
         <TTField label="大总结间隔（批）">
           <input class="tt-ctrl" type="number" min="2" max="10" :value="store.settings.bigEvery" @change="onNumberChange('bigEvery', $event)">
         </TTField>
-        <template v-if="store.settings.triggerMode === 'adaptive'">
-          <TTField label="强制线（轮）">
-            <input class="tt-ctrl" type="number" :min="store.settings.intervalRounds + 2" max="40" :value="store.settings.maxIntervalRounds" @change="onNumberChange('maxIntervalRounds', $event)">
-          </TTField>
-          <TTField label="询问间隔（轮）">
-            <input class="tt-ctrl" type="number" min="1" max="10" :value="store.settings.judgeEveryRounds" @change="onNumberChange('judgeEveryRounds', $event)">
-          </TTField>
-        </template>
       </div>
 
       <!-- 状态行 -->
@@ -95,7 +81,7 @@ function onToggleAuto(event: Event): void {
     store.updateSettings({ autoEnabled: (event.target as HTMLInputElement).checked });
 }
 
-function onNumberChange(key: 'intervalRounds' | 'keepRounds' | 'bigEvery' | 'maxIntervalRounds' | 'judgeEveryRounds', event: Event): void {
+function onNumberChange(key: 'intervalRounds' | 'keepRounds' | 'bigEvery', event: Event): void {
     const raw = Number((event.target as HTMLInputElement).value);
     // 非有限或清空输入（Number('')===0）不写 patch：折成 0 会被钳到下界
     // 而非回退默认（0 是合法越界值的语义误导）；不写则显示值随回读保持原值。
@@ -103,13 +89,6 @@ function onNumberChange(key: 'intervalRounds' | 'keepRounds' | 'bigEvery' | 'max
     const patch: Partial<SummarySettings> = {};
     patch[key] = raw;
     store.updateSettings(patch);
-}
-
-function onModeChange(event: Event): void {
-    const mode = (event.target as HTMLSelectElement).value;
-    // 枚举外值不写 patch（显示值随回读保持原值——写通道归一同款纪律）
-    if (mode !== 'fixed' && mode !== 'adaptive') return;
-    store.updateSettings({ triggerMode: mode });
 }
 
 function toggleEditor(): void {

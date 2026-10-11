@@ -8,7 +8,6 @@ export const TASKS = [
     { id: 'persona', label: '人设生成' },
     { id: 'summary_small', label: '小总结' },
     { id: 'summary_big', label: '大总结' },
-    { id: 'summary_judge', label: '总结判断' },
 ] as const;
 
 export type TaskId = (typeof TASKS)[number]['id'];

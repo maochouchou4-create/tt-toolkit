@@ -62,7 +62,7 @@ function wipeApiScenarioDomains(): void {
     }
 }
 
-/** 五行任务档案统一种子（全部指向同一服务商＋模型——迁移保真与 e2e 前置共用）。 */
+/** 全任务档案统一种子（全部指向同一服务商＋模型——迁移保真与 e2e 前置共用）。 */
 function seedTaskProfiles(providerId: string, model: string): void {
     const profiles = {} as TaskProfilesDomain;
     for (const id of TASK_IDS) profiles[id] = { providerId, model };
@@ -218,12 +218,12 @@ function runMigrationChecks(): void {
         && Array.isArray(((rawChoice.pool ?? {}) as Record<string, unknown>).masterPool)
         && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
         `choice=${JSON.stringify(rawChoice)}`);
-    // 任务档案化迁移（v1.9 通道二）：旧活动键 c2 命中条目 → 五行档案收编
+    // 任务档案化迁移（v1.9 通道二）：旧活动键 c2 命中条目 → 任务档案收编
     // {c2, m-choice-2}；apis 条目 model 字段删除；activeEndpointId 键退役
     const ttRaw = extension_settings.ttToolkit as Record<string, unknown>;
     const rawApisAfter = Array.isArray(ttRaw.apis) ? (ttRaw.apis as Array<Record<string, unknown>>) : [];
     const profilesAfter = (ttRaw.taskProfiles ?? {}) as Record<string, { providerId?: unknown; model?: unknown }>;
-    check('任务档案迁移：五行全部初始化为旧活动端点 {c2, m-choice-2}',
+    check('任务档案迁移：全部任务行初始化为旧活动端点 {c2, m-choice-2}',
         !tpReport.skipped && tpReport.initializedFrom === 'activeEndpoint' && tpReport.providerized >= 3
         && TASK_IDS.every(id => profilesAfter[id]?.providerId === 'c2' && profilesAfter[id]?.model === 'm-choice-2'),
         `report=${JSON.stringify(tpReport)} profiles=${JSON.stringify(profilesAfter)}`);
@@ -745,7 +745,7 @@ async function runApiChecks(): Promise<void> {
 
 async function runPersonaE2EChecks(): Promise<void> {
     const store = usePersonaStore();
-    // 服务商表放一个冒烟服务商，五行任务档案全部指向它
+    // 服务商表放一个冒烟服务商，各任务行全部指向它
     writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟服务商', url: 'https://smoke.example.com/v1', key: 'sk-smoke', models: ['smoke-model'] }]);
     seedTaskProfiles('smoke-endpoint', 'smoke-model');
     store.requestText = '生成一个侦探人设';

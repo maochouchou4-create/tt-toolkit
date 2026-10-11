@@ -149,7 +149,7 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: true,
-                requestText: serializeOutbound(pendingMessages, 'choice'),
+                requestText: serializeOutbound(pendingMessages),
                 responseText: DEBUG_MALFORMED_RAW,
             });
         } else {
@@ -208,7 +208,7 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: false,
-                requestText: pendingMessages ? serializeOutbound(pendingMessages, 'choice') : '',
+                requestText: pendingMessages ? serializeOutbound(pendingMessages) : '',
                 responseText: '',
                 error: message,
             });

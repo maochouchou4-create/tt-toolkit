@@ -353,8 +353,8 @@ function serializeMessages(messages: GenerateMessage[]): string {
  * requestText 时用它）。序列化原语 serializeMessages 模块私有——
  * 丢前缀的裸序列化在模块外结构上不可达。
  */
-export function serializeOutbound(messages: GenerateMessage[], task: RunTask): string {
-    return serializeMessages(composeOutbound(messages, task));
+export function serializeOutbound(messages: GenerateMessage[]): string {
+    return serializeMessages(composeOutbound(messages));
 }
 
 /**
@@ -406,7 +406,7 @@ export async function callGenerateEndpoint(
 ): Promise<GenerateResult> {
     const startedAt = performance.now();
     const runlogStore = useRunlogStore();
-    const outbound = composeOutbound(messages, config.task);
+    const outbound = composeOutbound(messages);
     if (outbound.length > messages.length) {
         log.info(`破限注入 (${config.task}): ${outbound.length - messages.length} 条前缀`);
     }

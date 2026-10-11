@@ -14,7 +14,7 @@
 import { defineStore } from 'pinia';
 import { showToast } from '@/host';
 import { resolveTaskRoute } from '@/modules/apis/task-profiles';
-import { roundsToTrigger, agedRoundCount } from './arithmetic';
+import { roundsToTrigger } from './arithmetic';
 import { isSummaryRunning, restoreAllSummaries, runBigSummary, runSmallSummary, type SummaryRunOutcome } from './generator';
 import { readSummaryChatState, readSummarySettings, writeSummaryChatState, writeSummarySettings, type SummarySettings } from './settings';
 import { resyncSummarySlot } from './slot';
@@ -47,18 +47,12 @@ export const useSummaryStore = defineStore('tt-summary', {
             void this.revision;
             return readSummaryChatState().bigSummary;
         },
-        /**
-         * 状态行触发进度（按模式分支，算式与触发守卫同源——UI 不另写算式）：
-         * fixed＝「再聊 x 轮触发小总结」；adaptive＝最少/最多两档＋当前 aged 进度。
-         */
+        /** 状态行触发进度（算式与触发守卫同源——UI 不另写算式）。 */
         triggerStatus(): string {
             void this.revision;
             const s = this.settings;
             const raw = rawFloorIndices().length;
-            if (s.triggerMode === 'fixed') {
-                return `再聊 ${roundsToTrigger(raw, s.intervalRounds, s.keepRounds)} 轮触发小总结`;
-            }
-            return `最少 ${s.intervalRounds} 轮起步，最多 ${s.maxIntervalRounds} 轮强制（已攒 ${agedRoundCount(raw, s.keepRounds)} 轮待总结）`;
+            return `再聊 ${roundsToTrigger(raw, s.intervalRounds, s.keepRounds)} 轮触发小总结`;
         },
         /** 端点行展示（小总结任务路由；模型名优先，缺席回退 url；未配置态单独文案）。 */
         endpointLabel(): string {
