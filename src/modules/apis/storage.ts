@@ -1,37 +1,22 @@
 /**
- * 统一端点表存储域（extension_settings.ttToolkit.apis）。
+ * 统一服务商表存储域（extension_settings.ttToolkit.apis）。
  *
- * choice 与 persona 共用一套 API 端点。域形状＝端点数组
- * Array<ApiEndpoint>。读写纪律照 persona/choice 存储域：getGlobal/
- * setGlobal 单通道、normalize 未知字段丢弃、缺字段补默认、反复读写幂等。
+ * url+key＝服务商接入身份，全任务共用一张表；模型选择权在任务档案
+ * （task-profiles）。域形状＝服务商数组 Array<ApiProvider>。读写纪律照
+ * persona/choice 存储域：getGlobal/setGlobal 单通道、normalize 未知字段
+ * 丢弃（旧档 model 字段自然丢弃）、缺字段补默认、反复读写幂等。
  */
 
 import { getGlobal, setGlobal } from '@/storage/service';
 import { newId } from '@/storage';
-import type { ApiEndpoint } from './types';
+import type { ApiProvider } from './types';
+import { resetTaskProfilesForProvider } from './task-profiles';
 
-/** 统一端点表域键（extension_settings.ttToolkit 下）。 */
+/** 统一服务商表域键（extension_settings.ttToolkit 下）。 */
 export const APIS_DOMAIN_KEY = 'apis';
-
-/** 全局活动端点键（extension_settings.ttToolkit 顶层；类型在 GlobalDomain）。 */
-export const ACTIVE_ENDPOINT_KEY = 'activeEndpointId';
 
 /** 破限预设名键（extension_settings.ttToolkit 顶层；''＝不启用）。 */
 export const JAILBREAK_PRESET_KEY = 'jailbreakPreset';
-
-/**
- * 读全局活动端点 id（''＝未选态：键缺席/非字符串皆归 ''）。
- * choice 与 persona 的端点解析共用此单通道，不再各持任务域选中键。
- */
-export function readActiveEndpointId(): string {
-    const raw = getGlobal<unknown>(ACTIVE_ENDPOINT_KEY);
-    return typeof raw === 'string' ? raw : '';
-}
-
-/** 写全局活动端点 id（API 页「使用」按钮通道；''＝清回未选态）。 */
-export function setActiveEndpointId(id: string): void {
-    setGlobal(ACTIVE_ENDPOINT_KEY, id);
-}
 
 /** 读选中破限预设名（''＝不启用：键缺席/非字符串皆归 ''）。 */
 export function readJailbreakPreset(): string {
@@ -48,85 +33,75 @@ function normalizeString(value: unknown, fallback: string): string {
     return typeof value === 'string' ? value : fallback;
 }
 
-/** 单条端点归一：未知字段丢弃；无 id＝坏档剔除。 */
-function normalizeEndpoint(value: unknown): ApiEndpoint | null {
+/** 单条服务商归一：未知字段丢弃（旧档 model 字段自然退役）；无 id＝坏档剔除。 */
+function normalizeProvider(value: unknown): ApiProvider | null {
     if (!value || typeof value !== 'object') return null;
     const raw = value as Record<string, unknown>;
     const id = typeof raw.id === 'string' ? raw.id : '';
     if (!id) return null;
     return {
         id,
-        name: normalizeString(raw.name, '未命名端点'),
+        name: normalizeString(raw.name, '未命名服务商'),
         url: normalizeString(raw.url, ''),
         key: normalizeString(raw.key, ''),
-        model: normalizeString(raw.model, ''),
+        models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
     };
 }
 
-/** 端点表归一（坏条目剔除；非数组输入归空表）。 */
-export function normalizeApiDomain(value: unknown): ApiEndpoint[] {
+/** 服务商表归一（坏条目剔除；非数组输入归空表）。 */
+export function normalizeApiDomain(value: unknown): ApiProvider[] {
     if (!Array.isArray(value)) return [];
     return value.flatMap(item => {
-        const endpoint = normalizeEndpoint(item);
-        return endpoint ? [endpoint] : [];
+        const provider = normalizeProvider(item);
+        return provider ? [provider] : [];
     });
 }
 
-/** 读统一端点表（读侧归一：坏档条目不进内存）。 */
-export function readApiDomain(): ApiEndpoint[] {
+/** 读统一服务商表（读侧归一：坏档条目不进内存）。 */
+export function readApiDomain(): ApiProvider[] {
     return normalizeApiDomain(getGlobal(APIS_DOMAIN_KEY));
 }
 
-/** 写端点表单通道（写侧再归一：坏值不会经写通道持久化）。 */
-export function writeApiDomain(next: ApiEndpoint[]): void {
+/** 写服务商表单通道（写侧再归一：坏值不会经写通道持久化）。 */
+export function writeApiDomain(next: ApiProvider[]): void {
     setGlobal(APIS_DOMAIN_KEY, normalizeApiDomain(next));
 }
 
-/** 按 id 查端点（命中返回条目；缺席返回 null）。 */
-export function resolveEndpointById(id: string): ApiEndpoint | null {
-    return readApiDomain().find(e => e.id === id) ?? null;
-}
-
-/** 读当前生效端点（全局活动键命中统一端点表；缺席/悬空返回 null＝未选态）。 */
-export function resolveActiveEndpoint(): ApiEndpoint | null {
-    return resolveEndpointById(readActiveEndpointId());
-}
-
-/** 新建端点骨架（id 冲突域内唯一；字段由调用方填）。 */
-export function createEndpoint(name: string): ApiEndpoint {
+/** 新建服务商骨架（id 冲突域内唯一；字段由调用方填）。 */
+export function createEndpoint(name: string): ApiProvider {
     return {
         id: newId('endpoint'),
         name,
         url: '',
         key: '',
-        model: '',
+        models: [],
     };
 }
 
 /** 读-改-写单通道（照 choice/persona 域纪律）。 */
-export function mutateApiDomain(mutate: (endpoints: ApiEndpoint[]) => void): void {
-    const endpoints = readApiDomain();
-    mutate(endpoints);
-    writeApiDomain(endpoints);
+export function mutateApiDomain(mutate: (providers: ApiProvider[]) => void): void {
+    const providers = readApiDomain();
+    mutate(providers);
+    writeApiDomain(providers);
 }
 
-/** 增改单条端点（按 id 整体替换；新增即追加）。 */
-export function upsertEndpoint(endpoint: ApiEndpoint): void {
+/** 增改单条服务商（按 id 整体替换；新增即追加）。 */
+export function upsertEndpoint(endpoint: ApiProvider): void {
     mutateApiDomain(list => {
-        const idx = list.findIndex(e => e.id === endpoint.id);
+        const idx = list.findIndex(p => p.id === endpoint.id);
         if (idx >= 0) list[idx] = endpoint;
         else list.push(endpoint);
     });
 }
 
 /**
- * 删除端点。删除的是当前活动端点时全局选中键同步清空——悬空引用没有
- * 「上次选择」可回退，直接回「未选择」态（两任务的生成入口各自 fail fast）。
+ * 删除服务商。被任务档案引用时引用行同步重置回未配置态——悬空引用
+ * 没有「上次选择」可回退（各任务生成入口 fail fast 指路任务模型卡）。
  */
 export function deleteEndpoint(id: string): void {
     mutateApiDomain(list => {
-        const idx = list.findIndex(e => e.id === id);
+        const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list.splice(idx, 1);
     });
-    if (readActiveEndpointId() === id) setActiveEndpointId('');
+    resetTaskProfilesForProvider(id);
 }

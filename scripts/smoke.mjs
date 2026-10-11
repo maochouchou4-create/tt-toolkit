@@ -149,7 +149,7 @@ globalThis.STBaiBaiBook = {
 // response_format json_object）回固定 4 条选项 JSON；summary 形状
 // （temperature 0.7、无契约键）回定稿测试摘要文本——两任务不能共用
 // 固定回包（summary 请求吃到选项 JSON 会被空白守门之外的形状误判吞掉）。
-// 流式 SSE 帧形态（stream 恒开——TASK_DEFAULTS），content 走 delta 帧，
+// 流式 SSE 帧形态（stream 恒开——TASK_PARAMS），content 走 delta 帧，
 // 与 src/modules/apis/client.ts 的 callGenerateEndpoint 流式消费契约对齐。
 // 每次调用的 {url, body} 记入 __TT_SMOKE_STUBS__.generateCalls 供
 // summary 冒烟断言请求形状（choice/persona 冒烟各自装私有桩，不读它）。
@@ -188,7 +188,7 @@ function sseResponse(content) {
 globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(String(init?.body ?? '{}'));
     globalThis.__TT_SMOKE_STUBS__.generateCalls.push({ url: String(_url), body });
-    // 0.7 与 TASK_DEFAULTS.summaryTemperature 同值锚定＋e2e 请求形状断言互锁：
+    // 0.7 与 TASK_PARAMS.summary_small.defaultTemperature 同值锚定＋e2e 请求形状断言互锁：
     // 参数日后改值时 e2e 断言（temperature===0.7）与本分发同步翻红，不是静默漂移。
     const isSummary = body.temperature === 0.7 && !('response_format' in body);
     return sseResponse(isSummary ? SUMMARY_REPLY_TEXT : FIXED_OPTIONS_JSON);
@@ -430,7 +430,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ 130。
 // 不从「分组小计」加总推：分组基数随每批增长，抄旧小计必算错（下次 bump
 // 只改本行等式右侧总数与该批 +N）。
-const CHOICE_PASS_EXPECTED = 130;
+// ＝ v1.9.0 任务模型卡新增 8（任务路由 fail fast 三态 3＋写档带出 1＋
+// 缺席默认档 1＋normalize 钳制/剔除 3）
+const CHOICE_PASS_EXPECTED = 138;
 const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -510,7 +512,9 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // ＋ 宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误正文/拦下空与散文/拦下散言前导换皮形态/
 // 拦下与切块口径分歧的 1 空格散言行；传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/
 // 正常产出以标签开头不误杀；端到端 1：curator 段遇信封即中断、第二段不发出）
-const PERSONA_PASS_EXPECTED = 79;
+// 本批净 +1（v1.9.0：任务档案迁移 +2——五行初始化为旧活动端点＋model 收编删除/
+// 活动键退役 1、服务商删除联动重置档案行 1；测连断言随 testConnection 退役 -1）
+const PERSONA_PASS_EXPECTED = 80;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

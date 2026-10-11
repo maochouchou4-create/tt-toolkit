@@ -8,7 +8,9 @@
  * 自清理：stub 单例跨段共享（boot2 重跑同段），不留 fixture 残留。
  */
 import { event_types, extension_settings, type ChatMessage } from '@/host';
-import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
+import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
+import { mutateTaskProfiles, readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { TASK_IDS } from '@/tasks';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { handleSummaryMessageReceived, installSummaryAuto } from './auto';
 import { useSummaryStore } from './store';
@@ -38,6 +40,13 @@ interface SmokeStubs {
 
 function smokeStubs(): SmokeStubs {
     return (globalThis as unknown as { __TT_SMOKE_STUBS__: SmokeStubs }).__TT_SMOKE_STUBS__;
+}
+
+/** 五行任务档案统一种子（全部指向同一服务商＋模型）。 */
+function seedTaskProfiles(providerId: string, model: string): void {
+    const profiles = {} as TaskProfilesDomain;
+    for (const id of TASK_IDS) profiles[id] = { providerId, model };
+    writeTaskProfiles(profiles);
 }
 
 interface FakeMessage extends Record<string, unknown> {
@@ -204,15 +213,15 @@ const SUMMARY_TEXT = '王玉与林霜在旧货铺重逢，谈起初见；两人�
 async function runGenerationChecks(): Promise<void> {
     const stubs = smokeStubs();
     const savedEndpoints = readApiDomain();
-    const savedActive = readActiveEndpointId();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
     const ttDomain = extension_settings.ttToolkit as Record<string, unknown>;
     const savedSettings = ttDomain.summary;
-    const endpoint = createEndpoint('summary冒烟端点');
+    const endpoint = createEndpoint('summary冒烟服务商');
     endpoint.url = 'https://summary-smoke.example.com/v1';
     endpoint.key = 'sk-summary';
-    endpoint.model = 'summary-model';
+    endpoint.models = ['summary-model'];
     writeApiDomain([endpoint]);
-    setActiveEndpointId(endpoint.id);
+    seedTaskProfiles(endpoint.id, 'summary-model');
     // speaker 名直配 stubContext（宿主同源字段 name1/name2；finally 还原防跨段污染）
     const savedName1 = stubs.getContext().name1;
     const savedName2 = stubs.getContext().name2;
@@ -253,12 +262,17 @@ async function runGenerationChecks(): Promise<void> {
         check('守卫：自动触发算术不达标跳过（aged 4 楼 < 间隔 3 轮）',
             notEligible.kind === 'skipped' && notEligible.reason.includes('算术不达标'),
             `reason=${notEligible.kind === 'skipped' ? notEligible.reason : notEligible.kind}`);
-        // 端点缺席
-        setActiveEndpointId('no-such-endpoint');
+        // 任务模型未配置（小总结行悬空）
+        mutateTaskProfiles(profiles => {
+            profiles.summary_small = { providerId: 'no-such-endpoint', model: 'x' };
+        });
         const noEndpoint = await runSmallSummary({ auto: false });
-        check('守卫：端点缺席跳过（指引文案与 choice 同口径）',
-            noEndpoint.kind === 'skipped' && noEndpoint.reason.includes('未选择生成端点'));
-        setActiveEndpointId(endpoint.id);
+        check('守卫：任务模型未配置跳过（指引文案指向任务模型卡）',
+            noEndpoint.kind === 'skipped' && noEndpoint.reason.includes('未配置总结模型'),
+            `reason=${noEndpoint.kind === 'skipped' ? noEndpoint.reason : noEndpoint.kind}`);
+        mutateTaskProfiles(profiles => {
+            profiles.summary_small = { providerId: endpoint.id, model: 'summary-model' };
+        });
         // 手动无可总结：aged 0（全部在保留窗口内）
         seedChat(4);
         const nothing = await runSmallSummary({ auto: false });
@@ -329,8 +343,8 @@ async function runGenerationChecks(): Promise<void> {
             && joined.includes('用户第0楼：走到旧货铺门口。'),
             `messages=${messages.length}`);
         // runlog ring 上限 20（早期记录被裁剪）——长度不可比，判据锁末条记录的归属与成败
-        check('e2e：runlog 记录 task=summary（RunTask 扩展生效）',
-            lastRecord?.task === 'summary' && lastRecord?.ok === true, `task=${String(lastRecord?.task)} ok=${String(lastRecord?.ok)}`);
+        check('e2e：runlog 记录 task=summary_small（RunTask SSOT 扩展生效）',
+            lastRecord?.task === 'summary_small' && lastRecord?.ok === true, `task=${String(lastRecord?.task)} ok=${String(lastRecord?.ok)}`);
         // 成功落账后的取消信号不回滚（hide 启动后路径不可中断的落账侧证明）
         cancelSummaryGeneration();
         check('e2e：落账后取消信号不回滚已折叠楼层与总结态',
@@ -371,7 +385,7 @@ async function runGenerationChecks(): Promise<void> {
     } finally {
         globalThis.fetch = baseFetch;
         writeApiDomain(savedEndpoints);
-        setActiveEndpointId(savedActive);
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
         if (savedSettings === undefined) delete ttDomain.summary;
         else ttDomain.summary = savedSettings;
         // chat 域 summary 键冒烟前不存在——delete 还原缺席态（写空值会把
@@ -393,7 +407,7 @@ async function runAutoWiringChecks(): Promise<void> {
     const ttDomain = extension_settings.ttToolkit as Record<string, unknown>;
     const savedSettings = ttDomain.summary;
     const savedEndpoints = readApiDomain();
-    const savedActive = readActiveEndpointId();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
     try {
         // 守卫分支（事件入口侧与 generator 守卫同判；基线设置缺席＝autoEnabled false）
         seedChat(10);
@@ -412,14 +426,14 @@ async function runAutoWiringChecks(): Promise<void> {
         await stubs.eventSource.emit(event_types.CHAT_CHANGED);
         check('接线：CHAT_CHANGED 自愈重隐藏＋按聊天态重挂槽',
             stubs.getContext().chat[0]?.is_system === true && (slotState()?.value ?? '').includes('【小总结·近期】'));
-        // 接线路径用的端点在本段起点就位：守卫链里端点检查排在错误正文检查
-        // 之后，若端点缺失，下面的断言会因端点被拦而恒真（测不到错误正文判据）
-        const endpoint = createEndpoint('接线冒烟端点');
+        // 接线路径用的任务路由在本段起点就位：守卫链里任务模型检查排在错误正文检查
+        // 之后，若路由缺席，下面的断言会因路由被拦而恒真（测不到错误正文判据）
+        const endpoint = createEndpoint('接线冒烟服务商');
         endpoint.url = 'https://wiring-smoke.example.com/v1';
         endpoint.key = 'sk-wiring';
-        endpoint.model = 'wiring-model';
+        endpoint.models = ['wiring-model'];
         writeApiDomain([endpoint]);
-        setActiveEndpointId(endpoint.id);
+        seedTaskProfiles(endpoint.id, 'wiring-model');
 
         // 错误楼层跳过（宿主把生成失败伪装成正常回复落地，判据见 host/api-error.ts）：
         // 入口守卫拦「错误楼到达时触发」，源文本过滤拦「存量错误楼被后来某次批扫进来」。
@@ -457,7 +471,7 @@ async function runAutoWiringChecks(): Promise<void> {
             settled && hiddenFloorCount() === 8 && readSummaryChatState().smallSummaries.length === 1 && useSummaryStore().runningKind === null);
     } finally {
         writeApiDomain(savedEndpoints);
-        setActiveEndpointId(savedActive);
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
         if (savedSettings === undefined) delete ttDomain.summary;
         else ttDomain.summary = savedSettings;
         stubs.getContext().chat = [];

@@ -26,7 +26,7 @@ import {
     upsertPersona,
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
-import { readActiveEndpointId, resolveEndpointById } from '@/modules/apis/storage';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
 import { TEXT } from './strings';
 import { readPersonaDomain, writePersonaDomain } from './storage';
@@ -44,14 +44,14 @@ interface LastRunDescriptor {
 }
 
 /**
- * 生成调用面配置解析：全局活动键 → 统一端点表实体。端点缺失（未选择或
- * 已被删除）返回 null，由 generate/reroll 统一 fail fast。任务参数固化
- * 于 TASK_DEFAULTS，调用面只剩端点。
+ * 生成调用面配置解析：任务路由单点解析（人设生成行档案 → 服务商表）。
+ * 未配置/悬空返回 null，由 generate/reroll 统一 fail fast；温度/思考强度
+ * 随路由带出（档案缺席＝任务默认档），调用面只剩路由。
  */
 function buildApiConfig(): GenerationApiConfig | null {
-    const endpoint = resolveEndpointById(readActiveEndpointId());
-    if (!endpoint) return null;
-    return { endpoint };
+    const route = resolveTaskRoute('persona');
+    if (!route) return null;
+    return { route };
 }
 
 /** store 实例类型（模块级私有装配函数专用——不扩 store 公开面）。 */

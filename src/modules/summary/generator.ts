@@ -12,10 +12,9 @@
  */
 import { getChatMessages, getTavernContext, isHostErrorText, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, type GenerateRequestConfig } from '@/modules/apis/client';
-import { resolveActiveEndpoint } from '@/modules/apis/storage';
-import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { assembleMessages, usePromptsStore } from '@/prompts';
-import type { TaskKey } from '@/prompts';
 import { planAutoSmallSummary, planManualSmallSummary, shouldRunBigSummary } from './arithmetic';
 import { readSummaryChatState, readSummarySettings, writeSummaryChatState, clearSummaryChatState } from './settings';
 import { clearSummarySlot, resyncSummarySlot } from './slot';
@@ -74,32 +73,33 @@ export function buildBigSourceText(state: { bigSummary: string; smallSummaries: 
 }
 
 /**
- * 单段总结生成（组装→请求）。任务参数固化在 TASK_DEFAULTS（temperature
- * 0.7 保真优先、reasoningEffort high 全任务同档；outputContract prompt_only
- * ——纯文本压缩无 JSON 契约）。端点缺席抛错（守卫链已先行归类 skipped，
- * 这里是 Fail Fast 兜底）。
+ * 单段总结生成（组装→请求）。温度/思考强度随任务档案带出（缺席＝
+ * TASK_PARAMS 默认档：0.7 保真优先、思考高；outputContract prompt_only
+ * ——纯文本压缩无 JSON 契约）。任务路由缺席抛错（守卫链已先行归类
+ * skipped，这里是 Fail Fast 兜底）。
  */
-async function generateSummaryText(task: TaskKey, sourceText: string, signal: AbortSignal): Promise<string> {
-    const endpoint = resolveActiveEndpoint();
-    if (!endpoint) throw new Error('未选择生成端点');
+async function generateSummaryText(task: 'summary_small' | 'summary_big', sourceText: string, signal: AbortSignal): Promise<string> {
+    // TaskKey 与 TaskId 同名同粒度（summary_small/summary_big；其余键不进本函数）
+    const route = resolveTaskRoute(task);
+    if (!route) throw new Error(`未配置总结模型（${task}）`);
     const config = usePromptsStore().configFor(task);
     if (!config) throw new Error(`提示词配置缺席（${task}——storage 未初始化？）`);
     const assembled = assembleMessages(config.modules, { sourceText });
     const requestConfig: GenerateRequestConfig = {
-        task: 'summary',
-        baseUrl: endpoint.url,
-        apiKey: endpoint.key,
-        model: endpoint.model,
-        temperature: TASK_DEFAULTS.summaryTemperature,
-        stream: TASK_DEFAULTS.stream,
-        outputContract: 'prompt_only',
-        reasoningEffort: TASK_DEFAULTS.summaryReasoningEffort,
+        task,
+        baseUrl: route.url,
+        apiKey: route.key,
+        model: route.model,
+        temperature: route.temperature,
+        stream: TASK_PARAMS[task].stream,
+        outputContract: TASK_PARAMS[task].outputContract,
+        reasoningEffort: route.reasoningEffort,
     };
     const result = await callGenerateEndpoint(assembled.messages, requestConfig, signal);
     return result.content;
 }
 
-const NO_ENDPOINT_REASON = '未选择生成端点——到「API」页点端点条目上的「使用」按钮';
+const NO_ENDPOINT_REASON = '未配置总结模型——到「API」页「任务模型」卡给「小总结/大总结」选择服务商与模型';
 const NOTHING_TO_SUMMARIZE_REASON = '没有可总结的楼层（更早的楼层都在原文保留窗口内）';
 const NOTHING_TO_MERGE_REASON = '没有未折叠的小总结，无需大总结';
 
@@ -121,7 +121,7 @@ export async function runSmallSummary(options: { auto: boolean }): Promise<Summa
         if (plan.batchSize < 2) {
             return { kind: 'skipped', reason: options.auto ? `算术不达标（aged ${plan.eatCount} 楼，间隔 ${settings.intervalRounds} 轮）` : NOTHING_TO_SUMMARIZE_REASON };
         }
-        if (!resolveActiveEndpoint()) return { kind: 'skipped', reason: NO_ENDPOINT_REASON };
+        if (!resolveTaskRoute('summary_small')) return { kind: 'skipped', reason: NO_ENDPOINT_REASON };
         const chat = getChatMessages();
         const targetIdx = rawIdx.slice(0, plan.batchSize).filter(i => typeof chat[i]?.mes === 'string');
         if (targetIdx.length < 2) return { kind: 'skipped', reason: NOTHING_TO_SUMMARIZE_REASON };
@@ -187,7 +187,7 @@ export async function runBigSummary(): Promise<SummaryRunOutcome> {
     const controller = new AbortController();
     activeAbort = controller;
     try {
-        if (!resolveActiveEndpoint()) return { kind: 'skipped', reason: NO_ENDPOINT_REASON };
+        if (!resolveTaskRoute('summary_big')) return { kind: 'skipped', reason: NO_ENDPOINT_REASON };
         return await runBigSummaryLocked(controller.signal);
     } catch (e) {
         if (controller.signal.aborted) return { kind: 'cancelled' };

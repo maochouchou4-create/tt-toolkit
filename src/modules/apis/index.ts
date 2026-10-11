@@ -7,18 +7,21 @@
  */
 
 import { migratePersonaDomain } from '@/modules/persona/storage';
-import { migrateApiDomain, type ApiMigrationReport } from './migration';
+import { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';
 import type { PersonaMigrationReport } from '@/modules/persona/storage';
 
 export interface ApisInitReport {
     persona: PersonaMigrationReport;
     apis: ApiMigrationReport;
+    taskProfiles: TaskProfileMigrationReport;
 }
 
 export function initApis(): ApisInitReport {
     const persona = migratePersonaDomain();
     const apis = migrateApiDomain();
-    return { persona, apis };
+    // 任务档案迁移后置：收编通道落表的 model 字段（同启动携带）由它收编
+    const taskProfiles = migrateTaskProfiles();
+    return { persona, apis, taskProfiles };
 }
 
-export { migrateApiDomain, type ApiMigrationReport } from './migration';
+export { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';

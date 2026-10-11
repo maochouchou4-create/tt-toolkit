@@ -2,8 +2,8 @@
   <!--
     「人设」tab（PersonaWeaver 概念的壳内简化形态）。
     单 tab 纵向卡片流：人设编织单卡；生成参考收 <details>
-    折叠块。任务参数（流式/思考强度/超时）已固化为 TASK_DEFAULTS，
-    端点选择唯一入口＝「API」页「使用」按钮（未选端点由 generate 的
+    折叠块。流式/超时按任务固化（TASK_PARAMS），模型与温度/思考强度的
+    唯一入口＝「API」页「任务模型」卡（未配置由 generate 的
     fail-fast toast 引导）。生成按钮双态：进行中点击＝取消（choice
     选项条同款长请求逃生姿势）。
     视觉从简：卡片化＋SmartTheme 变量（复用壳的 .tt-card 体系），类名前缀 tt-persona-。

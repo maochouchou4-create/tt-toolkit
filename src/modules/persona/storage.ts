@@ -5,9 +5,9 @@
  * getGlobal/setGlobal 单通道）。域形状 normalize 纪律照 choice/pool：
  * 未知字段丢弃（显式保真注释），缺字段补默认，反复读写幂等。
  *
- * 端点身份（url/key/model）移入统一端点表（modules/apis），端点选择
- * 收归全局活动键（v1.4.0 起）；任务参数（流式/思考强度/超时）已固化为
- * TASK_DEFAULTS（用户面零旋钮）——本域只剩 userContext（编辑现场）。
+ * 端点身份（url/key）移入统一服务商表（modules/apis），模型选择权在
+ * 任务档案（apis/task-profiles）；流式/超时按任务固化于 TASK_PARAMS
+ * ——本域只剩 userContext（编辑现场）。
  * 旧档的 localConfig 键（含 v1.3 endpointId、v1.4 过渡端点字段）与
  * uiState 键（任务级预设选择）由 normalize 的未知字段丢弃面退休；端点
  * 旧字段的收编原料由 apis/migration 直接读 legacy 快照键（pw_state_v20，
@@ -146,9 +146,9 @@ export interface PersonaMigrationReport {
  * ＋清退休键；域在场时只清退休键。旧键保留作 legacy 快照（防回滚旧版本
  * 丢存量），此后只读不写。
  *
- * 旧 localConfig 不再进域：任务参数已固化（TASK_DEFAULTS），端点身份旧
+ * 旧 localConfig 不再进域：流式/超时按任务固化（TASK_PARAMS），端点身份旧
  * 字段（apiProfiles/indepApi* 等）由 migrateApiDomain（modules/apis/
- * migration.ts）直接读 legacy 快照键收编进统一端点表。
+ * migration.ts）直接读 legacy 快照键收编进统一服务商表。
  */
 export function migratePersonaDomain(): PersonaMigrationReport {
     const report: PersonaMigrationReport = { skipped: false, migratedKeys: [], retiredKeysCleaned: [] };

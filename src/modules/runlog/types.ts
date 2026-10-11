@@ -5,12 +5,13 @@
  * 内的 ttlog 摘要转发承担，正文只活在内存 ring 里）。
  */
 
+import type { TaskId } from '@/tasks';
+
 /**
  * 生成任务归属（观测点在共享传输层，按任务区分摘要与 enrich 权）。
- * 与 prompts/TASK_KEYS 手工同步扩（本模块不 import prompts——runlog 被
- * apis client 消费，引入 prompts 侧依赖成环），平行清单靠本注释锚维持。
+ * 任务清单唯一真相源＝src/tasks.ts（叶子位防环），本枚举同源派生。
  */
-export type RunTask = 'choice' | 'persona' | 'summary';
+export type RunTask = TaskId;
 
 export interface RunRecord {
     /** 自增，会话内唯一 */

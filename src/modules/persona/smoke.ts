@@ -14,10 +14,12 @@ import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
-import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint, testConnection } from '@/modules/apis/client';
+import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
-import { migrateApiDomain } from '@/modules/apis/migration';
-import { ACTIVE_ENDPOINT_KEY, deleteEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
+import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration';
+import { deleteEndpoint, readApiDomain, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
+import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
 import { stripYamlFence, collectWorldInfoContext } from './generation';
 import { usePersonaStore } from './store';
@@ -48,15 +50,23 @@ function wipeDomain(): void {
     if (tt) delete tt.persona;
 }
 
-/** 统一端点表＋choice 域＋全局活动键整体抹掉（收编场景需要三域＋全局键从零起步）。 */
+/** 统一服务商表＋choice 域＋任务档案域整体抹掉（收编场景需要三域从零起步）。 */
 function wipeApiScenarioDomains(): void {
     const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
     if (tt) {
         delete tt.apis;
         delete tt.choice;
         delete tt.persona;
-        delete tt[ACTIVE_ENDPOINT_KEY];
+        delete tt.taskProfiles;
+        delete tt.activeEndpointId;
     }
+}
+
+/** 五行任务档案统一种子（全部指向同一服务商＋模型——迁移保真与 e2e 前置共用）。 */
+function seedTaskProfiles(providerId: string, model: string): void {
+    const profiles = {} as TaskProfilesDomain;
+    for (const id of TASK_IDS) profiles[id] = { providerId, model };
+    writeTaskProfiles(profiles);
 }
 
 function domainJson(): string {
@@ -187,51 +197,66 @@ function runMigrationChecks(): void {
     }));
     migratePersonaDomain();
     const report = migrateApiDomain();
+    const tpReport = migrateTaskProfiles();
     const endpoints = readApiDomain();
     const c1 = endpoints.find(e => e.id === 'c1');
     const c2 = endpoints.find(e => e.id === 'c2');
-    const remapped = endpoints.find(e => e.url === 'https://persona.example.net/v1' && e.model === 'm-persona');
+    const remapped = endpoints.find(e => e.name === '撞车档');
     check('收编：choice 旧 apis 并入统一表（id 保留、字段零丢失）',
         !report.skipped && report.collectedFrom.includes('choice') && report.endpointCount === 3
-        && !!c1 && c1.name === 'choice端点一' && c1.url === 'https://choice.example.com/v1' && c1.key === 'sk-c1' && c1.model === 'm-choice'
-        && !!c2 && c2.url === 'https://choice-two.example.com/v1' && c2.key === 'sk-c2' && c2.model === 'm-choice-2');
+        && !!c1 && c1.name === 'choice端点一' && c1.url === 'https://choice.example.com/v1' && c1.key === 'sk-c1'
+        && !!c2 && c2.url === 'https://choice-two.example.com/v1' && c2.key === 'sk-c2');
     check('收编：persona 侧撞 id 重分配＋同端点去重（idRemaps/mergedDuplicates）',
         report.mergedDuplicates === 1
         && report.idRemaps.length === 1 && report.idRemaps[0].from === 'c2' && typeof report.idRemaps[0].to === 'string'
-        && !!remapped && remapped.id !== 'c2' && remapped.name === '撞车档',
+        && !!remapped && remapped.id !== 'c2',
         `remaps=${JSON.stringify(report.idRemaps)} merged=${report.mergedDuplicates}`);
     const rawChoice = (tt.choice ?? {}) as Record<string, unknown>;
-    check('收编：choice 域 v2 重写（全局活动键提升＝activeApiId 重映射＋产物 {gen,pool} 无 task 键）',
-        readActiveEndpointId() === 'c2'
-        && !('task' in rawChoice)
+    check('收编：choice 域 v2 重写（产物 {gen,pool} 无 task 键）',
+        !('task' in rawChoice)
         && ((rawChoice.gen ?? {}) as Record<string, unknown>).count === 5
         && Array.isArray(((rawChoice.pool ?? {}) as Record<string, unknown>).masterPool)
         && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
         `choice=${JSON.stringify(rawChoice)}`);
+    // 任务档案化迁移（v1.9 通道二）：旧活动键 c2 命中条目 → 五行档案收编
+    // {c2, m-choice-2}；apis 条目 model 字段删除；activeEndpointId 键退役
+    const ttRaw = extension_settings.ttToolkit as Record<string, unknown>;
+    const rawApisAfter = Array.isArray(ttRaw.apis) ? (ttRaw.apis as Array<Record<string, unknown>>) : [];
+    const profilesAfter = (ttRaw.taskProfiles ?? {}) as Record<string, { providerId?: unknown; model?: unknown }>;
+    check('任务档案迁移：五行全部初始化为旧活动端点 {c2, m-choice-2}',
+        !tpReport.skipped && tpReport.initializedFrom === 'activeEndpoint' && tpReport.providerized >= 3
+        && TASK_IDS.every(id => profilesAfter[id]?.providerId === 'c2' && profilesAfter[id]?.model === 'm-choice-2'),
+        `report=${JSON.stringify(tpReport)} profiles=${JSON.stringify(profilesAfter)}`);
+    check('任务档案迁移：apis 条目 model 字段收编后删除、activeEndpointId 键不在',
+        rawApisAfter.length === 3 && rawApisAfter.every(e => !('model' in e))
+        && !('activeEndpointId' in ttRaw));
     const afterCollect = readPersonaDomain();
     check('收编：persona 域 v2 重写（整键清洗后无 localConfig/uiState 键；选中不参与提升——choice 优先）',
         !('localConfig' in (afterCollect as unknown as Record<string, unknown>))
         && !('localConfig' in rawPersona())
         && !('uiState' in (afterCollect as unknown as Record<string, unknown>)));
 
-    // 1f. 二次启动零重写（统一表在场＋两域 v2 → 全部 skip，逐字节不变）
+    // 1f. 二次启动零重写（统一表＋档案域在场 → 三通道全部 skip，逐字节不变）
     const apisBefore = JSON.stringify(tt.apis);
     const choiceBefore = JSON.stringify(tt.choice);
     const personaBefore = domainJson();
     const personaSecond = migratePersonaDomain();
     const apisSecond = migrateApiDomain();
-    check('收编：二次启动零重写（两步迁移均 skip、三域逐字节不变）',
-        personaSecond.skipped && apisSecond.skipped
+    const tpSecond = migrateTaskProfiles();
+    check('收编：二次启动零重写（三步迁移均 skip、三域逐字节不变）',
+        personaSecond.skipped && apisSecond.skipped && tpSecond.skipped
         && JSON.stringify(tt.apis) === apisBefore
         && JSON.stringify(tt.choice) === choiceBefore
         && domainJson() === personaBefore);
 
-    // 1h. 删活动端点 → 全局选中键联动清空（回未选态，两任务生成入口 fail fast）
-    writeApiDomain([{ id: 'smoke-del', name: '待删端点', url: 'https://del.example.com/v1', key: 'k', model: 'm' }]);
-    setActiveEndpointId('smoke-del');
+    // 1h. 删被档案引用的服务商 → 引用任务行联动重置（回未配置态）
+    writeApiDomain([{ id: 'smoke-del', name: '待删服务商', url: 'https://del.example.com/v1', key: 'k', models: ['m-del'] }]);
+    seedTaskProfiles('smoke-del', 'm-del');
     deleteEndpoint('smoke-del');
-    check('端点删除：删活动端点联动清空全局选中键（回未选态）',
-        readActiveEndpointId() === '' && readApiDomain().every(e => e.id !== 'smoke-del'));
+    const profilesAfterDelete = readTaskProfiles();
+    check('服务商删除：被档案引用时引用任务行联动重置（回未配置态、条目出表）',
+        TASK_IDS.every(id => profilesAfterDelete[id].providerId === '' && profilesAfterDelete[id].model === '')
+        && readApiDomain().every(e => e.id !== 'smoke-del'));
 
     // 1g. 退休键清理无条件（域在场也清）——再放回验证
     ls.set('pw_custom_themes_v1', '残留');
@@ -566,27 +591,8 @@ async function runApiChecks(): Promise<void> {
     );
     check('api：reasoning_effort＝high 注入（low/medium/high 档）', bodyEffort.reasoning_effort === 'high');
 
-    // fetch 桩：testConnection 实际发出形状（model+max_tokens:5+Hi 消息）
-    const calls: Array<{ url: string; init: RequestInit }> = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-        calls.push({ url: String(url), init: init ?? {} });
-        return { ok: true, status: 200 } as Response;
-    }) as typeof fetch;
-    try {
-        const res = await testConnection('https://api.example.com/v1', 'sk-test', 'm1');
-        const sent = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
-        check('api：测连 fetch 桩形状（/chat/completions、Bearer、model、max_tokens:5、Hi 消息）',
-            res.ok && calls.length === 1
-            && calls[0].url === 'https://api.example.com/v1/chat/completions'
-            && sent.model === 'm1' && sent.max_tokens === 5
-            && Array.isArray(sent.messages) && (sent.messages as Array<{ content: string }>)[0].content === 'Hi'
-            && String((calls[0].init.headers as Record<string, string>).Authorization) === 'Bearer sk-test');
-    } finally {
-        globalThis.fetch = originalFetch;
-    }
-
     // SSE 帧状态机（经 callGenerateEndpoint 公共面）
+    const originalFetch = globalThis.fetch;
     const sseCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
         sseCalls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
@@ -726,9 +732,9 @@ async function runApiChecks(): Promise<void> {
 
 async function runPersonaE2EChecks(): Promise<void> {
     const store = usePersonaStore();
-    // 端点表放一个冒烟端点，全局活动键指向它
-    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟端点', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model' }]);
-    setActiveEndpointId('smoke-endpoint');
+    // 服务商表放一个冒烟服务商，五行任务档案全部指向它
+    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟服务商', url: 'https://smoke.example.com/v1', key: 'sk-smoke', models: ['smoke-model'] }]);
+    seedTaskProfiles('smoke-endpoint', 'smoke-model');
     store.requestText = '生成一个侦探人设';
     store.isProcessing = false;
 
@@ -736,7 +742,7 @@ async function runPersonaE2EChecks(): Promise<void> {
     const PERSONA_YAML = '```yaml\n姓名: 阿德\n年龄: 20\n```';
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const originalFetch = globalThis.fetch;
-    // 流式 SSE 桩（stream 恒开——TASK_DEFAULTS）：content 走 delta 帧
+    // 流式 SSE 桩（stream 恒开——TASK_PARAMS）：content 走 delta 帧
     const sseResponse = (content: string): Response => ({
         ok: true,
         status: 200,
@@ -940,7 +946,7 @@ async function runPersonaE2EChecks(): Promise<void> {
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);
-        setActiveEndpointId('');
+        seedTaskProfiles('', '');
     }
 }
 
@@ -964,14 +970,14 @@ async function runStoreChecks(): Promise<void> {
     store.isProcessing = false;
     store.processingLabel = '';
 
-    // 端点缺失 fail fast（全局活动键悬空指向）
-    setActiveEndpointId('no-such-endpoint');
+    // 任务模型未配置 fail fast（档案行空＝未配置态）
+    seedTaskProfiles('', '');
     store.requestText = '合成需求';
     const resultBefore = store.resultText;
     await store.generate();
-    check('store：端点缺失 fail fast（不进生成、互斥态干净、结果不误写）',
+    check('store：任务模型未配置 fail fast（不进生成、互斥态干净、结果不误写）',
         store.isProcessing === false && store.processingLabel === '' && store.resultText === resultBefore);
-    setActiveEndpointId('');
+    seedTaskProfiles('', '');
 
     // 会话感知：CHAT_CHANGED 处理（lastRun 无条件清空、开场白重置为默认档
     // ＝greetings 在场注入 #0、宿主快照无条件重拉

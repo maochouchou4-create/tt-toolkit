@@ -45,12 +45,12 @@ export interface GlobalDomain {
     nav: NavStorageState;
     /** choice 域（生成参数＋条目池；modules/choice/api.ts GLOBAL_CHOICE_KEY） */
     choice?: unknown;
-    /** 统一端点表（modules/apis/storage.ts APIS_DOMAIN_KEY） */
+    /** 统一服务商表（modules/apis/storage.ts APIS_DOMAIN_KEY） */
     apis?: unknown;
-    /** 全局活动端点（引用统一端点表条目 id；''/缺席/指向已删端点＝未选态）。 */
-    activeEndpointId?: string;
     /** 破限预设名（modules/apis/storage.ts JAILBREAK_PRESET_KEY） */
     jailbreakPreset?: unknown;
+    /** 任务档案（modules/apis/task-profiles.ts TASK_PROFILES_KEY） */
+    taskProfiles?: unknown;
     /** persona 域（modules/persona/storage.ts PERSONA_DOMAIN_KEY） */
     persona?: unknown;
     /** 提示词配置集（prompts/storage.ts GLOBAL_PROMPT_CONFIGS_KEY） */

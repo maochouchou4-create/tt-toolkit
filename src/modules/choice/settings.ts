@@ -2,8 +2,8 @@
  * choice 设置 store（Pinia）：生成参数。
  * 真相源＝storage 全局域（choice 键）；读透传＋写穿＋revision 失效信号
  * （nav/prompts store 同款纪律，store 不落值快照）。
- * 任务参数已固化为 TASK_DEFAULTS（用户面零旋钮），端点实体（增删改查/
- * 测连/拉模型）与端点选择（全局活动键）归 apis 域与 apis store。
+ * 流式/输出契约按任务固化于 TASK_PARAMS，温度/思考强度在任务档案
+ * （API 页任务模型卡）配置；服务商实体（增删改查/拉清单）归 apis 域与 apis store。
  */
 import { defineStore } from 'pinia';
 import { choiceStorage, type ChoiceGenParams } from './api';

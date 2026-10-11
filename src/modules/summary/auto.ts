@@ -2,7 +2,7 @@
  * summary 事件接线：MESSAGE_RECEIVED 自动触发守卫链＋CHAT_CHANGED 生命周期＋启动挂载。
  *
  * 守卫顺序（越早越便宜，choice/auto.ts 同款骨架）：分组形态 → autoEnabled →
- * 生成中 → 端点在场 → 算术达标，全部通过后 fire-and-forget。监听器内不得
+ * 生成中 → 任务模型在场 → 算术达标，全部通过后 fire-and-forget。监听器内不得
  * await（宿主 eventSource.emit 串行 await 每个监听器，重活脱钩理由见
  * host/events.ts 头注）；runSmallSummary 在首个 await 前同步置位并发锁，
  * 守卫与脱钩之间无竞态窗口。
@@ -20,7 +20,7 @@
  */
 
 import { eventBus, event_types, getChatMessages, isHostErrorText, showToast } from '@/host';
-import { resolveActiveEndpoint } from '@/modules/apis/storage';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { planAutoSmallSummary } from './arithmetic';
 import { cancelSummaryGeneration, isSummaryRunning, runSmallSummary, type SummaryRunOutcome } from './generator';
 import { readSummarySettings } from './settings';
@@ -100,9 +100,9 @@ export function handleSummaryMessageReceived(messageId: unknown): boolean {
 
     if (isSummaryRunning()) return false;
 
-    if (!resolveActiveEndpoint()) {
+    if (!resolveTaskRoute('summary_small')) {
         // 不弹 UI（AI 刚回复完抢焦点体验极差，choice 同口径）；留 console 线索供排障
-        console.warn('[tt-toolkit][summary] 自动总结跳过：未选择生成端点');
+        console.warn('[tt-toolkit][summary] 自动总结跳过：任务模型未配置——到「API」页「任务模型」卡给「小总结」配置服务商与模型');
         return false;
     }
 

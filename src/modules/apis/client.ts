@@ -1,8 +1,9 @@
 /**
  * 统一请求客户端：choice 直连请求与 persona OpenAI 兼容请求
- * 合一。两个任务只差传参——任务参数（输出契约/思考强度/流式/超时/
- * 信号）留在各自任务域，端点身份（url/key/model）从统一
- * 端点表取。两任务均不发 max_tokens：服务端用模型默认输出上限
+ * 合一。两个任务只差传参——出站身份与采样参数（url/key/model/
+ * temperature/reasoningEffort）由任务路由单点解析（apis/task-profiles
+ * 的 resolveTaskRoute），流式/输出契约按任务固化于 TASK_PARAMS。
+ * 所有任务均不发 max_tokens：服务端用模型默认输出上限
  * （推理模型思维链与正文共享上限，显式小上限会把正文掐断——实测
  * deepseek-flash 2048 预算被思维链耗尽、正文截断在半条 JSON）。
  *
@@ -182,20 +183,6 @@ export async function fetchModels(url: string, key: string): Promise<string[]> {
 }
 
 /**
- * 连通性测试：发一次最小请求，原样返回 fetch 响应（ok 判定与 toast 归
- * 调用方）。30 秒上界——死端点快速失败，不等浏览器默认超时。
- */
-export async function testConnection(url: string, key: string, model: string): Promise<Response> {
-    const cleanBase = normalizeApiBase(url);
-    const ep = /\/v\d+$/.test(cleanBase) ? `${cleanBase}/chat/completions` : `${cleanBase}/v1/chat/completions`;
-    return await fetchWithTimeout(ep, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 }),
-    });
-}
-
-/**
  * 装配生成请求体（契约见文件头核实记录）。显式发送制：temperature/
  * max_tokens 未传（undefined）就不进请求体（宿主 insert_if_present
  * 同语义）——缺省值归任务域 normalize 保证，客户端不做任务侧默认。
@@ -366,8 +353,8 @@ function serializeMessages(messages: GenerateMessage[]): string {
  * requestText 时用它）。序列化原语 serializeMessages 模块私有——
  * 丢前缀的裸序列化在模块外结构上不可达。
  */
-export function serializeOutbound(messages: GenerateMessage[]): string {
-    return serializeMessages(composeOutbound(messages));
+export function serializeOutbound(messages: GenerateMessage[], task: RunTask): string {
+    return serializeMessages(composeOutbound(messages, task));
 }
 
 /**
@@ -399,7 +386,7 @@ export async function callGenerateEndpoint(
 ): Promise<GenerateResult> {
     const startedAt = performance.now();
     const runlogStore = useRunlogStore();
-    const outbound = composeOutbound(messages);
+    const outbound = composeOutbound(messages, config.task);
     if (outbound.length > messages.length) {
         log.info(`破限注入 (${config.task}): ${outbound.length - messages.length} 条前缀`);
     }

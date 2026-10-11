@@ -3,7 +3,7 @@
  *
  * 守卫顺序（越早越便宜）：quiet 静默生成跳过 → 消息文本空跳过 →
  * 错误正文跳过 → messageId===0 跳过 → autoGenerate 关跳过 → 生成中
- * 跳过 → 未选端点 console.warn 跳过。全部通过后 fire-and-forget 触发生成。
+ * 跳过 → 任务模型未配置 console.warn 跳过。全部通过后 fire-and-forget 触发生成。
  *
  * 监听器内不得 await（重活脱钩）：宿主 eventSource.emit 串行 await 每个
  * 监听器，emit 后紧接 finalizeMessageContent→CHARACTER_MESSAGE_RENDERED
@@ -11,11 +11,12 @@
  * 核实记录见 host/events.ts 头注释）。generateOptions 在首个 await 前同步
  * 置位 activeAbort（并发互斥），守卫与脱钩之间无竞态窗口。
  *
- * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差。
+ * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差（配置面＝API 页任务模型卡）。
  */
 
 import { eventBus, event_types, getChatMessages, isHostErrorText } from '@/host';
-import { resolveActiveEndpoint } from '@/modules/apis/storage';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { taskLabel } from '@/tasks';
 import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
 
@@ -62,10 +63,9 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
 
     if (isGenerating()) return false;
 
-    const endpoint = resolveActiveEndpoint();
-    if (!endpoint) {
+    if (!resolveTaskRoute('choice')) {
         // 不弹 UI（理由见文件头）；留 console 线索供排障
-        console.warn('[tt-toolkit][choice] 自动生成跳过：未选择生成端点');
+        console.warn(`[tt-toolkit][choice] 自动生成跳过：任务模型未配置——到「API」页「任务模型」卡给「${taskLabel('choice')}」配置服务商与模型`);
         return false;
     }
 

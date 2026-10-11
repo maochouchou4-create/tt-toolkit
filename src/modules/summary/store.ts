@@ -7,13 +7,13 @@
  * 敛到 revision bump，UI 侧无第二套刷新机制。
  *
  * toast 分发：手动路径按方案文案表逐字（skipped reason 本就是用户向
- * 文案——未选端点指引/无可总结/无可合并由 generator 常量给出）；自动
+ * 文案——未配置总结模型指引/无可总结/无可合并由 generator 常量给出）；自动
  * 路径的 toast 归 auto.ts。
  */
 
 import { defineStore } from 'pinia';
 import { showToast } from '@/host';
-import { resolveActiveEndpoint } from '@/modules/apis/storage';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { roundsToTrigger } from './arithmetic';
 import { isSummaryRunning, restoreAllSummaries, runBigSummary, runSmallSummary, type SummaryRunOutcome } from './generator';
 import { readSummaryChatState, readSummarySettings, writeSummaryChatState, writeSummarySettings, type SummarySettings } from './settings';
@@ -53,12 +53,12 @@ export const useSummaryStore = defineStore('tt-summary', {
             const s = this.settings;
             return roundsToTrigger(rawFloorIndices().length, s.intervalRounds, s.keepRounds);
         },
-        /** 端点行展示（模型名优先，缺席回退 url；未选择态单独文案）。 */
+        /** 端点行展示（小总结任务路由；模型名优先，缺席回退 url；未配置态单独文案）。 */
         endpointLabel(): string {
             void this.revision;
-            const endpoint = resolveActiveEndpoint();
-            if (!endpoint) return '未选择';
-            return endpoint.model || endpoint.url;
+            const route = resolveTaskRoute('summary_small');
+            if (!route) return '未配置';
+            return route.model || route.url;
         },
         isRunning(): boolean {
             return this.runningKind !== null || isSummaryRunning();

@@ -7,8 +7,8 @@
  */
 import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
-import { resolveActiveEndpoint } from '@/modules/apis/storage';
-import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
+import { resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
     assembleMessages,
@@ -132,8 +132,8 @@ export async function generateOptions(): Promise<void> {
     let pendingMessages: GenerateMessage[] | null = null; // 组装成功即存：哨兵预览惰性取用（正常路径零额外序列化）
     try {
         const gen = choiceStorage.readDomain().gen;
-        // 输出契约日志口径随常量（任务参数固化，两分支同值）
-        const outputContract: GenerateRequestConfig['outputContract'] = TASK_DEFAULTS.choiceOutputContract;
+        // 输出契约日志口径随常量（契约按任务固化，两分支同值）
+        const outputContract: GenerateRequestConfig['outputContract'] = TASK_PARAMS.choice.outputContract;
         let rawText: string;
         const assembly = await assembleCurrent();
         store.lastDump = assembly.dumpText;
@@ -150,24 +150,25 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: true,
-                requestText: serializeOutbound(pendingMessages),
+                requestText: serializeOutbound(pendingMessages, 'choice'),
                 responseText: DEBUG_MALFORMED_RAW,
             });
         } else {
-            const endpoint = resolveActiveEndpoint();
-            if (!endpoint) {
-                throw new Error('未选择生成端点——到「API」页点端点条目上的「使用」按钮');
+            // 任务路由单点解析：未配置/悬空 fail fast，文案指路任务模型卡
+            const route = resolveTaskRoute('choice');
+            if (!route) {
+                throw new Error('未配置选项生成模型——到「API」页「任务模型」卡给「选项生成」选择服务商与模型');
             }
-            // 任务参数固化（TASK_DEFAULTS 单一真相源；用户面零旋钮）
             const requestConfig: GenerateRequestConfig = {
                 task: 'choice',
-                baseUrl: endpoint.url,
-                apiKey: endpoint.key,
-                model: endpoint.model,
-                temperature: TASK_DEFAULTS.temperature,
-                stream: TASK_DEFAULTS.stream,
-                outputContract: TASK_DEFAULTS.choiceOutputContract,
-                reasoningEffort: TASK_DEFAULTS.reasoningEffort,
+                baseUrl: route.url,
+                apiKey: route.key,
+                model: route.model,
+                // 温度/思考强度随任务档案带出（档案缺席＝TASK_PARAMS 默认档）
+                temperature: route.temperature,
+                stream: TASK_PARAMS.choice.stream,
+                outputContract: TASK_PARAMS.choice.outputContract,
+                reasoningEffort: route.reasoningEffort,
             };
             handedToClient = true;
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
@@ -208,7 +209,7 @@ export async function generateOptions(): Promise<void> {
                 stream: false,
                 durationMs: 0,
                 ok: false,
-                requestText: pendingMessages ? serializeOutbound(pendingMessages) : '',
+                requestText: pendingMessages ? serializeOutbound(pendingMessages, 'choice') : '',
                 responseText: '',
                 error: message,
             });

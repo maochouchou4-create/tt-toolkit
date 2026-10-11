@@ -10,8 +10,8 @@
  *   两条通道合一，走统一端点表＋共享请求客户端。
  * - 字符串拼接组装退役——消息组装走引擎管线（persona 两任务
  *   键的模块与模板在代码默认模板内置）。
- * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：任务参数
- *   固化于 TASK_DEFAULTS，调用面只剩端点（GenerationApiConfig）。
+ * - DOM 读值链（getIndepTimeoutSec/getIndepStreamEnabled）退役：调用面只剩
+ *   任务路由（GenerationApiConfig）。
  * - setGenProgress 直写 jQuery 按钮退役：onProgress 回调由 store 接管。
  * - toastr.info(prefill 重试) 退役：onPrefillRetry 回调归调用方 toast。
  * - collectContextData 的 DOM 勾选读取与「UI 勾选 → 存储域已存选择 →
@@ -27,8 +27,8 @@
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, type GenerateMessage } from '@/modules/apis/client';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
-import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
-import type { ApiEndpoint } from '@/modules/apis/types';
+import { PERSONA_TIMEOUT_SEC, TASK_PARAMS } from '@/modules/apis/task-defaults';
+import type { TaskRoute } from '@/modules/apis/task-profiles';
 import {
     assembleMessages,
     createTaskDefaultConfig,
@@ -53,10 +53,10 @@ export class PersonaRunCancelled extends Error {
     }
 }
 
-/** 生成调用面的任务配置（store 侧解析端点；任务参数固化于 TASK_DEFAULTS）。 */
+/** 生成调用面的任务配置（store 侧经任务路由解析；温度/思考强度随档案带出）。 */
 export interface GenerationApiConfig {
-    /** 选中统一端点（url/key/model；store 侧已解析非空）。 */
-    endpoint: ApiEndpoint;
+    /** 任务出站路由（url/key/model/temperature/reasoningEffort；store 侧已解析非空）。 */
+    route: TaskRoute;
 }
 
 /**
@@ -148,14 +148,14 @@ function assemblePersonaMessages(task: TaskKey, sources: PersonaAssemblySources)
  * 请求并处理超时/中断/错误分类。生成链每段各调一次（每段超时独立）。
  *
  * 单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
- * persona 任务参数面（固化于 TASK_DEFAULTS）：temperature 1、不发送
- * max_tokens（长 YAML 友好，依赖宿主 insert_if_present 语义）、输出契约
- * prompt_only（纯文本）、stream 恒开、reasoning_effort high、超时 600s。
+ * persona 任务参数面：温度/思考强度随任务档案带出（缺席＝默认档）、
+ * 不发 max_tokens（长 YAML 友好，依赖宿主 insert_if_present 语义）、输出契约
+ * prompt_only（纯文本）、stream 恒开、超时 600s。
  */
 async function requestOnce(params: RequestOnceParams): Promise<string> {
     const { config, messages, trace, prefillContent, label } = params;
-    const timeoutSec = TASK_DEFAULTS.personaTimeoutSec;
-    log.info(`发送请求 (${label})，超时 ${timeoutSec}s，流式 ${String(TASK_DEFAULTS.stream)}`);
+    const timeoutSec = PERSONA_TIMEOUT_SEC;
+    log.info(`发送请求 (${label})，超时 ${timeoutSec}s，流式 ${String(TASK_PARAMS.persona.stream)}`);
     log.info(`模块管线 (${label}): ${renderTraceCompact({ messages, trace })}`);
 
     let responseContent = '';
@@ -183,14 +183,15 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
         const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
             const result = await callGenerateEndpoint(messages, {
                 task: 'persona',
-                baseUrl: config.endpoint.url,
-                apiKey: config.endpoint.key,
-                model: config.endpoint.model,
-                temperature: TASK_DEFAULTS.temperature,
+                baseUrl: config.route.url,
+                apiKey: config.route.key,
+                model: config.route.model,
+                // 温度/思考强度随任务档案带出（档案缺席＝任务默认档）
+                temperature: config.route.temperature,
                 // max_tokens 不发：人设长文本依赖服务端模型默认上限
-                stream: TASK_DEFAULTS.stream,
-                outputContract: 'prompt_only',
-                reasoningEffort: TASK_DEFAULTS.reasoningEffort,
+                stream: TASK_PARAMS.persona.stream,
+                outputContract: TASK_PARAMS.persona.outputContract,
+                reasoningEffort: config.route.reasoningEffort,
             }, controller.signal);
             return result.content;
         };
@@ -205,7 +206,7 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
             // 外部取消优先归类（外部 abort 也会触发 isAbort，先判它防误报超时）
             if (params.signal?.aborted) throw new PersonaRunCancelled();
             if (timedOutBySelf || (isAbort && controller.signal.aborted)) {
-                throw new Error(`请求超时（${TASK_DEFAULTS.personaTimeoutSec} 秒）——中转站响应过慢或网络不稳，可稍后重试或更换端点`);
+                throw new Error(`请求超时（${PERSONA_TIMEOUT_SEC} 秒）——中转站响应过慢或网络不稳，可稍后重试或更换端点`);
             }
             if (isNetwork) {
                 throw new Error(`网络请求失败：${errStr}。请检查中转站地址、API Key、网络连通性（梯子 / 公司网络代理等可能拦截）。`);

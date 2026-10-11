@@ -1,10 +1,9 @@
 /**
  * choice 模块全局域（extension_settings.ttToolkit.choice）。
  *
- * 端点身份（url/key/model）住在统一端点表（modules/apis），选中的端点
- * 收归全局活动键（v1.4.0 起，见 apis/storage readActiveEndpointId）。
- * 任务参数（输出契约/思考强度/流式/温度）已固化为代码常量
- * （apis/task-defaults TASK_DEFAULTS，用户面零旋钮），本域只承载
+ * 端点身份（url/key）住在统一服务商表（modules/apis），模型选择权在
+ * 任务档案（apis/task-profiles，API 页任务模型卡按任务行配置）。
+ * 流式/输出契约按任务固化（apis/task-defaults TASK_PARAMS），本域只承载
  * 生成参数（gen）与条目池数据（pool）。
  *
  * response_format 支持度实测结论（三家端点，json_object 恒定的依据存档）：

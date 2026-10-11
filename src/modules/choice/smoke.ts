@@ -8,9 +8,10 @@
  */
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
-import { TASK_DEFAULTS } from '@/modules/apis/task-defaults';
+import { TASK_PARAMS } from '@/modules/apis/task-defaults';
+import { mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { useRunlogStore } from '@/modules/runlog/store';
-import { createEndpoint, readActiveEndpointId, readApiDomain, setActiveEndpointId, writeApiDomain } from '@/modules/apis/storage';
+import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage } from './api';
 import { generateOptions, zeroOptionsMessage } from './generator';
@@ -21,6 +22,13 @@ import type { PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 
 const failures: string[] = [];
+
+/** choice 行档案单行写（夹具用；其余行不动）。 */
+function setChoiceProfile(providerId: string, model: string): void {
+    mutateTaskProfiles(profiles => {
+        profiles.choice = { providerId, model };
+    });
+}
 
 function check(label: string, ok: boolean, detail = ''): void {
     console.info(`[choice-smoke] ${ok ? 'PASS' : 'FAIL'} ${label}${detail ? ` —— ${detail}` : ''}`);
@@ -260,15 +268,15 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：冒烟 stub 在场', true);
     // 池态对齐真实启动：asset 同步在场（前序 asset 区结尾池=asset 全量）
     syncAssetPool();
-    // 端点在场（池写面删除后无导入链落端点；stub fetch 在 smoke.mjs 注入）——
-    // 记录原态（全局活动键必须在前置之前记录），收尾统一还原
+    // 服务商与 choice 行档案在场（stub fetch 在 smoke.mjs 注入）——
+    // 记录原态，收尾统一还原
     const savedEndpoints = readApiDomain();
-    const savedActiveEndpointId = readActiveEndpointId();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
     const smokeEndpoint = savedEndpoints[0] ?? createEndpoint('冒烟端点');
     if (savedEndpoints.length === 0) {
         writeApiDomain([smokeEndpoint]);
-        setActiveEndpointId(smokeEndpoint.id);
     }
+    setChoiceProfile(smokeEndpoint.id, smokeEndpoint.models[0] ?? 'smoke-model');
     // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
     // phase 停在 idle」（跳过守卫不得触发任何生成）
     store.clearOptions();
@@ -306,8 +314,8 @@ async function runAutoGenerateChecks(): Promise<void> {
     check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);
     choiceStorage.updateGenParams({ autoGenerate: true });
 
-    // 无端点：全局活动键悬空 → resolveActiveEndpoint null → console.warn（不弹 UI）
-    setActiveEndpointId('no-such-endpoint');
+    // 任务模型未配置：choice 行悬空 → resolveTaskRoute null → console.warn（不弹 UI）
+    setChoiceProfile('no-such-endpoint', 'x');
     const warns: string[] = [];
     const origWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -315,8 +323,8 @@ async function runAutoGenerateChecks(): Promise<void> {
     };
     emitReceived(2, 'normal');
     console.warn = origWarn;
-    check('自动生成：端点未选 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('未选择生成端点')), `warns=${warns.length}`);
-    setActiveEndpointId(smokeEndpoint.id);
+    check('自动生成：任务模型未配置 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('任务模型未配置')), `warns=${warns.length}`);
+    setChoiceProfile(smokeEndpoint.id, smokeEndpoint.models[0] ?? 'smoke-model');
 
     // happy path：同步返回（emit 返回时生成已启动但远未完成——fire-and-forget 实证）
     const returned = emitReceived(2, 'normal');
@@ -344,9 +352,9 @@ async function runAutoGenerateChecks(): Promise<void> {
     // globalThis）→ getBaibaiSummary 优先注入口径 → <past_events> 段可见
     check('自动生成：柏宝书在场即带（摘要注入 <past_events> 段）', store.lastDump.includes('<past_events>') && store.lastDump.includes('【柏宝书·stub】'), 'stub getInjectedHistory 链路');
 
-    // 还原端点原态（全局活动键还原前置前记录的原值——含「未选」空串；
-    // 本区自落的冒烟端点与选中态不留残）
-    setActiveEndpointId(savedActiveEndpointId);
+    // 还原档案与服务商表原态（前置前记录的快照；本区自落的冒烟端点与
+    // 配置态不留残）
+    writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
     if (savedEndpoints.length === 0) {
         writeApiDomain([]);
     }
@@ -368,7 +376,7 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：冒烟 stub 在场', true);
     const context = stubs.getContext();
     const emit = (type: string, ...args: unknown[]): unknown => stubs.eventSource.emit(type, ...args);
-    const savedActiveEndpointId = readActiveEndpointId();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
 
     // 索引签名对齐 ChatMessage（宿主消息含任意附加键，extra/swipes 等）
     interface FakeMessage { mes?: string; is_user?: boolean; is_system?: boolean; extra?: Record<string, unknown>; [key: string]: unknown; }
@@ -424,13 +432,13 @@ async function runFloorPersistChecks(): Promise<void> {
         !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲') && store.options.length === 4 && store.lastParsePath === 'bracket_fallback',
         `oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} ui=${store.options.length}`,
     );
-    // 失败路径：请求未发出（端点缺失）——生成开始已清档，该楼保持无选项态
+    // 失败路径：请求未发出（任务模型未配置）——生成开始已清档，该楼保持无选项态
     writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null });
-    setActiveEndpointId('no-such-endpoint');
+    setChoiceProfile('', '');
     try {
         await generateOptions();
     } finally {
-        setActiveEndpointId(savedActiveEndpointId);
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
     }
     check(
         '楼层落盘：生成失败路径旧档已清且不写新档（UI 空态、无残留）',
@@ -779,9 +787,9 @@ function runParseChecks(): void {
 }
 
 /**
- * 请求形状终态机判：choice 请求由 TASK_DEFAULTS 常量注入（任务参数固化，
- * 用户面零旋钮）——reasoning_effort high＋temperature 1＋stream true＋
- * json_object response_format 四件套锁定。
+ * 请求形状终态机判：choice 出站由 TASK_PARAMS 固化项＋任务档案带出项
+ * 组成——reasoning_effort high＋temperature 1＋stream true＋json_object
+ * response_format 四件套锁定（档案缺席＝默认档的出站形态）。
  */
 function runConstantRequestChecks(): void {
     const messages = [{ role: 'user' as const, content: 'x' }];
@@ -790,10 +798,10 @@ function runConstantRequestChecks(): void {
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk-test',
         model: 'test-model',
-        temperature: TASK_DEFAULTS.temperature,
-        stream: TASK_DEFAULTS.stream,
-        outputContract: TASK_DEFAULTS.choiceOutputContract,
-        reasoningEffort: TASK_DEFAULTS.reasoningEffort,
+        temperature: TASK_PARAMS.choice.defaultTemperature,
+        stream: TASK_PARAMS.choice.stream,
+        outputContract: TASK_PARAMS.choice.outputContract,
+        reasoningEffort: TASK_PARAMS.choice.defaultReasoningEffort,
     });
     const responseFormat = body.response_format as { type?: string } | undefined;
     check(
@@ -933,15 +941,15 @@ async function runRunlogChecks(): Promise<void> {
         choiceStorage.updateGenParams({ debugForceRaw: false });
     }
 
-    // 失败面：端点缺失（请求未发出）由 generator 哨兵补记 ok:false
-    const savedActiveEndpointId = readActiveEndpointId();
-    setActiveEndpointId('no-such-endpoint');
+    // 失败面：任务模型未配置（请求未发出）由 generator 哨兵补记 ok:false
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    setChoiceProfile('', '');
     await generateOptions();
     const failRecord = runlog.records[runlog.records.length - 1];
-    check('runlog：端点缺失失败落记录（ok=false、error 含「未选择生成端点」、requestText 在场）',
-        !!failRecord && failRecord.ok === false && (failRecord.error ?? '').includes('未选择生成端点') && failRecord.requestText.length > 0,
+    check('runlog：任务模型未配置失败落记录（ok=false、error 含「未配置选项生成模型」、requestText 在场）',
+        !!failRecord && failRecord.ok === false && (failRecord.error ?? '').includes('未配置选项生成模型') && failRecord.requestText.length > 0,
         `ok=${String(failRecord?.ok)} error=${failRecord?.error ?? '无'}`);
-    setActiveEndpointId(savedActiveEndpointId);
+    writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
     // 端点缺失用例把会话态留在 error 相位——复位，免污染后续守卫链断言基准
     useChoiceStore().$reset();
 
@@ -980,10 +988,10 @@ async function runRunlogChecks(): Promise<void> {
     // 走元素级恢复，runlog enrich 带解析路径与丢弃计数（排障可见性）
     {
         const savedEndpoints = readApiDomain();
-        const savedActiveEndpointId = readActiveEndpointId();
+        const savedProfilesJson = JSON.stringify(readTaskProfiles());
         const partialEndpoint = savedEndpoints[0] ?? createEndpoint('partial 端点');
         if (savedEndpoints.length === 0) writeApiDomain([partialEndpoint]);
-        setActiveEndpointId(partialEndpoint.id);
+        setChoiceProfile(partialEndpoint.id, partialEndpoint.models[0] ?? 'partial-model');
         const originalFetch = globalThis.fetch;
         const partialEncoder = new TextEncoder();
         globalThis.fetch = (async () => ({
@@ -1016,10 +1024,62 @@ async function runRunlogChecks(): Promise<void> {
             );
         } finally {
             globalThis.fetch = originalFetch;
-            setActiveEndpointId(savedActiveEndpointId);
+            writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
             if (savedEndpoints.length === 0) writeApiDomain([]);
             useChoiceStore().$reset();
         }
+    }
+}
+
+/**
+ * 任务路由单通道机判：未配置/悬空/缺模型 fail fast＋可调参数语义
+ * （写档带出、缺席＝TASK_PARAMS 默认档、温度钳 0-2/非数剔除、思考枚举外剔除）。
+ */
+function runTaskRouteChecks(): void {
+    const savedEndpoints = readApiDomain();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    try {
+        writeApiDomain([{ id: 'tp-p', name: '档案服务商', url: 'https://tp.example.com/v1', key: 'sk-tp', models: ['m-a'] }]);
+        setChoiceProfile('', '');
+        check('任务路由：档案行空＝null（未配置 fail fast 语义）', resolveTaskRoute('choice') === null);
+        setChoiceProfile('no-such-provider', 'm-a');
+        check('任务路由：服务商悬空＝null', resolveTaskRoute('choice') === null);
+        setChoiceProfile('tp-p', '');
+        check('任务路由：缺模型＝null', resolveTaskRoute('choice') === null);
+        mutateTaskProfiles(profiles => {
+            profiles.choice = { providerId: 'tp-p', model: 'm-a', temperature: 1.3, reasoningEffort: 'low' };
+        });
+        const route = resolveTaskRoute('choice');
+        check('任务路由：写档后带出所写值（url/key/model/温度/思考同点解析）',
+            !!route && route.url === 'https://tp.example.com/v1' && route.key === 'sk-tp'
+            && route.model === 'm-a' && route.temperature === 1.3 && route.reasoningEffort === 'low',
+            `route=${JSON.stringify(route)}`);
+        setChoiceProfile('tp-p', 'm-a');
+        const defaultRoute = resolveTaskRoute('choice');
+        check('任务路由：温度/思考缺席＝TASK_PARAMS 任务默认档',
+            !!defaultRoute && defaultRoute.temperature === TASK_PARAMS.choice.defaultTemperature
+            && defaultRoute.reasoningEffort === TASK_PARAMS.choice.defaultReasoningEffort);
+        mutateTaskProfiles(profiles => {
+            profiles.choice = { providerId: 'tp-p', model: 'm-a', temperature: 9, reasoningEffort: 'ultra' as never };
+        });
+        const clamped = readTaskProfiles().choice;
+        check('任务档案 normalize：温度越界钳 0-2、思考枚举外剔除',
+            clamped.temperature === 2 && clamped.reasoningEffort === undefined,
+            `p=${JSON.stringify(clamped)}`);
+        mutateTaskProfiles(profiles => {
+            profiles.choice = { providerId: 'tp-p', model: 'm-a', temperature: -3, reasoningEffort: 'high' };
+        });
+        const clampedLow = readTaskProfiles().choice;
+        check('任务档案 normalize：温度下界钳 0', clampedLow.temperature === 0 && clampedLow.reasoningEffort === 'high');
+        mutateTaskProfiles(profiles => {
+            profiles.choice = { providerId: 'tp-p', model: 'm-a', temperature: Number.NaN };
+        });
+        const dropped = readTaskProfiles().choice;
+        check('任务档案 normalize：非数温度剔除（回任务默认档语义）',
+            dropped.temperature === undefined && dropped.model === 'm-a');
+    } finally {
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
+        writeApiDomain(savedEndpoints);
     }
 }
 
@@ -1033,6 +1093,7 @@ export async function runChoiceSmoke(): Promise<void> {
     runParseGuardChecks();
     runZeroOptionMessageChecks();
     runConstantRequestChecks();
+    runTaskRouteChecks();
     await runDebugForceRawChecks();
     await runRunlogChecks();
     console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');
