@@ -36,6 +36,14 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 - 陷阱：`.extensionsMenuExtensionButton` 是条目内图标 div（无文本），按它找按钮永远 undefined；`display:none` 的壳里 `querySelectorAll` 照样列出隐藏 tab（假阳性），以 `innerText` 判可见性。
 - harness 存储在内存，刷新即丢端点等数据（正常现象，不是 bug）。
 
+## UI 原语纪律（src/shell/ui/）
+
+- tab 页面只用 TTCard/TTField/TTCombobox/TTStatus 组件与 .tt-btn/.tt-check-row/.tt-ctrl 类拼装，禁止手写裸 label+select/input 组合与私有控件 CSS；原生 select/input/textarea 一律加 .tt-ctrl 取皮；字号/间距/控件高只用令牌（shell.css --tt-*），font-size 字面量只许出现在 ui/ 组件样式内（token 元素父链恒为基准字号），tab 与 shell.css 非 token 区禁止。
+- 一个数据一个控件：同一字段禁止双控件拼功能（可输可选＝TTCombobox 单控件）。
+- 数据有无不改变布局结构：清单出现/消失只许发生在控件内部浮层，不许整行/整块冒出或行高突变。
+- 卡片描述 ≤2 行：规格级长文进 TTCard 的 details 折叠或运行日志，不铺在设置面。
+- 新控件需求先扩原语层再使用（缺什么补什么），不在单 tab 内特化。
+
 ## 存储域纪律
 
 写任何持久化数据前先定域（三域归属判据）：

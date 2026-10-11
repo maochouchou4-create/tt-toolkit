@@ -18,6 +18,16 @@
     max-height: calc(100dvh - var(--topBarBlockSize, 48px) - 96px);
     display: none;
     z-index: 30000;
+    /* 字号两档＋基准：基准 1em（卡片标题/输入下拉正文/按钮/tab 纽扣）不设 token */
+    --tt-fs-aux: 0.85em;   /* 字段标签、任务名、行内辅助文字 */
+    --tt-fs-hint: 0.75em;  /* 卡片描述、状态徽标、提示行、版本号 */
+    /* 间距尺（行内/块内/卡内/卡间） */
+    --tt-sp-1: 4px;
+    --tt-sp-2: 8px;
+    --tt-sp-3: 12px;
+    --tt-sp-4: 16px;
+    /* 控件高度（输入/下拉/combobox/按钮统一；border-box 含 padding） */
+    --tt-ctrl-h: 30px;
 }
 
 .tt-shell.openDrawer {
@@ -199,4 +209,63 @@
 
 .tt-switch-row input[type='checkbox'] {
     margin: 0;
+}
+
+/* ===== 原语层公共类（ui/ 组件与各 tab 共用；皮肤/按钮/开关行的样式单点） ===== */
+
+/* 原生控件皮肤单点：原生 select/input/textarea 一律加此类取皮，
+   tab 内禁止复制皮肤规则（tt-ctrl-h 用 border-box 含边框内边距） */
+.tt-ctrl {
+    box-sizing: border-box;
+    height: var(--tt-ctrl-h);
+    padding: 0 var(--tt-sp-2);
+    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    font-family: inherit;
+}
+
+/* 统一按钮（按钮皮肤单点，勿在 tab 内另写按钮样式） */
+.tt-btn {
+    box-sizing: border-box;
+    height: var(--tt-ctrl-h);
+    padding: 0 var(--tt-sp-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--SmartThemeBlurTintColor, rgba(128, 128, 128, 0.15));
+    color: var(--SmartThemeBodyColor, inherit);
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.tt-btn:hover {
+    filter: brightness(1.15);
+}
+
+.tt-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tt-btn--danger {
+    color: var(--SmartThemeFontColorDanger, #b54b4b);
+}
+
+/* 统一 checkbox 行 */
+.tt-check-row {
+    display: flex;
+    align-items: center;
+    gap: var(--tt-sp-2);
+    padding: var(--tt-sp-1) 0;
+    font-size: var(--tt-fs-aux);
+    cursor: pointer;
+}
+
+.tt-check-row input[type='checkbox'] {
+    margin: 0;
+    flex-shrink: 0;
 }

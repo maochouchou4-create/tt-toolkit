@@ -3,16 +3,11 @@
     「API」tab：服务商接入身份维护（列表/增删改/拉模型清单）＋任务模型
     （五行档案，各任务独立选服务商与模型）＋生成注入（破限预设）。
     url+key＝服务商，模型选择权在任务模型卡——两层分离。
-    视觉照 .tt-card 体系；类名前缀 tt-api-。
+    页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn，
+    字号/间距只走 --tt-* 令牌，本样式只余页面私有布局与信息行。
   -->
   <div class="tt-api-tab">
-    <div class="tt-card">
-      <div class="tt-card-title">API 服务商</div>
-      <div class="tt-card-sub">
-        这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。
-        密钥经宿主后端转发直达上游，不存进宿主的密钥库。
-      </div>
-
+    <TTCard title="API 服务商" :sub="PROVIDERS_SUB">
       <div v-if="!apis.endpoints.length" class="tt-api-empty">
         还没有服务商——点下方「新增服务商」开始配置。
       </div>
@@ -25,125 +20,121 @@
           <span class="tt-api-key" :title="p.key ? '密钥已保存（打码显示）' : '未填密钥'">{{ maskKey(p.key) }}</span>
         </div>
         <div class="tt-api-row-actions">
-          <button type="button" class="tt-api-btn" @click="apis.startDraft(p)">编辑</button>
-          <button type="button" class="tt-api-btn tt-api-btn-danger" @click="confirmRemove(p)">删除</button>
+          <button type="button" class="tt-btn" @click="apis.startDraft(p)">编辑</button>
+          <button type="button" class="tt-btn tt-btn--danger" @click="confirmRemove(p)">删除</button>
         </div>
       </div>
 
-      <button type="button" class="tt-api-btn" @click="apis.startDraft()">新增服务商</button>
-    </div>
+      <button type="button" class="tt-btn" @click="apis.startDraft()">新增服务商</button>
+    </TTCard>
 
-    <div class="tt-card">
-      <div class="tt-card-title">任务模型</div>
-      <div class="tt-card-sub">
-        每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。
-        模型下拉来自所选服务商的清单缓存，也可直接手填模型 ID。
-      </div>
-
-      <div v-for="t in TASKS" :key="t.id" class="tt-task-row">
-        <div class="tt-task-head">
-          <span class="tt-task-label">{{ t.label }}</span>
-          <span v-if="profileStatus(t.id) === 'dangling'" class="tt-api-status" data-ok="false">所选服务商已删除，请重新选择</span>
-          <span v-else-if="profileStatus(t.id) === 'empty'" class="tt-api-status">未配置</span>
+    <TTCard title="任务模型" :sub="TASKS_SUB">
+      <div class="tt-task-grid" role="grid">
+        <div class="tt-task-grid-row tt-task-grid-head" role="row">
+          <span class="tt-task-grid-cell tt-task-grid-cell--name" role="presentation" />
+          <span class="tt-task-grid-cell" role="columnheader">服务商</span>
+          <span class="tt-task-grid-cell" role="columnheader">模型</span>
+          <span class="tt-task-grid-cell" role="columnheader">温度</span>
+          <span class="tt-task-grid-cell" role="columnheader">思考</span>
         </div>
-        <div class="tt-task-fields">
-          <label class="tt-api-field">
-            <span>服务商</span>
-            <select :value="apis.taskProfiles[t.id].providerId" @change="onProviderChange(t.id, $event)">
+        <div v-for="t in TASKS" :key="t.id" class="tt-task-grid-row" role="row">
+          <span class="tt-task-grid-cell tt-task-grid-cell--name" role="rowheader">
+            <span class="tt-task-label">{{ t.label }}</span>
+            <TTStatus v-if="profileStatus(t.id) === 'dangling'" tone="err">所选服务商已删除，请重新选择</TTStatus>
+            <TTStatus v-else-if="profileStatus(t.id) === 'empty'" tone="muted">未配置</TTStatus>
+          </span>
+          <span class="tt-task-grid-cell" role="gridcell">
+            <select
+              class="tt-ctrl"
+              :value="apis.taskProfiles[t.id].providerId"
+              aria-label="服务商"
+              @change="onProviderChange(t.id, $event)"
+            >
               <option value="">（未选择）</option>
               <option v-for="p in apis.endpoints" :key="p.id" :value="p.id">{{ p.name || p.url }}</option>
             </select>
-          </label>
-          <label class="tt-api-field">
-            <span>模型</span>
-            <input
-              :value="apis.taskProfiles[t.id].model"
-              type="text"
-              list="tt-task-model-options"
+          </span>
+          <span class="tt-task-grid-cell" role="gridcell">
+            <TTCombobox
+              :model-value="apis.taskProfiles[t.id].model"
+              :options="providerModels(t.id)"
+              :empty-text="modelEmptyText(t.id)"
               placeholder="模型 ID（可从所选服务商清单选）"
-              @change="onModelInput(t.id, $event)"
-            >
-          </label>
-          <label class="tt-api-field">
-            <span>温度</span>
+              aria-label="模型"
+              @update:model-value="onModelInput(t.id, $event)"
+            />
+          </span>
+          <span class="tt-task-grid-cell" role="gridcell">
             <input
+              class="tt-ctrl"
               :value="apis.taskProfiles[t.id].temperature ?? ''"
               type="number"
               min="0"
               max="2"
               step="0.1"
               placeholder="默认"
+              aria-label="温度"
               @change="onTemperatureInput(t.id, $event)"
             >
-          </label>
-          <label class="tt-api-field">
-            <span>思考</span>
-            <select :value="apis.taskProfiles[t.id].reasoningEffort ?? ''" @change="onEffortChange(t.id, $event)">
+          </span>
+          <span class="tt-task-grid-cell" role="gridcell">
+            <select
+              class="tt-ctrl"
+              :value="apis.taskProfiles[t.id].reasoningEffort ?? ''"
+              aria-label="思考"
+              @change="onEffortChange(t.id, $event)"
+            >
               <option value="">默认（{{ effortLabel(TASK_PARAMS[t.id].defaultReasoningEffort) }}）</option>
               <option v-for="e in EFFORT_OPTIONS" :key="e.value" :value="e.value">{{ e.label }}</option>
             </select>
-          </label>
+          </span>
         </div>
-        <select v-if="providerModels(t.id).length" class="tt-api-model-select" @change="onModelPick(t.id, $event)">
-          <option value="" disabled>（从 {{ providerName(t.id) }} 的清单选择模型）</option>
-          <option v-for="m in providerModels(t.id)" :key="m" :value="m">{{ m }}</option>
-        </select>
       </div>
-      <datalist id="tt-task-model-options">
-        <option v-for="m in selectedTaskModels" :key="m" :value="m" />
-      </datalist>
 
       <div class="tt-api-hint">推荐参数（调乱后照此恢复）：选项生成/人设生成＝温度 1.0·思考高；小总结/大总结＝温度 0.7·思考高；总结判断＝温度 0.2·思考高（配 Flash 可按体验自调）。</div>
-    </div>
+    </TTCard>
 
-    <div class="tt-card">
-      <div class="tt-card-title">生成注入</div>
-      <div class="tt-card-sub">
-        破限预设：选中宿主预设的「启用文本条目」会按原角色（assistant 开场就还是 assistant）插到创作类任务每次请求的最前，人设两段链每段都带。
-        预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。
-        人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）；预设不存在或无启用文本条目时生成将不带注入（运行日志有记录）。
-      </div>
-      <label class="tt-api-field">
-        <span>破限预设</span>
-        <select :value="apis.jailbreakPreset" @change="onJbPresetChange">
+    <TTCard title="生成注入" :sub="JB_SUB">
+      <TTField label="破限预设">
+        <select class="tt-ctrl" :value="apis.jailbreakPreset" @change="onJbPresetChange">
           <option value="">不启用</option>
           <option v-for="name in apis.presetNames" :key="name" :value="name">{{ name }}</option>
         </select>
-      </label>
-      <div v-if="jbMissing" class="tt-api-status" data-ok="false">
-        选中预设「{{ apis.jailbreakPreset }}」已不存在——生成将不带注入，请重选或切回「不启用」
+      </TTField>
+      <div v-if="jbMissing" class="tt-api-notice">
+        <TTStatus tone="err">选中预设「{{ apis.jailbreakPreset }}」已不存在——生成将不带注入，请重选或切回「不启用」</TTStatus>
       </div>
-    </div>
+      <template #details>{{ JB_DETAILS }}</template>
+    </TTCard>
 
-    <div v-if="apis.draft" class="tt-card">
-      <div class="tt-card-title">{{ isEdit ? '编辑服务商' : '新服务商' }}</div>
-      <label class="tt-api-field">
-        <span>名称</span>
-        <input v-model.trim="apis.draft.name" type="text" placeholder="如：DeepSeek 官方 / 某中转站">
-      </label>
-      <label class="tt-api-field">
-        <span>地址</span>
-        <input v-model.trim="apis.draft.url" type="text" placeholder="https://api.example.com/v1">
-      </label>
-      <label class="tt-api-field">
-        <span>密钥</span>
-        <input v-model.trim="apis.draft.key" type="text" autocomplete="off" placeholder="sk-…">
-      </label>
-      <div class="tt-api-field">
-        <span>模型清单</span>
-        <div class="tt-api-model-edit">
-          <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `已缓存 ${apis.draft.models.length} 个模型` : '未拉取' }}</span>
-          <button type="button" class="tt-api-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
-        </div>
+    <TTCard v-if="apis.draft" :title="isEdit ? '编辑服务商' : '新服务商'">
+      <TTField label="名称">
+        <input v-model.trim="apis.draft.name" class="tt-ctrl" type="text" placeholder="如：DeepSeek 官方 / 某中转站">
+      </TTField>
+      <TTField label="地址">
+        <input v-model.trim="apis.draft.url" class="tt-ctrl" type="text" placeholder="https://api.example.com/v1">
+      </TTField>
+      <TTField label="密钥">
+        <input v-model.trim="apis.draft.key" class="tt-ctrl" type="text" autocomplete="off" placeholder="sk-…">
+      </TTField>
+
+      <div class="tt-api-model-edit">
+        <span class="tt-api-model-edit-label">模型清单</span>
+        <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `已缓存 ${apis.draft.models.length} 个模型` : '未拉取' }}</span>
+        <button type="button" class="tt-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
       </div>
 
       <div class="tt-api-actions">
-        <button type="button" class="tt-api-btn" @click="onSave">保存</button>
-        <button type="button" class="tt-api-btn" @click="apis.cancelDraft()">取消</button>
+        <button type="button" class="tt-btn" @click="onSave">保存</button>
+        <button type="button" class="tt-btn" @click="apis.cancelDraft()">取消</button>
       </div>
-      <div v-if="draftError" class="tt-api-status" data-ok="false">{{ draftError }}</div>
-      <div v-else-if="apis.fetchStatus" class="tt-api-status" :data-ok="apis.fetchStatus.ok">{{ apis.fetchStatus.message }}</div>
-    </div>
+      <div v-if="draftError" class="tt-api-notice">
+        <TTStatus tone="err">{{ draftError }}</TTStatus>
+      </div>
+      <div v-else-if="apis.fetchStatus" class="tt-api-notice">
+        <TTStatus :tone="apis.fetchStatus.ok ? 'ok' : 'err'">{{ apis.fetchStatus.message }}</TTStatus>
+      </div>
+    </TTCard>
   </div>
 </template>
 
@@ -154,11 +145,18 @@ import { TASKS, type TaskId } from '@/tasks';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import type { ReasoningEffort } from '@/modules/apis/client';
 import type { ApiProvider } from '@/modules/apis/types';
+import { TTCard, TTCombobox, TTField, TTStatus } from '@/shell/ui';
 
 const apis = useApisStore();
 
 const modelsLoading = ref(false);
 const draftError = ref('');
+
+// 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写
+const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
+const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。模型下拉来自所选服务商的清单缓存，也可直接手填模型 ID。';
+const JB_SUB = '选中宿主预设的「启用文本条目」会插到创作类任务每次请求的最前，人设两段链每段都带；预设不存在或无启用条目时生成不带注入（运行日志有记录）。';
+const JB_DETAILS = '按原角色插入（assistant 开场就还是 assistant）。预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）。';
 
 const EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
     { value: 'off', label: '关' },
@@ -209,30 +207,21 @@ function providerModels(task: TaskId): string[] {
     return apis.endpoints.find(p => p.id === providerId)?.models ?? [];
 }
 
-function providerName(task: TaskId): string {
-    const providerId = apis.taskProfiles[task].providerId;
-    const provider = apis.endpoints.find(p => p.id === providerId);
-    return provider?.name || provider?.url || '';
+/** 模型候选空态文案：区分「没选服务商」与「选了但没清单」两种指引。 */
+function modelEmptyText(task: TaskId): string {
+    return apis.taskProfiles[task].providerId
+        ? '该服务商暂无模型清单，可直接手填'
+        : '请先选择服务商，或直接手填模型 ID';
 }
-
-/** 任务模型卡的手填 datalist 源：当前有服务商档的行的清单并集。 */
-const selectedTaskModels = computed(() => {
-    const ids = new Set(apis.endpoints.flatMap(p => p.models));
-    return [...ids].sort();
-});
 
 function onProviderChange(task: TaskId, event: Event): void {
     // 换服务商不保留旧模型（模型属于服务商），回未配置态等用户重选
     apis.updateTaskProfile(task, { providerId: (event.target as HTMLSelectElement).value, model: '' });
 }
 
-function onModelInput(task: TaskId, event: Event): void {
-    apis.updateTaskProfile(task, { model: (event.target as HTMLInputElement).value.trim() });
-}
-
-function onModelPick(task: TaskId, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    if (value) apis.updateTaskProfile(task, { model: value });
+/** 模型值唯一写通道（手填与候选选中同路），trim 语义在此收口。 */
+function onModelInput(task: TaskId, value: string): void {
+    apis.updateTaskProfile(task, { model: value.trim() });
 }
 
 function onTemperatureInput(task: TaskId, event: Event): void {
@@ -286,20 +275,19 @@ function onSave(): void {
 }
 </script>
 
-<style>
-/* 「API」tab 样式（tt-api- 前缀自持；卡片壳复用壳层 .tt-card） */
+<style scoped>
 .tt-api-empty {
-    font-size: 0.8em;
+    font-size: var(--tt-fs-aux);
     opacity: 0.7;
-    padding: 6px 0;
+    padding: var(--tt-sp-2) 0;
 }
 
 .tt-api-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 6px 4px;
+    gap: var(--tt-sp-2);
+    padding: var(--tt-sp-2) var(--tt-sp-1);
     border-bottom: 1px dashed var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.3));
 }
 
@@ -307,10 +295,10 @@ function onSave(): void {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
+    gap: var(--tt-sp-3);
     min-width: 0;
     flex: 1;
-    font-size: 0.85em;
+    font-size: var(--tt-fs-aux);
 }
 
 .tt-api-name {
@@ -332,136 +320,98 @@ function onSave(): void {
 
 .tt-api-key {
     opacity: 0.5;
-    font-size: 0.9em;
+    font-size: var(--tt-fs-hint);
 }
 
 .tt-api-row-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--tt-sp-2);
     flex-shrink: 0;
 }
 
-/* 任务模型卡：一行一任务（任务名＋四字段＋清单下拉） */
-.tt-task-row {
-    padding: 6px 4px;
+/* 任务模型卡：单表头 ARIA 网格——列头只说一次，控件关联靠 aria-label */
+.tt-task-grid {
+    display: flex;
+    flex-direction: column;
+}
+
+.tt-task-grid-row {
+    display: grid;
+    grid-template-columns: minmax(5em, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.5fr) minmax(4.5em, 0.6fr) minmax(0, 0.9fr);
+    gap: var(--tt-sp-1) var(--tt-sp-2);
+    align-items: center;
+    padding: var(--tt-sp-1) 0;
     border-bottom: 1px dashed var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.3));
 }
 
-.tt-task-head {
+.tt-task-grid-cell {
     display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.tt-task-grid-cell > .tt-ctrl,
+.tt-task-grid-cell > .tt-combobox {
+    width: 100%;
+}
+
+.tt-task-grid-cell--name {
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
+    gap: var(--tt-sp-1) var(--tt-sp-2);
+}
+
+.tt-task-grid-head .tt-task-grid-cell {
+    font-size: var(--tt-fs-hint);
+    opacity: 0.65;
 }
 
 .tt-task-label {
     font-weight: 600;
-    font-size: 0.85em;
+    font-size: var(--tt-fs-aux);
 }
 
-.tt-task-fields {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 12px;
-}
+/* 窄壳回退：任务名整行、四控件两列两行（程序化关联靠 aria-label 兜底） */
+@media (max-width: 480px) {
+    .tt-task-grid-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
 
-.tt-task-fields .tt-api-field {
-    flex: 1;
-    min-width: 9em;
-}
-
-.tt-task-fields .tt-api-field > span {
-    min-width: 3em;
+    .tt-task-grid-cell--name {
+        grid-column: 1 / -1;
+    }
 }
 
 .tt-api-hint {
-    font-size: 0.75em;
+    font-size: var(--tt-fs-hint);
     opacity: 0.65;
-    padding-top: 8px;
-}
-
-.tt-api-btn {
-    background: var(--SmartThemeBlurTintColor, rgba(128, 128, 128, 0.15));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 3px 10px;
-    font-size: 0.85em;
-    cursor: pointer;
-}
-
-.tt-api-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.tt-api-btn-danger {
-    color: var(--SmartThemeFontColorDanger, #b54b4b);
-}
-
-.tt-api-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85em;
-    flex-wrap: wrap;
-}
-
-.tt-api-field > span {
-    min-width: 4em;
-    opacity: 0.8;
-    flex-shrink: 0;
-}
-
-.tt-api-field input,
-.tt-api-field select {
-    flex: 1;
-    min-width: 10em;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 3px 6px;
-    font-size: 0.95em;
+    padding-top: var(--tt-sp-2);
 }
 
 .tt-api-model-edit {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--tt-sp-2);
     flex: 1;
     min-width: 12em;
+    padding: var(--tt-sp-1) 0;
 }
 
-.tt-api-model-select {
-    width: 100%;
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 5px;
-    padding: 3px 6px;
-    font-size: 0.9em;
-    margin-top: 4px;
+.tt-api-model-edit-label {
+    min-width: 4em;
+    opacity: 0.8;
+    flex-shrink: 0;
+    font-size: var(--tt-fs-aux);
 }
 
 .tt-api-actions {
     display: flex;
-    gap: 8px;
-    padding-top: 8px;
+    gap: var(--tt-sp-2);
+    padding-top: var(--tt-sp-2);
 }
 
-.tt-api-status {
-    font-size: 0.8em;
-    padding-top: 6px;
-    opacity: 0.9;
-}
-
-.tt-api-status[data-ok='true'] {
-    color: var(--SmartThemeQuoteColor, #4b8b5f);
-}
-
-.tt-api-status[data-ok='false'] {
-    color: var(--SmartThemeFontColorDanger, #b54b4b);
+.tt-api-notice {
+    padding-top: var(--tt-sp-2);
 }
 </style>
