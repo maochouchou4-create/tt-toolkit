@@ -518,7 +518,9 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 活动键退役 1、服务商删除联动重置档案行 1；测连断言随 testConnection 退役 -1）
 // 本批 +4（v1.11.0 策展清单扩容：curator 参考清单体量 55 行/机制挂载开放段在场/
 // 新口径上限 16＋元层剥离/gen 值厚度与行为心理类传导；默认模板断言五块改十二块）
-const PERSONA_PASS_EXPECTED = 84;
+// 本批 +3（v1.18.0 流内上游错误帧：真实事故帧抛错＋runlog 记失败/error:null
+// 反向守门/去 prefill 重试端到端）
+const PERSONA_PASS_EXPECTED = 87;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

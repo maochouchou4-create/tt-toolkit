@@ -21,7 +21,7 @@ import { deleteEndpoint, readApiDomain, writeApiDomain, writeJailbreakPreset } f
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
-import { stripYamlFence, collectWorldInfoContext } from './generation';
+import { runGeneration, stripYamlFence, collectWorldInfoContext } from './generation';
 import { usePersonaStore } from './store';
 
 const failures: string[] = [];
@@ -734,6 +734,39 @@ async function runApiChecks(): Promise<void> {
         }
         check('api：正常产出正文以错误标签开头不被误杀（判据只认信封 id、不看正文文本）',
             labelLookalike.includes('这是我写的示例文本'), `content=${labelLookalike.slice(0, 30)}`);
+
+        // 流内上游错误帧（真实事故帧样本，抄自 llm-api-3158.response.sse 第 2 行
+        // ——原文随宿主日志轮转清除、事后追不回，故进夹具）：流已开后上游 400
+        // 被宿主原样转发，无信封 id、无 choices。不认它＝失败被记成 ok 空响应。
+        globalThis.fetch = (async () => fakeSSEStream([
+            `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
+        ])) as unknown as typeof fetch;
+        let upstreamFrameThrown = '';
+        try {
+            await callGenerateEndpoint(
+                [{ role: 'user', content: 'hi' }],
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            );
+        } catch (e) {
+            upstreamFrameThrown = (e as Error).message;
+        }
+        const upstreamFrameRecord = useRunlogStore().records[useRunlogStore().records.length - 1];
+        check('api：流内上游错误帧抛错（error 对象判别、文案保留上游原文、runlog 记失败不再伪装 ok 空响应）',
+            upstreamFrameThrown.includes('Requests ending with a model turn are not supported.')
+            && upstreamFrameThrown.includes('upstream status 400')
+            && !!upstreamFrameRecord && upstreamFrameRecord.ok === false
+            && (upstreamFrameRecord.error ?? '').includes('Requests ending with a model turn'),
+            `thrown=${upstreamFrameThrown.slice(0, 60)}`);
+
+        // 反向守门：部分上游的正常帧带 error:null 键——null 不算错误帧，照常收下
+        globalThis.fetch = (async () => fakeSSEStream([
+            'data: {"error":null,"choices":[{"delta":{"content":"好"}}]}\n\ndata: [DONE]\n\n',
+        ])) as unknown as typeof fetch;
+        const rErrorNull = await callGenerateEndpoint(
+            [{ role: 'user', content: 'hi' }],
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+        );
+        check('api：正常帧带 error:null 不误杀（null 键照常收下 delta）', rErrorNull.content === '好', `text=${rErrorNull.content}`);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -956,6 +989,37 @@ async function runPersonaE2EChecks(): Promise<void> {
         } finally {
             delete envelopeWindow.toastr;
         }
+
+        // 流内上游错误帧 e2e（判别性主断言，真跑 runGeneration）：persona 两段
+        // 请求均以 assistant prefill 结尾，curator 首发被网关以「末条是模型轮」
+        // 400 拒收（真实事故帧）——必须触发去 prefill 重试且第二次成功。锁
+        // 用户可见行为（三次实发 fetch body 的末条角色），不锁上游文案形状。
+        const prefillRetryBefore = calls.length;
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            if (calls.length === prefillRetryBefore + 1) {
+                return fakeSSEStream([
+                    `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
+                ]);
+            }
+            return sseResponse(calls.length === prefillRetryBefore + 2 ? CURATOR_YAML : PERSONA_YAML);
+        }) as typeof fetch;
+        const prefillProfile = await runGeneration({
+            route: { url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high' },
+            request: '流内错误帧重试试验',
+            wiText: '',
+            greetingsText: '',
+        });
+        const first400 = (calls[prefillRetryBefore]?.body.messages ?? []) as Array<{ role: string }>;
+        const retry400 = (calls[prefillRetryBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
+        check('端到端：流内上游错误帧触发去 prefill 重试（首发末条 assistant、重试末条 user、成功落地）',
+            calls.length === prefillRetryBefore + 3
+            && first400[first400.length - 1]?.role === 'assistant'
+            && retry400[retry400.length - 1]?.role === 'user'
+            && retry400.length === first400.length - 1
+            && prefillProfile === '姓名: 阿德\n年龄: 20',
+            `firstLast=${first400[first400.length - 1]?.role} retryLast=${retry400[retry400.length - 1]?.role} profile=${prefillProfile}`);
+
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);
@@ -1114,5 +1178,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }
