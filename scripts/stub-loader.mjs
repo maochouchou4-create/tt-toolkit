@@ -35,7 +35,7 @@ const STUB_EXPORTS = {
     // personas 写回通道（host/personas.ts 导入面）＋世界书读取
     // （host/worldinfo.ts，生成参考链）＋findPersona（utils）
     'scripts/world-info.js': ['getWorldInfoPrompt', 'loadWorldInfo'],
-    'scripts/personas.js': ['getUserAvatars', 'initPersona', 'setUserAvatar', 'user_avatar'],
+    'scripts/personas.js': ['getUserAvatars', 'initPersona', 'setPersonaDescription', 'setUserAvatar', 'user_avatar'],
     'scripts/utils.js': ['findPersona'],
     'scripts/slash-commands/SlashCommandParser.js': ['SlashCommandParser'],
     'scripts/slash-commands/SlashCommand.js': ['SlashCommand'],

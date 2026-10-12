@@ -3,14 +3,11 @@
  *
  * 核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - personas.js:75 `export let user_avatar = ''`（当前选中头像 id 的
- *   live binding，setUserAvatar :153 内部赋值）。
+ *   live binding，setUserAvatar 内部赋值，personas.js:170）。
  * - personas.js:548 `initPersona(avatarId, personaName, personaDescription,
  *   personaTitle, {silent,...})`：写 power_user.personas[avatarId] + 建
  *   persona 描述符 + saveSettingsDebounced + 非 silent emit PERSONA_CREATED。
  *   本通道建档走 silent:true（扩展不自造宿主 toast）。
- * - personas.js:864-881 宿主写回纪律（editPersonaTitle 实证）：写描述符 →
- *   getUserAvatars → saveSettingsDebounced → await eventSource.emit(
- *   event_types.PERSONA_UPDATED, avatarId)。
  * - personas.js:387-412 uploadUserAvatar 形态：fetch(default_user_avatar)→
  *   blob→File('avatar.png')→FormData(avatar + overwrite_name)→POST
  *   /api/avatars/upload（getRequestHeaders({omitContentType:true})，
@@ -25,16 +22,21 @@
  *   必须先经 /api/avatars/upload 落 PNG。
  *
  * emit 破例说明：本仓纪律是「扩展不反向 emit 宿主事件」（host/events.ts
- * 的 eventBus 只暴露 on/once）。但 persona 写回必须复刻宿主内部刷新行为
- * （personas.js:871 同款 PERSONA_UPDATED，否则宿主 persona 管理视图与镜像
- * 字段不刷新）。故本文件内部直接 import 宿主 eventSource 做 emit——破例
- * 封闭在本文件内，业务侧仍只读订阅（eventBus 面），不接触 emit。
+ * 的 eventBus 只暴露 on/once）。persona 写回要与宿主写回通道保持同款落库
+ * 时序，故本文件内部直接 import 宿主 eventSource 做 emit——破例封闭在本
+ * 文件内，业务侧仍只读订阅（eventBus 面），不接触 emit。
+ *
+ * 刷新靠渲染口而非事件：PERSONA_UPDATED 在整个宿主里零订阅（只有
+ * events.js 的常量定义，无一处 eventSource.on），emit 出去无人听。描述框
+ * 与人设列表的刷新只能直接调 setPersonaDescription / getUserAvatars 两个
+ * 渲染口——漏调则描述框留着旧文本，用户此后在框里打字会经
+ * onPersonaDescriptionInput 把刚写入的新描述覆写回去并持久化。
  */
 
 import { default_user_avatar, getRequestHeaders, saveSettingsDebounced } from '@sillytavern/script';
 import { power_user as stPowerUser } from '@sillytavern/scripts/power-user';
 import { eventSource as stEventSource, event_types as stEventTypes } from '@sillytavern/scripts/events';
-import { getUserAvatars, initPersona, setUserAvatar, user_avatar } from '@sillytavern/scripts/personas';
+import { getUserAvatars, initPersona, setPersonaDescription, setUserAvatar, user_avatar } from '@sillytavern/scripts/personas';
 import { findPersona } from '@sillytavern/scripts/utils';
 import { createTtlog } from './ttlog';
 
@@ -132,7 +134,9 @@ async function createAvatarPersona(displayName: string, description: string): Pr
     if (!res.ok) throw new Error(`头像上传失败 (${res.status})`);
     const json = (await res.json()) as { path?: string };
     const avatarId = json.path || preferredId;
-    await getUserAvatars(false);
+    // initPersona（personas.js:548-570）只写 power_user.personas / persona_descriptions，
+    // 不读 userAvatars——头像列表的刷新由调用方的 getUserAvatars(true, id) 一处负责，
+    // 此前这里还多挂一次无渲染刷新，非 Tauri 下等于每次建档多打一个 POST /api/avatars/get
     await initPersona(avatarId, displayName, description, '', { silent: true });
     return avatarId;
 }
@@ -142,10 +146,12 @@ async function createAvatarPersona(displayName: string, description: string): Pr
  * 先清幽灵键再查重——旧版插件写入的幽灵键若仍在内存，findPersona 会命中它
  * 并走「更新已存在」分支，该分支对无头像文件的 id 必然保存失败。
  *
- * 已存在分支写回纪律（personas.js:864-881 宿主内部同序）：
+ * 已存在分支写回纪律（personas.js:2255-2262 宿主 /persona-update 通道同序）：
  * 写 persona_descriptions[avatarId].description →（选中态时刷
  * power_user.persona_description 镜像）→ saveSettingsDebounced →
- * emit PERSONA_UPDATED → 未选中时 setUserAvatar 静默切换。
+ * emit PERSONA_UPDATED →（选中态时 setPersonaDescription 刷描述框）→
+ * 未选中时 setUserAvatar 静默切换 → getUserAvatars(true, avatarId)
+ * 刷人设列表（其渲染回调末端即 UI 选中态刷新）。
  */
 export async function upsertPersona(displayName: string, description: string): Promise<{ avatarId: string; created: boolean }> {
     await cleanGhostPersonaKeys();
@@ -153,21 +159,28 @@ export async function upsertPersona(displayName: string, description: string): P
     const existingAvatarId = existing && typeof existing.avatar === 'string' ? existing.avatar : null;
 
     if (existingAvatarId) {
+        // 「是不是当前人设」在这条链路上要判三次（镜像、刷描述框、静默切换），
+        // 分处写三遍必然走岔——算出一次全程复用。求值点定在 await 之前：
+        // 中途 saveSettingsDebounced / emit 都不该改变当前人设
+        const isCurrentAvatar = getCurrentAvatarId() === existingAvatarId;
         // 按名查到的人设名字本就一致，此处不写 name（半截改名会与 name1 脱钩，改名应走宿主流程）
         const descriptor = (personaDescriptions()[existingAvatarId] ??= { description: '', position: 0, depth: 2, role: 0, lorebook: '', title: '' });
         descriptor.description = description;
-        if (getCurrentAvatarId() === existingAvatarId) {
+        if (isCurrentAvatar) {
             (stPowerUser as Record<string, unknown>).persona_description = description;
         }
         saveSettingsDebounced();
-        // emit 破例：复刻宿主内部刷新行为（见文件头），业务侧仍只读订阅
+        // emit 破例：复刻宿主写回通道的落库时序（见文件头），业务侧仍只读订阅
         await stEventSource.emit(stEventTypes.PERSONA_UPDATED, existingAvatarId);
-        if (getCurrentAvatarId() !== existingAvatarId) {
-            await setUserAvatar(existingAvatarId, { toastPersonaNameChange: false });
-        }
+        // 事件全宿主零订阅，UI 只能直调渲染口：刷描述框 / 未选中时静默切过去
+        if (isCurrentAvatar) setPersonaDescription();
+        else await setUserAvatar(existingAvatarId, { toastPersonaNameChange: false });
+        await getUserAvatars(true, existingAvatarId);
         return { avatarId: existingAvatarId, created: false };
     }
 
     const avatarId = await createAvatarPersona(displayName, description);
+    // 建档不切选中态，描述框无须重填；列表渲染照走（新人设要当场可见）
+    await getUserAvatars(true, avatarId);
     return { avatarId, created: true };
 }

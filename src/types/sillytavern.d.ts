@@ -263,7 +263,7 @@ declare module '@sillytavern/scripts/world-info' {
 declare module '@sillytavern/scripts/personas' {
     /**
      * 当前选中用户头像 id（live binding：setUserAvatar 内部赋值，
-     * personas.js:153 user_avatar = avatar）。
+     * personas.js:170）。
      * @hostAnchor scripts/personas.js:75 export let user_avatar = '';
      */
     export let user_avatar: string;
@@ -294,6 +294,12 @@ declare module '@sillytavern/scripts/personas' {
      * @hostAnchor scripts/personas.js:302 export async function getUserAvatars(doRender = true, openPageAt = '') {
      */
     export function getUserAvatars(doRender?: boolean, openPageAt?: string): Promise<unknown>;
+    /**
+     * 刷新人设管理页描述框（PERSONA_UPDATED 无人订阅，镜像字段写完必须
+     * 直接调它，宿主页才拿到新描述）。
+     * @hostAnchor scripts/personas.js:651 export function setPersonaDescription({ displayName = name1 } = {}) {
+     */
+    export function setPersonaDescription(options?: { displayName?: string }): void;
 }
 
 declare module '@sillytavern/scripts/utils' {

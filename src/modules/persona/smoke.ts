@@ -1,13 +1,13 @@
 /**
  * node 冒烟的 persona 机判部分：迁移幂等＋统一端点收编＋五任务
- * 提示词引擎＋api 客户端形状＋store 互斥。
+ * 提示词引擎＋api 客户端形状＋store 互斥＋人设写回渲染通道。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
  * scripts/smoke.mjs 收口断言）。全部走合成数据——不依赖宿主在场数据，
  * 断言确定性；与浏览器真实数据共用同一条 storage/generation 代码路径
  * （dist 加载即覆盖）。
  */
-import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages } from '@/host';
+import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages, upsertPersona } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
@@ -1255,9 +1255,114 @@ function runHostLiveBindingChecks(): void {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 9) 人设写回渲染通道（宿主描述框/人设列表的刷新调用不能漏）
+// ---------------------------------------------------------------------------
+
+interface PersonaWriteStubs {
+    power_user: Record<string, unknown>;
+    personasCalls: {
+        initPersona: number;
+        setUserAvatar: number;
+        setPersonaDescription: number;
+        getUserAvatarsLog: Array<[boolean, string]>;
+    };
+}
+
+function personaWriteStubs(): PersonaWriteStubs {
+    return (globalThis as unknown as { __TT_SMOKE_STUBS__: PersonaWriteStubs }).__TT_SMOKE_STUBS__;
+}
+
+/** 存根里登记一个人设（personas 真源＝{头像id: 显示名}）。 */
+function seedPersona(stubs: PersonaWriteStubs, avatarId: string, name: string): void {
+    const personas = stubs.power_user.personas as Record<string, string>;
+    personas[avatarId] = name;
+}
+
+/** 刷人设列表的调用计数：渲染调用与幽灵键防御的取名调用同走 getUserAvatars，只有入参能分辨。 */
+function rendersFor(log: Array<[boolean, string]>, avatarId: string): number {
+    return log.filter(([doRender, openPageAt]) => doRender && openPageAt === avatarId).length;
+}
+
+async function runPersonaWriteBackChecks(): Promise<void> {
+    const stubs = personaWriteStubs();
+    const calls = stubs.personasCalls;
+    const descriptionBefore = stubs.power_user.persona_description;
+    const setDescBefore = calls.setPersonaDescription;
+    const initBefore = calls.initPersona;
+    const avatarLogBefore = calls.getUserAvatarsLog.length;
+    const personas = stubs.power_user.personas as Record<string, string>;
+    const descriptions = stubs.power_user.persona_descriptions as Record<string, { description?: string }>;
+    const originalFetch = globalThis.fetch;
+    // 建档分支要真走头像上传（默认头像取 PNG → /api/avatars/upload 落盘
+    // 才存得住描述）——fetch 桩按 URL 分发，两个方法各回一个够用的响应
+    const uploadPath = '1700000000000-smoke-persona.png';
+    // 非选中人设：覆盖分支的 setUserAvatar 静默切换面只有第二张头像才可达
+    //（它同样要过幽灵键防御——头像文件不在 getUserAvatars 返回表里的键会被
+    // 当旧插件脏数据整条删掉），故桩的头像文件表预置了这一张
+    const otherAvatarId = 'user-other.png';
+    globalThis.fetch = (async (url: string | URL) => (String(url) === '/api/avatars/upload'
+        ? { ok: true, status: 200, json: async () => ({ path: uploadPath }) }
+        : { ok: true, status: 200, blob: async () => new Blob(['stub']) })) as unknown as typeof fetch;
+    try {
+        // 建档分支：personas 无同名 → 上传建档（不切选中态，描述框无须重填）
+        const created = await upsertPersona('冒烟新建人设', '冒烟描述·建档');
+        // 建档的落库结果必须在下一次 upsert 的 cleanGhostPersonaKeys 之前取：
+        // uploadPath 不在桩的头像文件表里，再进一次写回就被当幽灵键删掉，
+        // 而 avatarId 早在调 initPersona 之前就返回了——不立刻断言等于没断
+        check('写回：建档分支 initPersona 恰一次且 personas 与描述符双写落地',
+            calls.initPersona - initBefore === 1
+            && personas[uploadPath] === '冒烟新建人设'
+            && descriptions[uploadPath]?.description === '冒烟描述·建档',
+            `initPersona=${calls.initPersona - initBefore} personas=${String(personas[uploadPath])} desc=${String(descriptions[uploadPath]?.description)}`);
+        // 覆盖分支：把桩的选中头像登记进 personas（名字即真源键），随后
+        // 按名 upsert 必走覆盖分支且命中选中态
+        seedPersona(stubs, 'user-default.png', '冒烟已选人设');
+        const updated = await upsertPersona('冒烟已选人设', '冒烟描述·覆盖');
+        const avatarLog = calls.getUserAvatarsLog.slice(avatarLogBefore);
+        check('写回：两条分支都刷人设列表（各一次 getUserAvatars(true, 本人设 id)）',
+            created.created && created.avatarId === uploadPath
+            && !updated.created && updated.avatarId === 'user-default.png'
+            && rendersFor(avatarLog, uploadPath) === 1 && rendersFor(avatarLog, 'user-default.png') === 1,
+            `log=${JSON.stringify(avatarLog)} created=${created.avatarId} updated=${updated.avatarId}`);
+        check('写回：覆盖选中人设时刷描述框（setPersonaDescription 恰一次、镜像字段与描述符同步为新描述）',
+            calls.setPersonaDescription - setDescBefore === 1
+            && stubs.power_user.persona_description === '冒烟描述·覆盖'
+            && descriptions['user-default.png']?.description === '冒烟描述·覆盖',
+            `setPersonaDescription=${calls.setPersonaDescription - setDescBefore} mirror=${String(stubs.power_user.persona_description)}`);
+        // 非选中人设覆盖：镜像写与刷描述框都归选中态独占，改走 setUserAvatar
+        // 静默切换（列表照刷）。这条分支此前零断言，整段删掉冒烟仍全绿
+        seedPersona(stubs, otherAvatarId, '冒烟未选人设');
+        const setAvatarBefore = calls.setUserAvatar;
+        const setDescBeforeSwitch = calls.setPersonaDescription;
+        const switchLogBefore = calls.getUserAvatarsLog.length;
+        const mirrorBefore = stubs.power_user.persona_description;
+        const switched = await upsertPersona('冒烟未选人设', '冒烟描述·切换');
+        const switchLog = calls.getUserAvatarsLog.slice(switchLogBefore);
+        check('写回：覆盖非选中人设走 setUserAvatar 静默切换（恰一次、不刷描述框、镜像不动、列表仍刷本人设）',
+            !switched.created && switched.avatarId === otherAvatarId
+            && calls.setUserAvatar - setAvatarBefore === 1
+            && calls.setPersonaDescription - setDescBeforeSwitch === 0
+            && stubs.power_user.persona_description === mirrorBefore
+            && descriptions[otherAvatarId]?.description === '冒烟描述·切换'
+            // 幽灵键防御的取名调用与刷列表调用同走此表，两次以外即纪律漂移
+            && switchLog.length === 2 && rendersFor(switchLog, otherAvatarId) === 1,
+            `setUserAvatar=${calls.setUserAvatar - setAvatarBefore} setPersonaDescription=${calls.setPersonaDescription - setDescBeforeSwitch} mirror=${String(stubs.power_user.persona_description)} log=${JSON.stringify(switchLog)}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+        delete personas[uploadPath];
+        delete personas['user-default.png'];
+        delete personas[otherAvatarId];
+        delete descriptions[uploadPath];
+        delete descriptions['user-default.png'];
+        delete descriptions[otherAvatarId];
+        stubs.power_user.persona_description = descriptionBefore;
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/全任务引擎/纯函数/api 形状/端到端/互斥机判 ===');
+    console.info('=== persona 迁移/统一端点收编/全任务引擎/纯函数/api 形状/端到端/互斥/写回渲染机判 ===');
     runMigrationChecks();
     runPromptsChecks();
     runPersonaAssemblyChecks();
@@ -1267,10 +1372,11 @@ export async function runPersonaSmoke(): Promise<void> {
     await runPersonaE2EChecks();
     await runStoreChecks();
     runHostLiveBindingChecks();
+    await runPersonaWriteBackChecks();
     if (failures.length > 0) {
         console.error(`[persona-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
 }

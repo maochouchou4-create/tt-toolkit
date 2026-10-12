@@ -290,24 +290,43 @@ globalThis.__TT_SMOKE_STUBS__ = {
     // ------------------------------------------------------------------
     // script.js:680 default_user_avatar（createAvatarPersona 的素材头像）
     default_user_avatar: 'img/user-default.png',
-    // personas.js：写回通道四件套（node 冒烟不真写宿主；调用计数供断言）
-    personasCalls: { initPersona: 0, setUserAvatar: 0, getUserAvatars: 0 },
+    // personas.js：写回通道（node 冒烟不真写宿主；调用计数与入参日志供断言）
+    // getUserAvatarsLog 记 (doRender, openPageAt)——渲染调用与幽灵键防御的
+    // 取名调用同走一个函数，只有入参能分辨哪次是刷列表
+    personasCalls: { initPersona: 0, setUserAvatar: 0, setPersonaDescription: 0, getUserAvatarsLog: [] },
+    // 头像文件表（宿主 getUserAvatars 的真源）：power_user.personas 的键只有
+    // 在表内才算有 PNG 落盘，否则 cleanGhostPersonaKeys 的幽灵键防御会把它
+    // 当旧插件脏数据删掉。预置两张——覆盖分支的 setUserAvatar 静默切换面
+    // 需要一张非选中头像才可达
+    personaAvatarFiles: ['user-default.png', 'user-other.png'],
+    // 选中态刻意不做活绑定（未进 stub-loader 的 LIVE_LET_NAMES）：宿主
+    // initPersona（personas.js:548-570）只写 personas/persona_descriptions，
+    // 切选中态是 setUserAvatar 的活绑定职责。这里给一个 const 快照，
+    // 模块侧读到的选中态恒为本值——桩模拟的是「建档不动选中态」这一宿主
+    // 真实语义；把它活起来只会让断言读到一个桩自己造的中间态
     user_avatar: 'user-default.png',
     initPersona: (avatarId, name, description) => {
         globalThis.__TT_SMOKE_STUBS__.personasCalls.initPersona++;
-        globalThis.__TT_SMOKE_STUBS__.user_avatar = avatarId;
         globalThis.__TT_SMOKE_STUBS__.power_user.personas[avatarId] = name;
         globalThis.__TT_SMOKE_STUBS__.power_user.persona_descriptions[avatarId] = { description };
     },
     setUserAvatar: async () => {
         globalThis.__TT_SMOKE_STUBS__.personasCalls.setUserAvatar++;
     },
-    getUserAvatars: async () => {
-        globalThis.__TT_SMOKE_STUBS__.personasCalls.getUserAvatars++;
-        return ['user-default.png'];
+    setPersonaDescription: () => {
+        globalThis.__TT_SMOKE_STUBS__.personasCalls.setPersonaDescription++;
     },
-    // utils.js:2724 findPersona（存档无同名 → 走建档路径）
-    findPersona: () => null,
+    getUserAvatars: async (doRender, openPageAt) => {
+        globalThis.__TT_SMOKE_STUBS__.personasCalls.getUserAvatarsLog.push([doRender === true, String(openPageAt ?? '')]);
+        return [...globalThis.__TT_SMOKE_STUBS__.personaAvatarFiles];
+    },
+    // utils.js:2724 findPersona（按 personas 真源 {头像id: 显示名} 按名查；
+    // 恒 null 时 upsertPersona 只有建档分支可达，覆盖分支的写回纪律无从机判）
+    findPersona: ({ name = null } = {}) => {
+        const personas = globalThis.__TT_SMOKE_STUBS__.power_user.personas;
+        const hit = Object.entries(personas).find(([, value]) => value === name);
+        return hit ? { avatar: hit[0] } : null;
+    },
     // world-info.js（node 冒烟：空世界书——生成参考链装载用）
     loadWorldInfo: async name => {
         return { entries: {}, name };
@@ -496,33 +515,30 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成 67 条：迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/
-// 退休键/legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃
-// 含 v1.3 endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重
-// 映射/choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动
-// 清空 1＋prompts 7（五任务键齐备/choice 18 模块红线/persona 两任务默认形状/
-// 旧数组一次写迁移/任务隔离开关/按任务恢复默认/骨架双源机判）＋persona 组装
+// 期望构成＝迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/退休键/
+// legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含旧
+// endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重映射/
+// choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动清空
+// 1＋prompts 7（五任务键齐备/choice 18 模块红线/persona 两任务默认形状/旧
+// 数组一次写迁移/任务隔离开关/按任务恢复默认/骨架双源机判）＋persona 组装
 // 3＋persona dump 观测口 2＋纯函数 5＋api 16（含 finish_reason=length 截断
 // 显式报错回归＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null，
 // ＋stub 同构机判 2：同一实例双方法 this 内部互调、保留接收者按名取预设）＋
 // e2e 7（含取消通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段
 // 前缀在场＋悬空 fail-soft 不注入）＋store 7＋会话感知 3
 // （CHAT_CHANGED 重置开场白默认档＋emit 接线全链＋无开场白卡回落不注入）＋
-// host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）。
-// 本批 +2（dump 口：观测口径标注传输层前缀状态；观测面收敛——选中预设＝实发序列含破限前缀段与计数行）
-// ＋ 空白正文 fail fast 1（纯空白抛「API 返回为空」：错误 toast 在场＋结果框保持原值＋互斥态干净）
-// ＋ 宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误正文/拦下空与散文/拦下散言前导换皮形态/
-// 拦下与切块口径分歧的 1 空格散言行；传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/
-// 正常产出以标签开头不误杀；端到端 1：curator 段遇信封即中断、第二段不发出）
-// 本批净 +1（v1.9.0：任务档案迁移 +2——五行初始化为旧活动端点＋model 收编删除/
-// 活动键退役 1、服务商删除联动重置档案行 1；测连断言随 testConnection 退役 -1）
-// 本批 +4（v1.11.0 策展清单扩容：curator 参考清单体量 55 行/机制挂载开放段在场/
-// 新口径上限 16＋元层剥离/gen 值厚度与行为心理类传导；默认模板断言五块改十二块）
-// 本批 +4（v1.18.0 流内上游错误帧：真实事故帧抛错＋runlog 记失败/error:null 反向
-// 守门/去 prefill 重试端到端＋轮内即学即用且生成链不反写设置域）＋4（v1.18.0
-// 端点 prefill 能力记忆：学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败
-// 不落标记＋错误 toast 在场/收编不抹端点能力记忆）
-const PERSONA_PASS_EXPECTED = 91;
+// host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）＋
+// 空白正文 fail fast 1（纯空白抛「API 返回为空」：错误 toast 在场＋结果框
+// 保持原值＋互斥态干净）＋宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误
+// 正文/拦下空与散文/拦下散言前导换皮形态/拦下与切块口径分歧的 1 空格散言行；
+// 传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/正常产出以标签开头不误杀；
+// 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展清单扩容 4（curator
+// 参考清单体量 55 行/机制挂载开放段在场/新口径上限 16＋元层剥离/gen 值
+// 厚度与行为心理类传导；默认模板断言五块改十二块）＋流内上游错误帧 4＋
+// 端点 prefill 能力记忆 4＋人设写回渲染通道 4（建档 initPersona 恰一次＋
+// personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
+// 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
+const PERSONA_PASS_EXPECTED = 95;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

@@ -338,6 +338,12 @@
         userAvatar = imgfile;
         console.info('[harness] setUserAvatar:', imgfile);
     }
+    // 宿主 setPersonaDescription（personas.js:651-674）把 power_user.persona_description
+    // 镜像刷进人设管理页的描述框；harness 没有该页面 DOM，镜像同步即可见——
+    // 写回链漏调它时描述框留在旧文本，用户接着打字会把新描述覆写回去并持久化
+    function setPersonaDescription() {
+        console.info('[harness] setPersonaDescription: 描述框 ← 镜像', power_user.persona_description);
+    }
     function findPersona({ name = null, allowAvatar = true } = {}) {
         const list = Object.entries(power_user.personas).map(([avatar, pName]) => ({ avatar, name: pName }));
         return list.find(p => !name || (allowAvatar && p.avatar === name) || p.name === name) ?? null;
@@ -433,7 +439,11 @@
         ross_ascends_mods: { dragElement },
         power_user: { power_user },
         world_info: { getWorldInfoPrompt, loadWorldInfo },
-        personas: { getUserAvatars, initPersona, setUserAvatar, user_avatar: userAvatar },
+        // 桩表与 src/host/personas.ts 的导入面一一对应（smoke 侧的同一约束
+        // 由 scripts/stub-loader.mjs 的 STUB_EXPORTS 承担）：少一个名字，
+        // app.js 重建后的解构拿到 undefined，人设写回在浏览器里被 catch
+        // 吞成「保存失败」——浏览器验收路径静默退化且无报错可查
+        personas: { getUserAvatars, initPersona, setPersonaDescription, setUserAvatar, user_avatar: userAvatar },
         utils: { findPersona },
         i18n: { translate },
     };
