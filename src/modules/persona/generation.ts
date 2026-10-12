@@ -41,9 +41,51 @@ import {
 } from '@/prompts';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
+import { PERSONA_BLOCK_CATALOG, isSkeletonLeaf } from '@/prompts/catalog';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
+
+/**
+ * 起手词围栏（全模块唯一定义）：策展段起手词、档案段首键起手词、以及剥
+ * 围栏时的「模型有没有把起手词带回来」判据都从它派生。三处各写一份字面
+ * 量时，围栏形态一改就会静默漏判补回——补回首行判错不报错，只把坏结构
+ * 送进下一段。
+ */
+const PREFILL_FENCE = '```yaml';
+
+/** 策展段起手词：只要围栏头（schema 的全部块键由模型自己续写）。 */
+const PREFILL_SCHEMA = PREFILL_FENCE + '\n';
+
+/**
+ * 回退骨架（目录骨架标记的推导物）＋出厂自断言：它必须自身是一份可解析
+ * 的骨架，且每个块键、每个叶键都在策展目录里。策展失败时链路由这份骨架
+ * 兜底，骨架坏了却照发＝用户拿到一份结构错的档案且全程无报错；自断言把
+ * 这层拦在出厂，不推给冒烟去发现。
+ */
+const SKELETON_FALLBACK = ((): string => {
+    const skeleton = DEFAULT_TEMPLATES.user;
+    const blocks = parseYamlToBlocks(skeleton);
+    const catalogLeaves = new Map(
+        PERSONA_BLOCK_CATALOG.map(b => [b.name, new Set(b.leaves.filter(isSkeletonLeaf).map(l => l.name))]),
+    );
+    const outside = [...blocks].flatMap(([block, body]) => {
+        const known = catalogLeaves.get(block);
+        const keys = (body.match(/^\s+(\S+):/gm) ?? []).map(k => k.trim().replace(/:$/, ''));
+        if (!known) return [`块「${block}」不在目录里`];
+        // 双向：解出来的键在目录里，且目录里该块标了骨架的叶一个不少地解了出来。
+        // 只判前者时，键行正则切不出的叶（名字带 -／：）会整行丢掉、断言照样绿，
+        // 而那正是骨架缺叶——模型拿到的是一份比目录少的档案，全程无报错。
+        const missing = keys.length !== known.size
+            ? [`块「${block}」解出 ${keys.length} 键 ≠ 目录骨架叶 ${known.size} 个`]
+            : [];
+        return [...missing, ...keys.filter(k => !known.has(k)).map(k => `叶「${block}·${k}」不在目录里`)];
+    });
+    if (!isSchemaSkeleton(skeleton) || blocks.size === 0 || outside.length > 0) {
+        throw new Error(`回退骨架自断言未过：${outside.join('、') || '骨架不可解析或无块'}`);
+    }
+    return skeleton;
+})();
 
 /** 外部取消（「停止」按钮）的哨兵异常——store 侧降级为取消提示，不作错误弹报。 */
 export class PersonaRunCancelled extends Error {
@@ -92,13 +134,37 @@ export function stripYamlFence(rawText: string, prefillContent?: string): string
     if (match && match[1]) return match[1].trim();
 
     let text = rawText;
-    if (prefillContent && !text.startsWith(prefillContent) && !text.startsWith('```yaml')) {
+    // ⚠️ 这五处判据（起手词在场／首行已含起手词／首行不是围栏／trim 后
+    // 不是围栏／三段首行白名单）必须同批看：漏判任一处的后果是静默的
+    // ——把已经带头的正文再拼一次，拼出「```yaml基本信息: 姓名: …」这种
+    // 坏结构，全程不报错。
+    if (prefillContent && !text.startsWith(prefillContent) && !text.startsWith(PREFILL_FENCE)) {
         const trimRes = text.trim();
-        if (!trimRes.startsWith('```yaml') && (trimRes.startsWith('姓名') || trimRes.startsWith('  姓名') || trimRes.startsWith('基本信息'))) {
+        if (!trimRes.startsWith(PREFILL_FENCE) && resumesPrefillHead(trimRes, prefillContent)) {
             text = prefillContent + text;
         }
     }
     return text.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
+/**
+ * 首行是否像「起手词之后该接上的那一行」：块键段取自起手词本身（档案段
+ * 的起手词按 schema 首块拼，那一段就必须是那个块名，写死会在首块改名后
+ * 判错），叶行两段是续写落在叶上的两种形态——顶格与两格缩进。
+ */
+function resumesPrefillHead(trimmed: string, prefillContent: string): boolean {
+    const prefillBlockKey = prefillContent.startsWith(PREFILL_FENCE)
+        ? prefillContent.slice(PREFILL_FENCE.length + 1).replace(/:$/, '')
+        : '';
+    // 块键切不出东西＝起手词只有围栏头（策展段就是这种起手词：schema 的
+    // 全部块键由模型自己续写，起手词里本来就没有块键可比）。这种起手词
+    // 之后模型必然是从围栏头接着写下去的，所以这一支恒真是有意的：把
+    // 空串交给 startsWith 会让块键判据整段空转，写成显式分支是让「恒真」
+    // 与「这里根本没有块键可比」在代码里分得开，改的人一眼看得见。
+    if (!prefillBlockKey) return true;
+    return trimmed.startsWith(prefillBlockKey)
+        || trimmed.startsWith('姓名')
+        || trimmed.startsWith('  姓名');
 }
 
 /**
@@ -284,10 +350,12 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     // 策展产出 schema（纯键），起手词只需围栏头；档案段起手词从目标结构
     // 首键派生——schema 由策展动态产出，不保证首块是基本信息，硬编码会
     // 逼模型续写出 schema 外的块。
-    const PREFILL_SCHEMA = '```yaml\n';
     const profilePrefillFor = (structureText: string): string => {
-        const firstKey = parseYamlToBlocks(structureText || '').keys().next().value;
-        return firstKey ? '```yaml\n' + firstKey + ':' : '```yaml\n基本信息:';
+        // 首键取不到（结构不可解析）时退到回退骨架的首键：骨架由目录推导，
+        // 首块会随目录变，这里再写死块名就是把第二份真相源搬进起手词。
+        const firstKey = parseYamlToBlocks(structureText || '').keys().next().value
+            ?? parseYamlToBlocks(SKELETON_FALLBACK).keys().next().value;
+        return PREFILL_FENCE + '\n' + firstKey + ':';
     };
     // 端点能力记忆门控：已标记不支持 prefill 的端点直接不发起手词（格式
     // 稳定性的代价换可用性；标记由去 prefill 重试成功自动落下，不自动翻回）。
@@ -334,7 +402,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
         const curated = raw ? stripYamlFence(raw, prefillFor(PREFILL_SCHEMA)) : '';
         if (!isSchemaSkeleton(curated)) {
             log.warn('策展输出为空或不可解析，回退默认模板', { curated });
-            return DEFAULT_TEMPLATES.user;
+            return SKELETON_FALLBACK;
         }
         return curated;
     };

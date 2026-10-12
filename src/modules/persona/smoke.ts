@@ -21,6 +21,7 @@ import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, wr
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
+import { PERSONA_BLOCK_CATALOG, REFERENCE_MODULES_CLOSE_TAG, REFERENCE_MODULES_OPEN_TAG, isSkeletonLeaf, renderCatalog } from '@/prompts/catalog';
 import { runGeneration, stripYamlFence, collectWorldInfoContext } from './generation';
 import { usePersonaStore } from './store';
 
@@ -327,10 +328,18 @@ function runPromptsChecks(): void {
     ensurePromptConfigs();
     prompts.$patch({ revision: prompts.revision + 1 });
     const afterRebuild = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, { id?: string; defaultsVersion?: number; modules?: unknown[] }>;
-    check('prompts：旧默认快照版本化重建（整键重建＋版本号写入）',
+    const rebuiltModuleIds = (afterRebuild.persona_gen?.modules ?? []).map(m => (m as { id?: string }).id);
+    // 按 module id 断言在场：单靠条数会把「少一个模块、多一个模块」两类错互相
+    // 抵消掉（3 换 2 时长度照样不变），id 缺失则一定翻红；反过来条数也不能丢
+    // ——多出来的模块带着正确的 id 一律照过，「不多」这个方向没有 id 判据能
+    // 兜住，而全仓再没有第二处数 persona_gen 模块个数。两条方向都上。
+    check('prompts：旧默认快照版本化重建（整键重建＋版本号写入＋两个模块按 id 在场且不多余）',
         afterRebuild.persona_gen?.id === 'default'
         && afterRebuild.persona_gen?.defaultsVersion === DEFAULTS_VERSION
-        && Array.isArray(afterRebuild.persona_gen?.modules) && afterRebuild.persona_gen.modules.length === 2);
+        && rebuiltModuleIds.includes('inject_persona_wi')
+        && rebuiltModuleIds.includes('persona_gen_prompt')
+        && rebuiltModuleIds.length === 2,
+        `modules=${rebuiltModuleIds.join('/')} 数=${rebuiltModuleIds.length}`);
 
     const curatorConfig = prompts.configFor('persona_curator');
     const genConfig = prompts.configFor('persona_gen');
@@ -343,32 +352,195 @@ function runPromptsChecks(): void {
         && genText.includes('{{greetings}}') && genText.includes('{{template}}')
         && genText.includes('{{input}}'));
 
+    // 回退骨架两条机判：一个判「块集合对不对」，一个判「每块的叶对不对」。
+    // ⚠️ 期望值必须是字面量：两侧都从目录推导就是同源自证——目录改错时
+    // 骨架跟着错，比对照样恒绿（这类断言只证明「两边一致」，不证明「对的」）。
     const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
-    const keys = [...templateBlocks.keys()];
-    check('prompts：默认用户人设模板十二块（基本信息/外貌/性格/情绪光谱/自我认知/恐惧软肋/言谈习惯/喜恶/底线雷区/技能专长/前史/目标动机）',
-        keys.length === 12 && ['基本信息', '外貌', '性格', '情绪光谱', '自我认知', '恐惧软肋', '言谈习惯', '喜恶', '底线雷区', '技能专长', '前史', '目标动机'].every(k => keys.includes(k)),
-        `blocks=${keys.join('/')}`);
+    const templateKeys = [...templateBlocks.keys()];
+    const skeletonBlockNames = new Set(
+        PERSONA_BLOCK_CATALOG.filter(b => b.leaves.some(isSkeletonLeaf)).map(b => b.name),
+    );
+    check('prompts：回退骨架块集合＝目录骨架块集合（逐块双向相等）',
+        templateKeys.length === skeletonBlockNames.size
+        && templateKeys.every(k => skeletonBlockNames.has(k)),
+        `骨架块=${templateKeys.join('/')}`);
 
-    // 骨架双源机判：回退骨架（DEFAULT_TEMPLATES.user）的性格叶键名与
-    // 策展清单 <reference_modules> 性格行声明一致——两侧集合对称相等
-    // （单向包含＋手抄叶数组都会漏改静默通过：换叶同数时长度不变、检测器
-    // 自身的数组忘了同步时断言恒真），改任一侧漏改另一侧即翻红
-    const personaLeaves = (templateBlocks.get('性格') ?? '')
-        .split('\n').map(l => l.trim().replace(/:$/, '')).filter(Boolean);
-    const curatorLine = curatorText.split('\n').find(l => l.startsWith('性格——')) ?? '';
-    const curatorLeaves = (curatorLine.split('；')[0]?.split('——')[1] ?? '')
-        .split('/').map(s => s.trim()).filter(Boolean);
-    const leavesAligned = personaLeaves.length === curatorLeaves.length
-        && personaLeaves.every(k => curatorLeaves.includes(k));
-    check('prompts：骨架双源机判（回退骨架性格叶＝策展清单性格行声明，集合对称相等）',
-        curatorLine !== '' && leavesAligned,
-        `骨架叶=${personaLeaves.join('/')} 清单叶=${curatorLeaves.join('/')}`);
+    /** 回退骨架的字面量期望（块名 → 叶键名，目录顺序）。改目录的骨架标记必须同改这里。 */
+    const SKELETON_EXPECT: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+    ['基本信息', ['年龄', '性别', '身份', '别名与名号']],
+    ['外貌', ['整体印象', '标志性特征', '形体细节']],
+    ['性格', ['核心矛盾', '情绪反应', '说话风格', '待人差异']],
+    ['情绪光谱', ['情绪外露程度', '生气外显信号', '有效安抚手段', '笑点哭点']],
+    ['自我认知', ['自我评价', '他人眼中形象', '认知盲区']],
+    ['恐惧软肋', ['最深恐惧', '软肋人或物', '会失态的威胁方式']],
+    ['底线雷区', ['绝不做的事', '道德底线']],
+    ['言谈习惯', ['口头禅', '语气词']],
+    ['技能专长', ['专业技能', '技能盲区']],
+    ['喜恶', ['喜欢', '讨厌', '雷点']],
+    ['前史', ['黑历史']],
+    ['目标动机', ['表层想要', '深层需要', '第一驱动力']],
+    ];
+    const skeletonMismatch = SKELETON_EXPECT.filter(([block, leaves]) => {
+        const got = (templateBlocks.get(block) ?? '').split('\n').map(l => l.trim().replace(/:$/, '')).filter(Boolean);
+        return got.length !== leaves.length || !leaves.every(l => got.includes(l));
+    }).map(([block]) => block);
+    check('prompts：骨架逐块机判（回退骨架每块的叶集合＝字面量期望）',
+        skeletonMismatch.length === 0 && templateBlocks.size === SKELETON_EXPECT.length,
+        `不符块=${skeletonMismatch.join('/') || '无'}`);
 
-    // 清单体量机判：行同时含「——」与「；」＝清单行形态（段标签与空行
-    // 不计）——55 行是策展清单扩容后的固定体量，漏行/多行即翻红
-    const refModuleText = curatorText.split('<reference_modules>')[1]?.split('</reference_modules>')[0] ?? '';
-    const refLineCount = refModuleText.split('\n').filter(l => l.includes('——') && l.includes('；')).length;
-    check('prompts：curator 参考清单体量（55 行）', refLineCount === 55, `lines=${refLineCount}`);
+    const refModuleText = curatorText.split(REFERENCE_MODULES_OPEN_TAG)[1]?.split(REFERENCE_MODULES_CLOSE_TAG)[0] ?? '';
+    // 清单体量机判：渲染行数＝目录条目数（块数由此成派生量，不再单点写死）
+    const renderedLineCount = refModuleText.split('\n').filter(l => l.includes('——') && l.includes('；')).length;
+    check('prompts：curator 参考清单渲染行数＝目录条目数',
+        renderedLineCount === PERSONA_BLOCK_CATALOG.length,
+        `lines=${renderedLineCount} catalog=${PERSONA_BLOCK_CATALOG.length}`);
+
+    // L0 目录层：渲染出来的叶集必须与「改成数据之前那份手写清单」逐叶相等。
+    // 期望值是内联的字面量快照——目录重整是内容批，这层机判卡的是「机制批
+    // 不许顺手改内容」：块序或叶名动一个字即翻红。
+    const LEGACY_CATALOG_SNAPSHOT: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+        ['基本信息', ['年龄', '性别', '身份', '别名与名号']],
+        ['外貌', ['整体印象', '标志性特征', '形体细节']],
+        ['性格', ['核心矛盾', '情绪反应', '说话风格', '待人差异']],
+        ['状态机', ['各态（概述＋行为特征＋切换触发）']],
+        ['情绪光谱', ['情绪外露程度', '生气外显信号', '有效安抚手段', '笑点哭点']],
+        ['自我认知', ['自我评价', '他人眼中形象', '认知盲区']],
+        ['耻感与面子', ['羞耻触发点', '面子敏感度', '当众出丑反应']],
+        ['恐惧软肋', ['最深恐惧', '软肋人或物', '会失态的威胁方式']],
+        ['底线雷区', ['绝不做的事', '道德底线', '禁触话题']],
+        ['价值观信念', ['道德观', '信仰立场', '金钱与人命排序']],
+        ['创伤档案', ['创伤事件', '信念伤疤', '触发情境', '未愈合部分']],
+        ['心理防御', ['战逃僵讨好', '危机优先级', '求援习惯']],
+        ['社交风格', ['社交能量', '对陌生人默认态度', '幽默类型', '群体角色']],
+        ['教养礼仪', ['礼仪习惯', '阶层烙印', '对上下位者态度差']],
+        ['称呼偏好', ['喜欢的称呼', '讨厌的称呼', '外号来历']],
+        ['人际边界', ['肢体接触接受度', '交友门槛', '社交距离感']],
+        ['言谈习惯', ['口头禅', '语气词', '敬语粗口', '口音方言', '语言能力']],
+        ['声音气息', ['声线音色', '音量语速', '体温气息']],
+        ['年龄错位', ['外表年龄', '实际年龄', '长寿带来的心态']],
+        ['性别表达', ['性别认同', '气质表达', '伪装与暴露风险']],
+        ['家庭出身', ['父母手足', '门第阶层', '家族义务或诅咒', '童年环境']],
+        ['关系网', ['挚友', '宿敌', '恩人仇家', '人情债']],
+        ['既有关系', ['与对方角色的历史关系', '专属称谓', '共同经历', '未说破的心结']],
+        ['组织归属', ['所属组织与职位', '师承同门', '组织义务与树敌']],
+        ['技能专长', ['专业技能', '特殊天赋', '水平对标', '技能盲区']],
+        ['战斗风格', ['武器偏好', '战斗哲学', '杀伤意志', '战力对标']],
+        ['职业经济', ['职业', '收入档位', '消费习惯', '金钱观']],
+        ['教育知识', ['学历师承', '知识强项', '知识盲区', '专业用语']],
+        ['生活自理', ['厨艺家务', '驾驶骑术', '生存技能']],
+        ['健康体质', ['体能', '慢性旧伤', '过敏用药', '病中表现', '感官锐钝']],
+        ['身体反应', ['忍痛阈值', '脸红体质', '流泪点', '酒量醉态']],
+        ['睡眠与梦', ['睡眠质量', '失眠诱因', '睡姿睡癖', '梦话噩梦']],
+        ['饮食禁忌', ['口味偏好', '忌口', '宗教种族禁忌']],
+        ['喜恶', ['喜欢', '讨厌', '雷点']],
+        ['兴趣嗜好', ['爱好', '消遣方式']],
+        ['作息怪癖', ['作息与出行规律', '居住环境', '标志性小动作']],
+        ['随身物品', ['出门必带', '口袋里有什么', '常用工具']],
+        ['重要所有物', ['传家信物与来历', '贵重资产', '拼命保护的东西']],
+        ['宠物伴生', ['宠物契约兽', '其能力脾气', '与 User 默契']],
+        ['数字身份', ['账号矩阵', '匿名马甲', '数字足迹', '反追踪习惯']],
+        ['声誉形象', ['圈内名声', '绰号传说', '公众认知与真实的落差', '圈层差异']],
+        ['权力地位', ['社会阶层', '权力来源', '追随者', '权力的代价']],
+        ['法律边缘', ['前科', '黑白人脉', '灰色手段']],
+        ['秘密马甲', ['隐藏身份', '秘密全貌', '知情者范围', '暴露风险']],
+        ['黑暗面', ['阴暗念头', '暴力控制倾向', '成瘾物', '最不堪的一面']],
+        ['说谎识谎', ['撒谎能力与破绽', '识谎能力', '被质疑反应']],
+        ['把柄操纵', ['会被什么诱惑', '轻信谁', '致命把柄']],
+        ['恩怨执念', ['复仇对象', '报恩包袱', '放不下的人']],
+        ['前史', ['童年关键', '人生转折', '光辉事迹', '黑历史', '未解锁身世线索']],
+        ['目标动机', ['表层想要', '深层需要', '第一驱动力', '受挫反应']],
+        ['成长弧', ['过去态', '现在态', '可松动面', '待解心结']],
+        ['戏点高光', ['名场面', '帅点萌点', '经典台词']],
+        ['恋爱', ['心动反应', '被撩反应', '吃醋表现', '亲近后相处', '会被什么打动']],
+        ['情史依恋', ['过往情史', '依恋类型', '关心人的方式', '占有欲', '恋爱观']],
+        ['NSFW', ['性向', '经验程度', '敏感点', '主导顺从倾向', '禁忌', '事后安抚']],
+    ];
+    const renderedRows = refModuleText.split('\n').filter(Boolean);
+    const renderedBlockNames = renderedRows.map(l => l.split('——')[0]);
+    const renderedLeaves = renderedRows.flatMap(l => {
+        const head = l.split('；')[0];
+        return head.slice(head.indexOf('——') + 2).split('/').map(x => x.trim());
+    });
+    const snapshotLeaves = LEGACY_CATALOG_SNAPSHOT.flatMap(([, leaves]) => leaves);
+    const leafDiff = [...new Set([
+        ...renderedLeaves.filter(l => !snapshotLeaves.includes(l)),
+        ...snapshotLeaves.filter(l => !renderedLeaves.includes(l)),
+    ])];
+    check('prompts：L0 目录叶集与现行 55 行清单逐叶相等（块序双向相等）',
+        renderedBlockNames.length === LEGACY_CATALOG_SNAPSHOT.length
+        && LEGACY_CATALOG_SNAPSHOT.every(([name], i) => renderedBlockNames[i] === name)
+        && leafDiff.length === 0,
+        `叶差集=${leafDiff.join('/') || '无'} 渲染叶=${renderedLeaves.length} 快照叶=${snapshotLeaves.length}`);
+    // 清单成文搬进数据文件时，最容易悄悄漂掉的是「叶名都在、但整行搬错了地方」：
+    // 叶集双向相等只锁住叶名的集合，叶在块间搬家、同块内重名、叶数段／档位词面／
+    // 括注三段任一处被改写，它都照过。整段字面量逐字节比才是「渲染文本一个字没动」
+    // 这句话的机判——期望值只能是抄下来的原文，从目录反推出来的期望锁不住自己。
+    const CATALOG_TEXT_SNAPSHOT = [
+    '基本信息——年龄/性别/身份/别名与名号；4 叶；几乎必选',
+    '外貌——整体印象/标志性特征/形体细节；3 叶；几乎必选',
+    '性格——核心矛盾/情绪反应/说话风格/待人差异；4 叶；几乎必选（可附类型学速记叶）',
+    '状态机——各态（概述＋行为特征＋切换触发）；≤4 态；行为或人格反差时',
+    '情绪光谱——情绪外露程度/生气外显信号/有效安抚手段/笑点哭点；4 叶；需要读空气或哄人戏时',
+    '自我认知——自我评价/他人眼中形象/认知盲区；3 叶；常选（破防与洞察戏的基座）',
+    '耻感与面子——羞耻触发点/面子敏感度/当众出丑反应；3 叶；调戏羞辱当众桥段指向时',
+    '恐惧软肋——最深恐惧/软肋人或物/会失态的威胁方式；3 叶；恐吓或保护戏指向时',
+    '底线雷区——绝不做的事/道德底线/禁触话题；3 叶；常选',
+    '价值观信念——道德观/信仰立场/金钱与人命排序；3 叶；两难抉择指向时（阵营归此）',
+    '创伤档案——创伤事件/信念伤疤/触发情境/未愈合部分；4 叶；背景有阴影素材时',
+    '心理防御——战逃僵讨好/危机优先级/求援习惯；3 叶；高压突发场面指向时',
+    '社交风格——社交能量/对陌生人默认态度/幽默类型/群体角色；4 叶；群像或初见戏指向时',
+    '教养礼仪——礼仪习惯/阶层烙印/对上下位者态度差；3 叶；阶层反差题材时',
+    '称呼偏好——喜欢的称呼/讨厌的称呼/外号来历；3 叶；多 NPC 场合或改口戏时',
+    '人际边界——肢体接触接受度/交友门槛/社交距离感；3 叶；慢热或距离感描写指向时',
+    '言谈习惯——口头禅/语气词/敬语粗口/口音方言/语言能力；5 叶；常选（说话味道的一致性）',
+    '声音气息——声线音色/音量语速/体温气息；3 叶；贴近戏或气味识人题材时',
+    '年龄错位——外表年龄/实际年龄/长寿带来的心态；3 叶；精灵吸血鬼重生者设定时',
+    '性别表达——性别认同/气质表达/伪装与暴露风险；3 叶；性别伪装类张力戏时',
+    '家庭出身——父母手足/门第阶层/家族义务或诅咒/童年环境；4 叶；家族戏或原生家庭题材时',
+    '关系网——挚友/宿敌/恩人仇家/人情债；4 叶；旧识登场或背景调查指向时',
+    '既有关系——与对方角色的历史关系/专属称谓/共同经历/未说破的心结；4 叶；熟人开局卡（青梅竹马/前恋人/宿敌）',
+    '组织归属——所属组织与职位/师承同门/组织义务与树敌；3 叶；身份带来便利与麻烦时',
+    '技能专长——专业技能/特殊天赋/水平对标/技能盲区；4 叶；常选（「明确不会什么」与「会什么」同重要）',
+    '战斗风格——武器偏好/战斗哲学/杀伤意志/战力对标；4 叶；动手戏题材时',
+    '职业经济——职业/收入档位/消费习惯/金钱观；4 叶；现代都市题材常选（职场身份归此）',
+    '教育知识——学历师承/知识强项/知识盲区/专业用语；4 叶；交谈可信度重要时（校园身份归此）',
+    '生活自理——厨艺家务/驾驶骑术/生存技能；3 叶；同居日常或野外剧情时',
+    '健康体质——体能/慢性旧伤/过敏用药/病中表现/感官锐钝；5 叶；病弱照顾或体能限制指向时',
+    '身体反应——忍痛阈值/脸红体质/流泪点/酒量醉态；4 叶；受伤饮酒或身体诚实桥段时',
+    '睡眠与梦——睡眠质量/失眠诱因/睡姿睡癖/梦话噩梦；4 叶；同床或噩梦安抚戏指向时',
+    '饮食禁忌——口味偏好/忌口/宗教种族禁忌；3 叶；宴席投喂桥段指向时',
+    '喜恶——喜欢/讨厌/雷点；3 叶；几乎必选',
+    '兴趣嗜好——爱好/消遣方式；2 叶；日常戏或约会选题时',
+    '作息怪癖——作息与出行规律/居住环境/标志性小动作；3 叶；偶遇蹲点与细节辨识戏时',
+    '随身物品——出门必带/口袋里有什么/常用工具；3 叶；搜身借用桥段指向时',
+    '重要所有物——传家信物与来历/贵重资产/拼命保护的东西；3 叶；物品钩子剧情时',
+    '宠物伴生——宠物契约兽/其能力脾气/与 User 默契；3 叶；伴生生物参与场景时',
+    '数字身份——账号矩阵/匿名马甲/数字足迹/反追踪习惯；4 叶；网恋掉马或人肉搜索题材时',
+    '声誉形象——圈内名声/绰号传说/公众认知与真实的落差/圈层差异；4 叶；NPC 初见预设立场重要时',
+    '权力地位——社会阶层/权力来源/追随者/权力的代价；4 叶；位分压迫戏时（宫廷位分归此）',
+    '法律边缘——前科/黑白人脉/灰色手段；3 叶；侦探律政或翻旧账剧情时',
+    '秘密马甲——隐藏身份/秘密全貌/知情者范围/暴露风险；4 叶；掉马与双面人生题材时',
+    '黑暗面——阴暗念头/暴力控制倾向/成瘾物/最不堪的一面；4 叶；阴沉底色或黑化剧情时',
+    '说谎识谎——撒谎能力与破绽/识谎能力/被质疑反应；3 叶；审讯试探攻防指向时',
+    '把柄操纵——会被什么诱惑/轻信谁/致命把柄；3 叶；反派设局剧情时',
+    '恩怨执念——复仇对象/报恩包袱/放不下的人；3 叶；长线恩怨动机时',
+    '前史——童年关键/人生转折/光辉事迹/黑历史/未解锁身世线索；5 叶；有背景故事素材时',
+    '目标动机——表层想要/深层需要/第一驱动力/受挫反应；4 叶；几乎必选（想要与需要不一致时人最有戏）',
+    '成长弧——过去态/现在态/可松动面/待解心结；4 叶；长线成长剧情时',
+    '戏点高光——名场面/帅点萌点/经典台词；3 叶；用户点名魅力点或高光期待时',
+    '恋爱——心动反应/被撩反应/吃醋表现/亲近后相处/会被什么打动；5 叶；素材或需求指向恋爱线时（性向面归 NSFW）',
+    '情史依恋——过往情史/依恋类型/关心人的方式/占有欲/恋爱观；5 叶；恋爱线且有旧伤包袱时',
+    'NSFW——性向/经验程度/敏感点/主导顺从倾向/禁忌/事后安抚；6 叶；用户需求或素材明确指向时',
+    ].join('\n');
+    const renderedCatalogText = renderCatalog();
+    const renderedCatalogRows = renderedCatalogText.split('\n');
+    const snapshotRows = CATALOG_TEXT_SNAPSHOT.split('\n');
+    const mismatchAt = snapshotRows.findIndex((line, i) => line !== renderedCatalogRows[i]);
+    check('prompts：渲染文本整段逐字节等于现行 55 行清单（叶序·叶数段·档位词面·括注全锁）',
+        renderedCatalogText === CATALOG_TEXT_SNAPSHOT && refModuleText === `\n${CATALOG_TEXT_SNAPSHOT}\n`,
+        mismatchAt < 0
+            ? `行数=${renderedCatalogRows.length} 字符=${renderedCatalogText.length}`
+            : `第 ${mismatchAt + 1} 行 期望「${snapshotRows[mismatchAt]}」实际「${renderedCatalogRows[mismatchAt] ?? '（缺行）'}」`);
     check('prompts：机制挂载开放段在场',
         curatorText.includes('<mechanism_mounts>') && curatorText.includes('示例之外出现任何机制同样挂载'));
     check('prompts：新口径生效（上限 16＋元层剥离）',
@@ -481,6 +653,19 @@ function runPureFunctionChecks(): void {
     check('stripYamlFence：prefill 未闭合（首行 姓名:）补 prefill 再剥',
         stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n基本信息:') === '基本信息:姓名: 测试\n年龄: 20'
         || stripYamlFence('姓名: 测试\n年龄: 20', '```yaml\n') === '姓名: 测试\n年龄: 20');
+    // 首块键 ≠「基本信息」的用例：上面两条的 prefill 起手词恒为「基本信息」
+    // 或空，块键判据换首块名后没有一条断言会红，而首块名将来是随目录块序
+    // 变的（骨架首块＝目录第一个带骨架叶的块）。正文从 prefill 的块键本身
+    // 起首＝模型从围栏头之后接写，这时必须把围栏头补回去。
+    const headKeyPrefill = '```yaml\n外貌:';
+    check('stripYamlFence：首块键非「基本信息」时正文接写补围栏头起首（块键判据生效）',
+        stripYamlFence('外貌: 高个冷峻\n  标志性特征: 疤', headKeyPrefill) === '外貌:外貌: 高个冷峻\n  标志性特征: 疤',
+        `实得「${stripYamlFence('外貌: 高个冷峻\n  标志性特征: 疤', headKeyPrefill)}」`);
+    // 起首词与块键、叶行两段都不沾时不补头：这一条是「块键判据不是恒真」的
+    // 反向机判——判据若退化成对任何正文都成立，上面两条照样绿。
+    check('stripYamlFence：正文起首词与首块键无关时不补围栏头（判据不恒真）',
+        stripYamlFence('年龄: 20\n籍贯: 江南', headKeyPrefill) === '年龄: 20\n籍贯: 江南',
+        `实得「${stripYamlFence('年龄: 20\n籍贯: 江南', headKeyPrefill)}」`);
 
     // isSchemaSkeleton：策展产出的可用性判据。事故原型——宿主错误正文里
     // 「连接目标服务失败：」「请求地址: …」都是合法的「键行」形态，旧判据
@@ -843,7 +1028,7 @@ async function runPersonaE2EChecks(): Promise<void> {
             && calls[0].body.reasoning_effort === 'high'
             && !('response_format' in calls[0].body));
         check('端到端：curator 段走引擎管线（策展指令全文进 messages＋assistant prefill 追加）',
-            firstJoined.includes('[任务：策展人设 schema]') && firstJoined.includes('<reference_modules>')
+            firstJoined.includes('[任务：策展人设 schema]') && firstJoined.includes(REFERENCE_MODULES_OPEN_TAG)
             && !firstJoined.includes('{{charInfo}}') && !firstJoined.includes('{{userRequirements}}')
             && lastFirst?.role === 'assistant' && lastFirst?.content.startsWith('```yaml'));
         check('端到端：personaGen 段消费策展产出（<target_schema> 含 curator 输出、生成指令在场）',
@@ -1378,5 +1563,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与现行 55 行清单逐叶相等＋块序双向/渲染文本整段逐字节等于现行清单/渲染行数＝目录条目数/回退骨架块集合＝目录骨架块集合/骨架逐块叶集合＝字面量）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
 }

@@ -519,9 +519,10 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含旧
 // endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重映射/
 // choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动清空
-// 1＋prompts 7（五任务键齐备/choice 18 模块红线/persona 两任务默认形状/旧
-// 数组一次写迁移/任务隔离开关/按任务恢复默认/骨架双源机判）＋persona 组装
-// 3＋persona dump 观测口 2＋纯函数 5＋api 16（含 finish_reason=length 截断
+// 1＋prompts 5（全任务键齐备含 choice 18 模块红线/旧数组一次写迁移/旧默认快照
+// 版本化重建按 module id 在场且不多余/curator 与 persona_gen 两任务默认占位符）
+// ＋persona 组装
+// 3＋persona dump 观测口 2＋纯函数 12＋api 16（含 finish_reason=length 截断
 // 显式报错回归＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null，
 // ＋stub 同构机判 2：同一实例双方法 this 内部互调、保留接收者按名取预设）＋
 // e2e 7（含取消通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段
@@ -532,13 +533,16 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 保持原值＋互斥态干净）＋宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误
 // 正文/拦下空与散文/拦下散言前导换皮形态/拦下与切块口径分歧的 1 空格散言行；
 // 传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/正常产出以标签开头不误杀；
-// 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展清单扩容 4（curator
-// 参考清单体量 55 行/机制挂载开放段在场/新口径上限 16＋元层剥离/gen 值
-// 厚度与行为心理类传导；默认模板断言五块改十二块）＋流内上游错误帧 4＋
+// 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展目录 8（骨架块集合＝
+// 目录骨架块集合、骨架逐块叶集合＝字面量期望、渲染行数＝目录条目数、L0 目录
+// 叶集与手写清单逐叶相等、渲染文本整段逐字节等于现行清单、机制挂载开放段
+// 在场、新口径上限 16＋元层剥离、gen 值
+// 厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）＋流内上游
+// 错误帧 4＋
 // 端点 prefill 能力记忆 4＋人设写回渲染通道 4（建档 initPersona 恰一次＋
 // personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
 // 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
-const PERSONA_PASS_EXPECTED = 95;
+const PERSONA_PASS_EXPECTED = 99;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
