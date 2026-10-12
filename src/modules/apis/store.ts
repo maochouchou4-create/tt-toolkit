@@ -8,7 +8,7 @@
  */
 
 import { defineStore } from 'pinia';
-import { createEndpoint, deleteEndpoint, readApiDomain, readJailbreakPreset, upsertEndpoint, writeJailbreakPreset } from './storage';
+import { createEndpoint, deleteEndpoint, readApiDomain, readJailbreakPreset, setProviderNoPrefill, upsertEndpoint, writeJailbreakPreset } from './storage';
 import { mutateTaskProfiles, readTaskProfiles, setRouteForAllTasks, type TaskProfile, type TaskProfilesDomain } from './task-profiles';
 import type { TaskId } from '@/tasks';
 import type { ApiProvider } from './types';
@@ -51,6 +51,18 @@ export const useApisStore = defineStore('tt-apis', {
         removeEndpoint(id: string) {
             deleteEndpoint(id);
             this.revision += 1;
+        },
+        /**
+         * 生成链学习到「该端点不支持 prefill」的记忆落点（去 prefill 重试
+         * 成功后调用）。不自动翻回：探测成功也不清标记，防抖动；复位走
+         * resetPrefillCapability（UI 手动按钮）。
+         */
+        markPrefillUnsupported(providerId: string) {
+            if (setProviderNoPrefill(providerId, true)) this.revision += 1;
+        },
+        /** 手动复位端点的 prefill 能力记忆（API 页「复位」按钮）。 */
+        resetPrefillCapability(providerId: string) {
+            if (setProviderNoPrefill(providerId, false)) this.revision += 1;
         },
         /** 单行任务档案写通道（任务模型卡的唯一写口）。 */
         updateTaskProfile(task: TaskId, patch: Partial<TaskProfile>) {

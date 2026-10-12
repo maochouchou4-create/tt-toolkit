@@ -1034,7 +1034,7 @@ function runTaskRouteChecks(): void {
     const savedEndpoints = readApiDomain();
     const savedProfilesJson = JSON.stringify(readTaskProfiles());
     try {
-        writeApiDomain([{ id: 'tp-p', name: '档案服务商', url: 'https://tp.example.com/v1', key: 'sk-tp', models: ['m-a'] }]);
+        writeApiDomain([{ id: 'tp-p', name: '档案服务商', url: 'https://tp.example.com/v1', key: 'sk-tp', models: ['m-a'], noPrefill: false }]);
         setChoiceProfile('', '');
         check('任务路由：档案行空＝null（未配置 fail fast 语义）', resolveTaskRoute('choice') === null);
         setChoiceProfile('no-such-provider', 'm-a');

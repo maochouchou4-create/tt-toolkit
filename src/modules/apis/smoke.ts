@@ -4,10 +4,11 @@
  */
 
 import { useApisStore } from './store';
-import { createEndpoint, deleteEndpoint, upsertEndpoint } from './storage';
+import { APIS_DOMAIN_KEY, createEndpoint, deleteEndpoint, readApiDomain, setProviderNoPrefill, upsertEndpoint } from './storage';
 import { TASK_PARAMS } from './task-defaults';
 import { emptyTaskProfile, readTaskProfiles, resolveTaskRoute, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
 import { TASK_IDS } from '@/tasks';
+import { setGlobal } from '@/storage/service';
 
 const failures: string[] = [];
 
@@ -75,10 +76,64 @@ export function runApisSmoke(): void {
         TASK_IDS.map(id => `${id}=${afterDelete[id].providerId}/${afterDelete[id].model}`).join('，'),
     );
 
+    // noPrefill 能力记忆（归一/带出/写穿三断言；夹具照旧自持，末尾复位清理）
+    // ① 老档兼容：缺 noPrefill 字段的存量条目读侧归一为 false，显式 true 往返不丢
+    const legacy = { ...P, url: 'https://smoke.apis-np/v1' };
+    delete (legacy as { noPrefill?: boolean }).noPrefill;
+    setGlobal(APIS_DOMAIN_KEY, [legacy]);
+    const legacyRead = readApiDomain()[0]?.noPrefill;
+    setProviderNoPrefill(P.id, true);
+    check(
+        'noPrefill 归一：老档缺字段归 false、显式 true 往返不丢',
+        legacyRead === false && readApiDomain()[0]?.noPrefill === true,
+        `缺字段读回=${String(legacyRead)}，写入 true 读回=${String(readApiDomain()[0]?.noPrefill)}`,
+    );
+    writeTaskProfiles({ ...readTaskProfiles(), choice: { providerId: P.id, model: 'm-strong2' } });
+
+    // ② 唯一解析点带出 providerId 与 noPrefill
+    const npRoute = resolveTaskRoute('choice');
+    check(
+        '出站路由带出 providerId 与 noPrefill',
+        npRoute !== null && npRoute.providerId === P.id && npRoute.noPrefill === true,
+        `providerId=${npRoute?.providerId ?? 'null'}，noPrefill=${String(npRoute?.noPrefill)}`,
+    );
+
+    // ③ store 记忆/复位两动作写穿＋revision 精确自增（值没变的写入不得惊动消费面）
+    const npStore = useApisStore();
+    const npRevisionBase = npStore.revision;
+    npStore.resetPrefillCapability(P.id);
+    const afterReset = readApiDomain()[0];
+    npStore.markPrefillUnsupported(P.id);
+    const afterMark = readApiDomain()[0];
+    check(
+        'store 记忆/复位写穿＋revision 精确自增',
+        afterReset?.noPrefill === false && afterMark?.noPrefill === true
+            && npStore.revision - npRevisionBase === 2
+            && readApiDomain().length === 1 && readApiDomain()[0]?.id === P.id,
+        `复位后=${String(afterReset?.noPrefill)}，标记后=${String(afterMark?.noPrefill)}，revision ${npRevisionBase}→${npStore.revision}`,
+    );
+
+    // ④ 写穿但无实际改动时必须静默：悬空 providerId（生成中被删的合法并发态）
+    // 与已处目标值的重复写入都不得 bump revision——否则每次重复学习/复位都会
+    // 让 API 页与各任务行整域重算（当前服务商处于已标记态：重复标记无改动，
+    // 重复复位则是真改动，只能留给收尾清理）
+    const revBeforeNoop = npStore.revision;
+    const domainBeforeNoop = JSON.stringify(readApiDomain());
+    npStore.markPrefillUnsupported('no-such-provider');
+    npStore.markPrefillUnsupported(P.id);
+    check(
+        '悬空/重复能力写入静默（revision 与服务商域均不变）',
+        npStore.revision === revBeforeNoop && JSON.stringify(readApiDomain()) === domainBeforeNoop,
+        `revision ${revBeforeNoop}→${npStore.revision}，域=${JSON.stringify(readApiDomain())}`,
+    );
+
+    setProviderNoPrefill(P.id, false);
+    deleteEndpoint(P.id);
+
     if (failures.length > 0) {
         console.error(`[apis-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行五断言（四行齐换/调参档保留/出站跟随/写穿 revision/删站收尾）');
+    console.info('[apis-smoke] OK：批量设置行与能力记忆九断言（四行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）');
 }

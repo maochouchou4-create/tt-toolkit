@@ -42,6 +42,32 @@ import { LEGACY_KEYS, PERSONA_DOMAIN_KEY, readPersonaDomain } from '@/modules/pe
 const DEFAULT_INDEP_URL = 'https://api.openai.com/v1';
 const DEFAULT_INDEP_MODEL = 'gpt-3.5-turbo';
 
+/** 原始域条目的逐字段读出口（两个迁移通道唯一一份，见 readRawProvider 注）。 */
+interface RawProviderFields extends ApiProvider {
+    /** 原始域里的旧活动模型字段（收编通道要带它过同启动的任务档案迁移）。 */
+    model: string;
+}
+
+/**
+ * 原始域条目 → 服务商字段（本文件唯一一份逐字段读口径）。
+ *
+ * 收编与任务档案两个通道都要「读原始域 → 重建整表 → 写原始域」，写口刻意
+ * 绕开读侧 normalize（收编要带 model 过去、任务档案迁移要删 model），所以
+ * 字段清单只能在这里写死一次：两份手抄清单早晚会漂（漏抄一个字段＝每跑一次
+ * 迁移就把该字段静默抹回默认值，端点能力记忆就这么丢过一次）。
+ */
+function readRawProvider(raw: Record<string, unknown>): RawProviderFields {
+    return {
+        id: typeof raw.id === 'string' ? raw.id : '',
+        name: typeof raw.name === 'string' ? raw.name : '未命名服务商',
+        url: typeof raw.url === 'string' ? raw.url : '',
+        key: typeof raw.key === 'string' ? raw.key : '',
+        models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
+        model: typeof raw.model === 'string' ? raw.model : '',
+        noPrefill: raw.noPrefill === true,
+    };
+}
+
 /** 迁移报告（smoke 断言收编零丢失/二次零重写用）。 */
 export interface ApiMigrationReport {
     /** 统一表在场且两侧旧字段已清（本次无任何写）。 */
@@ -201,17 +227,8 @@ export function migrateApiDomain(): ApiMigrationReport {
     const rawExistingApis = Array.isArray(rawDomain[APIS_DOMAIN_KEY]) ? (rawDomain[APIS_DOMAIN_KEY] as unknown[]) : [];
     const endpoints = rawExistingApis.flatMap(item => {
         if (!item || typeof item !== 'object') return [];
-        const raw = item as Record<string, unknown>;
-        const id = typeof raw.id === 'string' ? raw.id : '';
-        if (!id) return [];
-        return [{
-            id,
-            name: typeof raw.name === 'string' ? raw.name : '未命名端点',
-            url: typeof raw.url === 'string' ? raw.url : '',
-            key: typeof raw.key === 'string' ? raw.key : '',
-            models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
-            model: typeof raw.model === 'string' ? raw.model : '',
-        }];
+        const provider = readRawProvider(item as Record<string, unknown>);
+        return provider.id === '' ? [] : [provider];
     });
     const seen = new Map<string, string>();  // 去重键 → 端点 id
     for (const e of endpoints) seen.set(endpointKey(e.url, e.model), e.id);
@@ -220,6 +237,9 @@ export function migrateApiDomain(): ApiMigrationReport {
      * 把一条旧端点并入表：去重命中＝记映射并入；id 撞车＝重分配。
      * model 字段随旧档携带（收编通道写原始域——写侧 normalize 会把它
      * 丢弃，而任务档案迁移要在同一次启动消费它做任务档案初始化）。
+     * 能力记忆按 false 起算：进 ingest 的是 v1/v1.3 旧档，能力位晚于收编
+     * 通道才存在，旧档里根本没有；已学到能力的条目从不在这里重建——它们
+     * 在 endpoints 预置段就位，去重键命中即原样保留。
      */
     const ingest = (entry: { id: string; name: string; url: string; key: string; model: string }, fromPersona: boolean): string => {
         const key = endpointKey(entry.url, entry.model);
@@ -233,11 +253,11 @@ export function migrateApiDomain(): ApiMigrationReport {
             // 表里已有同 id 异键端点（数据异常），同样重分配保唯一
             const remapped = newEndpointId();
             if (fromPersona) report.idRemaps.push({ from: entry.id, to: remapped });
-            endpoints.push({ id: remapped, name: entry.name, url: entry.url, key: entry.key, models: [], model: entry.model });
+            endpoints.push({ id: remapped, name: entry.name, url: entry.url, key: entry.key, models: [], model: entry.model, noPrefill: false });
             seen.set(key, remapped);
             return remapped;
         }
-        endpoints.push({ id: entry.id, name: entry.name, url: entry.url, key: entry.key, models: [], model: entry.model });
+        endpoints.push({ id: entry.id, name: entry.name, url: entry.url, key: entry.key, models: [], model: entry.model, noPrefill: false });
         seen.set(key, entry.id);
         return entry.id;
     };
@@ -329,20 +349,14 @@ export function migrateTaskProfiles(): TaskProfileMigrationReport {
     const modelById = new Map<string, string>();
     const providers: ApiProvider[] = rawApis.flatMap(item => {
         if (!item || typeof item !== 'object') return [];
-        const raw = item as Record<string, unknown>;
-        const id = typeof raw.id === 'string' ? raw.id : '';
+        const { id, name, url, key, models, model, noPrefill } = readRawProvider(item as Record<string, unknown>);
         if (!id) return [];
-        if (typeof raw.model === 'string' && raw.model !== '') {
-            modelById.set(id, raw.model);
+        if (model !== '') {
+            modelById.set(id, model);
             report.providerized += 1;
         }
-        return [{
-            id,
-            name: typeof raw.name === 'string' ? raw.name : '未命名服务商',
-            url: typeof raw.url === 'string' ? raw.url : '',
-            key: typeof raw.key === 'string' ? raw.key : '',
-            models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
-        } satisfies ApiProvider];
+        // 本通道裁掉 model（值已收编进映射），其余字段沿 readRawProvider 的唯一口径
+        return [{ id, name, url, key, models, noPrefill } satisfies ApiProvider];
     });
 
     // 2) 任务档案初始化（各行同源：旧活动端点命中＝{该条 id, 该条 model}；

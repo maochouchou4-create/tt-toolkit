@@ -17,7 +17,7 @@ import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration';
-import { deleteEndpoint, readApiDomain, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
+import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
@@ -177,6 +177,12 @@ function runMigrationChecks(): void {
         gen: { count: 5, contextRounds: 2, minChars: 5, maxChars: 50, clickBehavior: 'append', debugForceRaw: false },
         pool: { masterPool: [] },
     };
+    // 预置一条已经学到能力的统一表条目（回滚旧版再升级的现场：收编会逐字段
+    // 重建整表，写口又绕开读侧归一——漏带 noPrefill ＝ 每跑一次抹回 false）。
+    // 直写原始域（writeApiDomain 会按读侧口径归一，测不到写口真实行为）。
+    tt.apis = [
+        { id: 'pre-learned', name: '预置服务商', url: 'https://pre.example.com/v1', key: 'sk-pre', models: ['m-pre'], model: 'm-pre', noPrefill: true },
+    ];
     ls.set(LEGACY_KEYS.state, JSON.stringify({
         localConfig: {
             apiSource: 'independent',
@@ -203,7 +209,7 @@ function runMigrationChecks(): void {
     const c2 = endpoints.find(e => e.id === 'c2');
     const remapped = endpoints.find(e => e.name === '撞车档');
     check('收编：choice 旧 apis 并入统一表（id 保留、字段零丢失）',
-        !report.skipped && report.collectedFrom.includes('choice') && report.endpointCount === 3
+        !report.skipped && report.collectedFrom.includes('choice') && report.endpointCount === 4
         && !!c1 && c1.name === 'choice端点一' && c1.url === 'https://choice.example.com/v1' && c1.key === 'sk-c1'
         && !!c2 && c2.url === 'https://choice-two.example.com/v1' && c2.key === 'sk-c2');
     check('收编：persona 侧撞 id 重分配＋同端点去重（idRemaps/mergedDuplicates）',
@@ -228,8 +234,11 @@ function runMigrationChecks(): void {
         && TASK_IDS.every(id => profilesAfter[id]?.providerId === 'c2' && profilesAfter[id]?.model === 'm-choice-2'),
         `report=${JSON.stringify(tpReport)} profiles=${JSON.stringify(profilesAfter)}`);
     check('任务档案迁移：apis 条目 model 字段收编后删除、activeEndpointId 键不在',
-        rawApisAfter.length === 3 && rawApisAfter.every(e => !('model' in e))
+        rawApisAfter.length === 4 && rawApisAfter.every(e => !('model' in e))
         && !('activeEndpointId' in ttRaw));
+    check('收编：既有统一表条目的端点能力记忆随收编保留（不回退成 false）',
+        readApiDomain().find(e => e.id === 'pre-learned')?.noPrefill === true,
+        `entry=${JSON.stringify(readApiDomain().find(e => e.id === 'pre-learned'))}`);
     const afterCollect = readPersonaDomain();
     check('收编：persona 域 v2 重写（整键清洗后无 localConfig/uiState 键；选中不参与提升——choice 优先）',
         !('localConfig' in (afterCollect as unknown as Record<string, unknown>))
@@ -250,7 +259,7 @@ function runMigrationChecks(): void {
         && domainJson() === personaBefore);
 
     // 1h. 删被档案引用的服务商 → 引用任务行联动重置（回未配置态）
-    writeApiDomain([{ id: 'smoke-del', name: '待删服务商', url: 'https://del.example.com/v1', key: 'k', models: ['m-del'] }]);
+    writeApiDomain([{ id: 'smoke-del', name: '待删服务商', url: 'https://del.example.com/v1', key: 'k', models: ['m-del'], noPrefill: false }]);
     seedTaskProfiles('smoke-del', 'm-del');
     deleteEndpoint('smoke-del');
     const profilesAfterDelete = readTaskProfiles();
@@ -779,7 +788,7 @@ async function runApiChecks(): Promise<void> {
 async function runPersonaE2EChecks(): Promise<void> {
     const store = usePersonaStore();
     // 服务商表放一个冒烟服务商，各任务行全部指向它
-    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟服务商', url: 'https://smoke.example.com/v1', key: 'sk-smoke', models: ['smoke-model'] }]);
+    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟服务商', url: 'https://smoke.example.com/v1', key: 'sk-smoke', models: ['smoke-model'], noPrefill: false }]);
     seedTaskProfiles('smoke-endpoint', 'smoke-model');
     store.requestText = '生成一个侦探人设';
     store.isProcessing = false;
@@ -994,6 +1003,11 @@ async function runPersonaE2EChecks(): Promise<void> {
         // 请求均以 assistant prefill 结尾，curator 首发被网关以「末条是模型轮」
         // 400 拒收（真实事故帧）——必须触发去 prefill 重试且第二次成功。锁
         // 用户可见行为（三次实发 fetch body 的末条角色），不锁上游文案形状。
+        // 第三段末条＝user 是轮内即学即用的机判：学习落在策展段重试里，
+        // 档案段必须接着不带起手词（读入口快照的实现会在此露馅）。
+        // 本例直调 runGeneration：事件回调只记账，设置域必须纹丝不动——能力
+        // 记忆是组合根（store）的职责，生成链不反写兄弟域。
+        let learnedEvents = 0;
         const prefillRetryBefore = calls.length;
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
             calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
@@ -1005,21 +1019,101 @@ async function runPersonaE2EChecks(): Promise<void> {
             return sseResponse(calls.length === prefillRetryBefore + 2 ? CURATOR_YAML : PERSONA_YAML);
         }) as typeof fetch;
         const prefillProfile = await runGeneration({
-            route: { url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high' },
+            route: { providerId: 'smoke-endpoint', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high', noPrefill: false },
             request: '流内错误帧重试试验',
             wiText: '',
             greetingsText: '',
+            onPrefillUnsupported: () => { learnedEvents += 1; },
         });
         const first400 = (calls[prefillRetryBefore]?.body.messages ?? []) as Array<{ role: string }>;
         const retry400 = (calls[prefillRetryBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
-        check('端到端：流内上游错误帧触发去 prefill 重试（首发末条 assistant、重试末条 user、成功落地）',
+        const afterLearn = (calls[prefillRetryBefore + 2]?.body.messages ?? []) as Array<{ role: string }>;
+        check('端到端：流内上游错误帧触发去 prefill 重试（首发末条 assistant、重试末条 user、档案段接着不带起手词、成功落地）',
             calls.length === prefillRetryBefore + 3
             && first400[first400.length - 1]?.role === 'assistant'
             && retry400[retry400.length - 1]?.role === 'user'
             && retry400.length === first400.length - 1
+            && afterLearn[afterLearn.length - 1]?.role === 'user'
+            && learnedEvents === 1
+            && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === false
             && prefillProfile === '姓名: 阿德\n年龄: 20',
-            `firstLast=${first400[first400.length - 1]?.role} retryLast=${retry400[retry400.length - 1]?.role} profile=${prefillProfile}`);
+            `firstLast=${first400[first400.length - 1]?.role} retryLast=${retry400[retry400.length - 1]?.role} `
+            + `afterLast=${afterLearn[afterLearn.length - 1]?.role} events=${learnedEvents} `
+            + `noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)} profile=${prefillProfile}`);
 
+        // 学习写穿设置域（判别性主断言，走组合根 store.generate()）：同一场
+        // 400 家族事故重跑一次——事件必须经 store 的 handler 落到服务商条目，
+        // 直调 runGeneration 不会写（上一断言已锁这条边界）。
+        setProviderNoPrefill('smoke-endpoint', false);
+        const learnBefore = calls.length;
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            if (calls.length === learnBefore + 1) {
+                return fakeSSEStream([
+                    `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
+                ]);
+            }
+            return sseResponse(calls.length === learnBefore + 2 ? CURATOR_YAML : PERSONA_YAML);
+        }) as typeof fetch;
+        store.requestText = '学习触发试验';
+        await store.generate();
+        check('端到端：去 prefill 重试成功后端点条目落 noPrefill=true（学习经组合根写穿设置域）',
+            calls.length === learnBefore + 3 && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === true,
+            `calls=${calls.length - learnBefore} noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)}`);
+
+        // 已标记端点（学习后的下一轮）：路由经 resolveTaskRoute 带出 noPrefill
+        // ＝true，两段实发 body 末条都应是 user（起手词被摘、生成照常成功）
+        const gatedBefore = calls.length;
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            return sseResponse(calls.length === gatedBefore + 1 ? CURATOR_YAML : PERSONA_YAML);
+        }) as typeof fetch;
+        store.requestText = '已标记端点试验';
+        await store.generate();
+        const gatedFirst = (calls[gatedBefore]?.body.messages ?? []) as Array<{ role: string }>;
+        const gatedSecond = (calls[gatedBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
+        check('端到端：已标记端点两段实发 body 末条均为 user（prefill 被摘、生成照常成功）',
+            readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === true
+            && calls.length === gatedBefore + 2
+            && gatedFirst[gatedFirst.length - 1]?.role === 'user'
+            && gatedSecond[gatedSecond.length - 1]?.role === 'user'
+            && store.resultText === '姓名: 阿德\n年龄: 20'
+            && store.isProcessing === false,
+            `firstLast=${gatedFirst[gatedFirst.length - 1]?.role} secondLast=${gatedSecond[gatedSecond.length - 1]?.role} result=${store.resultText}`);
+
+        // 对照（与学习触发器异向，否则判不了别）：复位后跑「400+prefill →
+        // 去 prefill 重试仍 400 失败」——证据不足，不得落标记；两次失败都
+        // 真实发生（重试末条 user 证明第二次是无 prefill 的重发），错误
+        // toast 带真实事故文案、结果框保持原值（用户可见面锁三件套）
+        setProviderNoPrefill('smoke-endpoint', false);
+        const failBefore = calls.length;
+        const failToastErrors: string[] = [];
+        const failWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
+        failWindow.toastr = { error: message => { failToastErrors.push(message); } };
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            return fakeSSEStream([
+                `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
+            ]);
+        }) as typeof fetch;
+        const resultBeforeFail = store.resultText;
+        try {
+            store.requestText = '重试仍失败对照试验';
+            await store.generate();
+        } finally {
+            delete failWindow.toastr;
+        }
+        const failFirst = (calls[failBefore]?.body.messages ?? []) as Array<{ role: string }>;
+        const failRetry = (calls[failBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
+        check('端到端：重试仍失败不落标记（两次真实失败、错误 toast 带事故文案、结果框保持原值、noPrefill 保持 false）',
+            calls.length === failBefore + 2
+            && failFirst[failFirst.length - 1]?.role === 'assistant'
+            && failRetry[failRetry.length - 1]?.role === 'user'
+            && failToastErrors.length === 1 && failToastErrors[0].includes('upstream status 400')
+            && store.resultText === resultBeforeFail && store.isProcessing === false
+            && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === false,
+            `calls=${calls.length - failBefore} toast=${JSON.stringify(failToastErrors).slice(0, 60)} `
+            + `result=${store.resultText} noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)}`);
     } finally {
         globalThis.fetch = originalFetch;
         writeApiDomain([]);
@@ -1178,5 +1272,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、骨架双源机判、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）全部通过。');
 }

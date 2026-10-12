@@ -16,6 +16,12 @@ export interface ApiProvider {
     key: string;
     /** 拉取的模型清单缓存（跨会话持久；空数组＝从未拉取）。任务模型行的下拉源。 */
     models: string[];
+    /**
+     * 端点不支持续写（prefill）的能力记忆：该端点曾因带 prefill 收 400、
+     * 去 prefill 重试成功后落下的事实标记（baseUrl 粒度，跨会话持久）。
+     * 生成链据此跳过 prefill；不自动翻回（防探测抖动），复位走 API 页手动按钮。
+     */
+    noPrefill: boolean;
 }
 
 /** 服务商表存储域（extension_settings.ttToolkit.apis＝服务商数组本体）。 */

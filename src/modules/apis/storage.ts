@@ -45,6 +45,7 @@ function normalizeProvider(value: unknown): ApiProvider | null {
         url: normalizeString(raw.url, ''),
         key: normalizeString(raw.key, ''),
         models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
+        noPrefill: raw.noPrefill === true,
     };
 }
 
@@ -75,6 +76,7 @@ export function createEndpoint(name: string): ApiProvider {
         url: '',
         key: '',
         models: [],
+        noPrefill: false,
     };
 }
 
@@ -92,6 +94,23 @@ export function upsertEndpoint(endpoint: ApiProvider): void {
         if (idx >= 0) list[idx] = endpoint;
         else list.push(endpoint);
     });
+}
+
+/**
+ * 置单条服务商的 noPrefill 能力记忆，返回是否真的改动（条目在且值不同）。
+ * 两种 false 同义：providerId 悬空（生成进行中服务商被删是合法并发态，
+ * 标记无落点即丢）与已处目标值（重复学习/重复复位）——都不该惊动消费面，
+ * 调用方按返回值决定要不要 bump revision（域重写照本文件既有写口纪律）。
+ */
+export function setProviderNoPrefill(providerId: string, value: boolean): boolean {
+    let changed = false;
+    mutateApiDomain(list => {
+        const idx = list.findIndex(p => p.id === providerId);
+        if (idx < 0 || list[idx].noPrefill === value) return;
+        list[idx] = { ...list[idx], noPrefill: value };
+        changed = true;
+    });
+    return changed;
 }
 
 /**

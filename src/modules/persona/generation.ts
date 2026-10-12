@@ -127,6 +127,8 @@ interface RequestOnceParams {
     label: string;
     /** prefill 兼容重试时的用户提示（toast 归调用方）。 */
     onPrefillRetry?: () => void;
+    /** 去 prefill 重试成功＝端点不支持续写的实锤：调用方处置能力记忆与提示（必填，见 RunGenerationConfig 同名字段）。 */
+    onPrefillUnsupported: () => void;
     /** 外部取消信号（整条两段链共用一个；段内超时与它汇入同一 abort 通道）。 */
     signal?: AbortSignal;
 }
@@ -229,6 +231,10 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
             params.onPrefillRetry?.();
             try {
                 responseContent = await doRequest(promptArrayNoPrefill);
+                // 去 prefill 才成功＝该端点不收 assistant 尾条的直接证据。
+                // 本链只报事件：能力记忆落档与用户提示都是调用方的
+                // 组合根职责（生成链不反写设置域），后续请求直接不带起手词。
+                params.onPrefillUnsupported();
             } catch (retryErr) {
                 // 重试期间的超时/取消/网络错误与首发同口径归类，不裸冒泡
                 classifyFailure(retryErr);
@@ -247,6 +253,12 @@ export interface RunGenerationConfig extends GenerationApiConfig {
     wiText: string;
     greetingsText: string;
     onPrefillRetry?: () => void;
+    /**
+     * 去 prefill 重试成功后的「端点不收 prefill」事件处置（必填＝不设默认
+     * no-op：能力记忆落档与用户提示都是跨域副作用，漏接＝能力永不再学且
+     * 用户无感知；必填把漏接挡在编译期）。
+     */
+    onPrefillUnsupported: () => void;
     /** 段边界进度文案（「策展模板中…」/「生成中…」；store 接管按钮态）。 */
     onProgress?: (label: string) => void;
     /** 外部取消信号（「停止」按钮；贯穿两段）。 */
@@ -277,6 +289,16 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
         const firstKey = parseYamlToBlocks(structureText || '').keys().next().value;
         return firstKey ? '```yaml\n' + firstKey + ':' : '```yaml\n基本信息:';
     };
+    // 端点能力记忆门控：已标记不支持 prefill 的端点直接不发起手词（格式
+    // 稳定性的代价换可用性；标记由去 prefill 重试成功自动落下，不自动翻回）。
+    // 活值而非入口快照：学习发生在策展段的重试里，档案段必须接着不带起手词
+    // ——入口快照会让同一轮再吃一次 400、用户再看到一条一样的提示。
+    let noPrefill = config.route.noPrefill;
+    const onLearnedNoPrefill = (): void => {
+        noPrefill = true;
+        config.onPrefillUnsupported();
+    };
+    const prefillFor = (prefill: string): string => (noPrefill ? '' : prefill);
 
     const finalize = (rawText: string, prefillContent: string): string => {
         // 空白正文也算空（isBlankResponseContent 单点判据）：上游静默拦截
@@ -303,12 +325,13 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
             config,
             messages: assembled.messages,
             trace: assembled.trace,
-            prefillContent: PREFILL_SCHEMA,
+            prefillContent: prefillFor(PREFILL_SCHEMA),
             label: 'curator',
             onPrefillRetry: config.onPrefillRetry,
+            onPrefillUnsupported: onLearnedNoPrefill,
             signal: config.signal,
         });
-        const curated = raw ? stripYamlFence(raw, PREFILL_SCHEMA) : '';
+        const curated = raw ? stripYamlFence(raw, prefillFor(PREFILL_SCHEMA)) : '';
         if (!isSchemaSkeleton(curated)) {
             log.warn('策展输出为空或不可解析，回退默认模板', { curated });
             return DEFAULT_TEMPLATES.user;
@@ -324,7 +347,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
     const assembled = assemblePersonaMessages('persona_gen', { ...baseSources, curatedSchema: wrappedTags });
 
     // 档案段起手词从策展 schema 首键派生（curateSchema fail-soft 回退默认模板，恒非空）
-    const profilePrefill = profilePrefillFor(schemaForGen);
+    const profilePrefill = prefillFor(profilePrefillFor(schemaForGen));
     const raw = await requestOnce({
         config,
         messages: assembled.messages,
@@ -332,6 +355,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<string
         prefillContent: profilePrefill,
         label: 'personaGen',
         onPrefillRetry: config.onPrefillRetry,
+        onPrefillUnsupported: onLearnedNoPrefill,
         signal: config.signal,
     });
     return finalize(raw, profilePrefill);

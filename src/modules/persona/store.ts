@@ -26,6 +26,7 @@ import {
     upsertPersona,
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
+import { useApisStore } from '@/modules/apis/store';
 import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
 import { TEXT } from './strings';
@@ -73,6 +74,13 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
             wiText: run.wiText,
             greetingsText: run.greetingsText,
             onPrefillRetry: () => toast(TEXT.TOAST_PREFILL_RETRY),
+            // 「端点不收 prefill」事件的组合根处置：能力记忆写穿设置域
+            // （providerId 已被删时存储层返回 false 静默跳过，合法并发态）
+            // ＋用户提示。生成链只报事件，不反写设置域。
+            onPrefillUnsupported: () => {
+                useApisStore().markPrefillUnsupported(api.route.providerId);
+                toast(TEXT.TOAST_PREFILL_UNSUPPORTED);
+            },
             onProgress: label => { store.processingLabel = label; },
             signal,
         });

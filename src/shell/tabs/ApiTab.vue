@@ -15,11 +15,13 @@
       <div v-for="p in apis.endpoints" :key="p.id" class="tt-api-row">
         <div class="tt-api-row-main">
           <span class="tt-api-name">{{ p.name || '（未命名）' }}</span>
+          <TTStatus v-if="p.noPrefill" tone="warn" :title="NO_PREFILL_BADGE_TITLE">不支持 prefill</TTStatus>
           <span class="tt-api-url" :title="p.url">{{ p.url || '（未填地址）' }}</span>
           <span class="tt-api-model">{{ p.models.length > 0 ? `${p.models.length} 个模型` : '未拉取清单' }}</span>
           <span class="tt-api-key" :title="p.key ? '密钥已保存（打码显示）' : '未填密钥'">{{ maskKey(p.key) }}</span>
         </div>
         <div class="tt-api-row-actions">
+          <button v-if="p.noPrefill" type="button" class="tt-btn" @click="resetPrefill(p)">复位</button>
           <button type="button" class="tt-btn" @click="apis.startDraft(p)">编辑</button>
           <button type="button" class="tt-btn tt-btn--danger" @click="confirmRemove(p)">删除</button>
         </div>
@@ -169,6 +171,7 @@ import { TASKS, type TaskId } from '@/tasks';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import type { ReasoningEffort } from '@/modules/apis/client';
 import type { ApiProvider } from '@/modules/apis/types';
+import { showToast } from '@/host';
 import { TTCard, TTCombobox, TTField, TTStatus } from '@/shell/ui';
 
 const apis = useApisStore();
@@ -223,6 +226,15 @@ function confirmRemove(provider: ApiProvider): void {
     // 删除是破坏性操作：确认后执行；引用它的任务档案行由存储层联动重置
     if (!window.confirm(`确定删除「${label}」？引用它的任务模型行会一并清空。该操作不可撤销。`)) return;
     apis.removeEndpoint(provider.id);
+}
+
+// 徽标悬停说明（why：起手词为何被摘、怎么恢复）；toast 在点击点弹——store
+// 动作会被冒烟直接调用，那里没有宿主桥
+const NO_PREFILL_BADGE_TITLE = '该端点拒绝以模型续写开头（prefill）的请求，已自动不再附带起手词；点「复位」可恢复。';
+
+function resetPrefill(provider: ApiProvider): void {
+    apis.resetPrefillCapability(provider.id);
+    showToast('已恢复该端点的续写能力');
 }
 
 /** 行状态：悬空（服务商已删）/空（未配置）/就绪不显示。 */

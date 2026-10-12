@@ -91,11 +91,13 @@ export function mutateTaskProfiles(mutate: (profiles: TaskProfilesDomain) => voi
 
 /** 任务出站路由（消费方调用面形态；GenerationApiConfig 等按它引用）。 */
 export interface TaskRoute {
+    providerId: string;
     url: string;
     key: string;
     model: string;
     temperature: number;
     reasoningEffort: ReasoningEffort;
+    noPrefill: boolean;
 }
 
 /** 任务出站路由（档案 → 服务商表）。未配置/悬空/缺模型返回 null＝入口 fail fast。 */
@@ -105,11 +107,13 @@ export function resolveTaskRoute(task: TaskId): TaskRoute | null {
     const provider = readApiDomain().find(p => p.id === profile.providerId);
     if (!provider) return null;
     return {
+        providerId: provider.id,
         url: provider.url,
         key: provider.key,
         model: profile.model,
         temperature: profile.temperature ?? TASK_PARAMS[task].defaultTemperature,
         reasoningEffort: profile.reasoningEffort ?? TASK_PARAMS[task].defaultReasoningEffort,
+        noPrefill: provider.noPrefill,
     };
 }
 

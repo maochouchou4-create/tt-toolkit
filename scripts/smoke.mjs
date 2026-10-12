@@ -518,9 +518,11 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 活动键退役 1、服务商删除联动重置档案行 1；测连断言随 testConnection 退役 -1）
 // 本批 +4（v1.11.0 策展清单扩容：curator 参考清单体量 55 行/机制挂载开放段在场/
 // 新口径上限 16＋元层剥离/gen 值厚度与行为心理类传导；默认模板断言五块改十二块）
-// 本批 +3（v1.18.0 流内上游错误帧：真实事故帧抛错＋runlog 记失败/error:null
-// 反向守门/去 prefill 重试端到端）
-const PERSONA_PASS_EXPECTED = 87;
+// 本批 +4（v1.18.0 流内上游错误帧：真实事故帧抛错＋runlog 记失败/error:null 反向
+// 守门/去 prefill 重试端到端＋轮内即学即用且生成链不反写设置域）＋4（v1.18.0
+// 端点 prefill 能力记忆：学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败
+// 不落标记＋错误 toast 在场/收编不抹端点能力记忆）
+const PERSONA_PASS_EXPECTED = 91;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -578,7 +580,9 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同上纪律）＝ v1.12.0 批量设置行新增 5（批量写五行
 // 齐换/调参档保留/出站路由跟随/store 写穿 revision/删服务商联动收尾）。
-const APIS_PASS_EXPECTED = 5;
+// ＋ v1.18.0 端点 prefill 能力记忆新增 4（noPrefill 归一兼容/路由带出
+// providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）。
+const APIS_PASS_EXPECTED = 9;
 const apisPassLines = outputLines.filter(l => l.startsWith('[apis-smoke] PASS'));
 const apisFailLines = outputLines.filter(l => l.startsWith('[apis-smoke] FAIL'));
 if (apisPassLines.length !== APIS_PASS_EXPECTED || apisFailLines.length > 0) {
