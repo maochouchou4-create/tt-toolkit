@@ -312,7 +312,7 @@ ${f}
 
 请检查网络连接、VPN、代理或自定义接口地址，然后重试。
 
-请求地址: https://api.commandcode.ai/provider/v1/chat/completions`)),_("yaml：骨架判据拦下空响应与纯散文",!Lt("")&&!Lt(`   
+请求地址: https://api.example.com/provider/v1/chat/completions`)),_("yaml：骨架判据拦下空响应与纯散文",!Lt("")&&!Lt(`   
 	 `)&&!Lt("好的主人，您的骚母狗已经完全准备好了，请主人下达指令。")),_("yaml：骨架判据拦下散言前导+真骨架（换皮形态：prefill 首键不得落在散文句上）",!Lt(`好的，以下是为您定制的骨架：
 基本信息:
   年龄:

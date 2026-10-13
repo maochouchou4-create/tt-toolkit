@@ -1121,7 +1121,7 @@ function runPureFunctionChecks(): void {
         isSchemaSkeleton('```yaml\n基本信息:\n  年龄:\n  性别:\n外貌:\n  整体印象:\n```')
         && isSchemaSkeleton(DEFAULT_TEMPLATES.user));
     check('yaml：骨架判据拦下宿主错误正文（顶格散文行出局）',
-        !isSchemaSkeleton('[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。\n\n请检查网络连接、VPN、代理或自定义接口地址，然后重试。\n\n请求地址: https://api.commandcode.ai/provider/v1/chat/completions'));
+        !isSchemaSkeleton('[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。\n\n请检查网络连接、VPN、代理或自定义接口地址，然后重试。\n\n请求地址: https://api.example.com/provider/v1/chat/completions'));
     check('yaml：骨架判据拦下空响应与纯散文',
         !isSchemaSkeleton('') && !isSchemaSkeleton('   \n\t ')
         && !isSchemaSkeleton('好的主人，您的骚母狗已经完全准备好了，请主人下达指令。'));
