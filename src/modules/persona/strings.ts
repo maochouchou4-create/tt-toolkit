@@ -18,4 +18,29 @@ export const TEXT = {
     TOAST_REROLLED: '已重新生成',
     TOAST_CANCELLED: '已取消生成',
     TOAST_EMPTY_RESULT: '内容为空',
+
+    /**
+     * 复核简报四态：与 persona 其余文案同住一处（同一个 tab 的文案分两家，
+     * 改文案的人必然只翻到其中一家）。
+     *
+     * 它渲染在结果框正下方的一行里，**不并进结果框**：结果框经 upsertPersona
+     * 进宿主 persona_description、经 inject_persona 进此后每一轮对话，一行 UI
+     * 文案混进去就是每轮提示词里都漂着它。
+     *
+     * `FAILURE_REASON` 与四态同组：它是 FAILED 那句里的原因槽，值域恰三项
+     * （模型原始报错进不来），逻辑层的失败原因类型直接从它派生——类型即白名单。
+     */
+    REVIEW_BRIEF: {
+        /** 已改写：两处同一个数（重复对数＝改写叶数），叶名按模型给出的顺序逐个列出。 */
+        REWRITTEN: (count: number, keys: string) => `模型复核：发现 ${count} 处重复，已改写 ${count} 个字段 —— ${keys}`,
+        NONE: '模型复核：未发现重复',
+        FAILED: (reason: string) => `模型复核：没能跑完，已保留上一版结果 —— ${reason}`,
+        /** 未进复核（结果框为空／还没生成过）——与「跑了没发现」必须分得开。 */
+        NOT_RUN: '模型复核：未运行',
+        FAILURE_REASON: {
+            EMPTY: '响应为空',
+            UNUSABLE: '解析不了复核结果',
+            REQUEST: '请求失败',
+        },
+    },
 } as const;

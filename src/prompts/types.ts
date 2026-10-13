@@ -16,6 +16,10 @@ export type PromptRole = 'system' | 'user' | 'assistant';
  * PromptConfig——choice（选项生成）、persona 两段（策展 schema、按
  * schema 填充人设）、summary 两段（小总结压缩、大总结合并）。
  * 存储形态 Record<taskKey, PromptConfig>。
+ *
+ * 键数与「一次生成发几轮」不是一回事：人设链现在发三轮，第三轮（查重复核）
+ * 刻意不占任务键——它的指令与返回格式是一份契约，可编辑＝可静默降级
+ * （见 src/prompts/review.ts）。
  */
 export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen' | 'summary_small' | 'summary_big';
 

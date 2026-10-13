@@ -22,7 +22,7 @@
  */
 import { OWNERSHIP_PAIRS, catalogKeySet, type CatalogBlock } from '@/prompts/catalog';
 import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
-import { ProfileUndecidableError, scanProfileLeaves, shapeOfScan, type ProfileLeafRow, type ProfileUndecidableCode } from './yaml';
+import { ProfileUndecidableError, scanProfileLeaves, shapeOfScan, type ProfileLeafRow, type ProfileScan, type ProfileUndecidableCode } from './yaml';
 
 /**
  * 分类码与异常在本层的对外门面（定义在解析层 yaml.ts，理由见那边：解析层是
@@ -56,8 +56,23 @@ export interface RedundancyReport {
      *
      * 它是**目录漂移的体检信号，不是语义判据**，不参与任何自动处置（不改写、
      * 不拦截、不进简报的重复结论）；「目录是不是该补叶」是人的事。
+     *
+     * 注意它把两类处置混在一个数里：**机制挂载块的叶也落在这里**（计算口径是
+     * 「叶键不在目录里」，不看它所在的块在不在目录里）。要查的那一类单独由
+     * `catalogDriftLeaves` 给出。
      */
     unrecognizedLeaves: ReadonlyArray<string>;
+    /**
+     * **要查的那一类目录漂移**：目录里存在的块下，模型写出了目录没有的叶。
+     *
+     * 与 `unrecognizedLeaves` 的差集＝机制挂载块的叶——按该世界的原生词汇挂的
+     * 机制块，它的叶永远不必补（见 `unrecognizedBlocks` 的注释）。两个字段的
+     * 处置不同，所以这个「查」的口径必须由本层显式给出：接线侧拿到合并后的
+     * 一个数时无法把两类分开，而把正常形态当漂移喊出来＝告警失去意义。
+     *
+     * 唯一的消费方是复核轮收尾那一条 warn（改目录而不是改档案）。
+     */
+    catalogDriftLeaves: ReadonlyArray<string>;
 }
 
 /**
@@ -163,6 +178,21 @@ function literalHits(leaves: ReadonlyArray<ProfileLeafRow>): ReadonlyArray<Liter
 }
 
 /**
+ * 完全同值分组的可比签名（组内叶键排序后以 | 连接）。
+ *
+ * 消费方是复核轮改完之后的「无新增完全同值」校验：改写的目的是拆开原有的同值
+ * 组，**新增**才是事故——两者靠分组签名区分（只看「改后还有几组」会把拆开也
+ * 判成新增，因为组数变了）。
+ *
+ * 与 `analyzeRedundancy` 的分工：那条是抛错入口（形状不可判定就抛），这条不
+ * 抛——校验侧要的是「扫到了什么」，能不能拿这个结论由调用方的形状闸决定。
+ */
+export function literalDuplicateSignatures(yamlText: string): ReadonlyArray<string> {
+    return literalHits(scanProfileLeaves(yamlText).leaves).map(hit =>
+        hit.group.map(leaf => `${leaf.block}·${leaf.leaf}`).sort().join('|'));
+}
+
+/**
  * 结构冲突：归属优先级表两端同时在场（按「块·叶」比对，数据源是 catalog 的
  * OWNERSHIP_PAIRS —— 与提示词里那张表共用一份，此处不另抄）。
  *
@@ -187,6 +217,65 @@ function isRecognizedLeafKey(keys: ReadonlySet<string>, openEndedPrefixes: Reado
     return openEndedPrefixes.some(prefix => key.startsWith(prefix));
 }
 
+/**
+ * 目录漂移体检的窄出口（一段档案文本 → 三个计数）。
+ *
+ * 与 `analyzeRedundancy` 的分工：**那条是判据入口，形状不可判定就抛**；这条是
+ * 诊断入口，**永不抛**——它是挂在生成链收尾的体检告警，诊断不参与成败：让一个
+ * 「这不是一份档案」的输入把告警变成错误，等于让体检在最需要说话的时候闭嘴。
+ * 窄在这里指只算漂移相关的账（目录对照），不算重复（literal/structural 与目录
+ * 无关，算它们纯属浪费）。
+ */
+export interface CatalogDriftReport {
+    /** 要查的那一类：目录里存在的块下，模型写出了目录没有的叶。 */
+    catalogDriftLeaves: ReadonlyArray<string>;
+    /** 整块在目录外的块数（机制挂载块——正常形态，只作上下文）。 */
+    mechanismBlocksOutsideCatalog: number;
+    /** 未识别叶与无主行合计（含机制挂载块的叶，同样只作上下文）。 */
+    unrecognizedLeavesTotal: number;
+}
+
+/** 目录对照的内部产物（判据入口与窄出口共用，不复制逻辑）。 */
+interface CatalogDriftScan {
+    inCatalogBlocks: ReadonlySet<string>;
+    unrecognizedBlocks: ReadonlyArray<string>;
+    unrecognizedLeaves: ReadonlyArray<string>;
+    catalogDriftLeaves: ReadonlyArray<string>;
+    orphanLineCount: number;
+}
+
+/**
+ * 目录对照扫描（私有；不抛错）。
+ *
+ * 「要查的那一类」＝未识别叶里、其所在块在目录内的那些：机制挂载块整块在目录外是
+ * 正常形态（`unrecognizedBlocks` 那条注释写明「永远不必补叶」），把它算进来等于
+ * 每份挂机制块的正常档案都喊一次漂移。
+ */
+function scanCatalogDrift(scan: ProfileScan, knownKeysCatalog?: ReadonlyArray<CatalogBlock>): CatalogDriftScan {
+    const keys = catalogKeySet(knownKeysCatalog);
+    const openEndedPrefixes = [...keys].filter(key => key.endsWith('·'));
+    const unrecognizedBlocks = scan.blockKeys.filter(block => !keys.has(block));
+    const unrecognizedLeaves = scan.leafKeys.filter(key => !isRecognizedLeafKey(keys, openEndedPrefixes, key));
+    const inCatalogBlocks = new Set(scan.blockKeys.filter(block => keys.has(block)));
+    return {
+        inCatalogBlocks,
+        unrecognizedBlocks,
+        unrecognizedLeaves,
+        catalogDriftLeaves: unrecognizedLeaves.filter(key => inCatalogBlocks.has(key.slice(0, key.indexOf('·')))),
+        orphanLineCount: scan.orphanLines.length,
+    };
+}
+
+/** 目录漂移体检（窄入口，永不抛）。 */
+export function analyzeCatalogDrift(yamlText: string, knownKeysCatalog?: ReadonlyArray<CatalogBlock>): CatalogDriftReport {
+    const drift = scanCatalogDrift(scanProfileLeaves(yamlText), knownKeysCatalog);
+    return {
+        catalogDriftLeaves: drift.catalogDriftLeaves,
+        mechanismBlocksOutsideCatalog: drift.unrecognizedBlocks.length,
+        unrecognizedLeavesTotal: drift.unrecognizedLeaves.length + drift.orphanLineCount,
+    };
+}
+
 /** 目录外叶过半的判定线（见 analyzeRedundancy 处的取舍说明）。 */
 const MOSTLY_OUT_OF_CATALOG_RATIO = 0.5;
 
@@ -203,12 +292,7 @@ export function analyzeRedundancy(yamlText: string, knownKeysCatalog?: ReadonlyA
     const scan = scanProfileLeaves(yamlText);
     const shape = shapeOfScan(scan);
     if (!shape.ok) throw new ProfileUndecidableError(shape.code ?? 'EMPTY', shape.topLevelBlocks, shape.leafCount);
-    const keys = catalogKeySet(knownKeysCatalog);
-    const openEndedPrefixes = [...keys].filter(key => key.endsWith('·'));
-
-    const unrecognizedBlocks = scan.blockKeys.filter(block => !keys.has(block));
-    const unrecognizedLeaves = scan.leafKeys.filter(key => !isRecognizedLeafKey(keys, openEndedPrefixes, key));
-    const inCatalogBlocks = new Set(scan.blockKeys.filter(block => keys.has(block)));
+    const drift = scanCatalogDrift(scan, knownKeysCatalog);
 
     // 「这份文本是不是档案」的降级判定。目录是「什么算档案叶」的唯一权威，而
     // 形状闸只看得见块数与叶数——宿主错误正文（`连接失败: 请求超时: 请重试`
@@ -218,16 +302,18 @@ export function analyzeRedundancy(yamlText: string, knownKeysCatalog?: ReadonlyA
     // 挂载块整块在目录外是正常形态（unrecognizedBlocks 那条注释写明「永远不必补
     // 叶」），把它算进分子就会把机制挂得多的正常档案判成不是档案。块整块都在
     // 目录外、而档案里一个目录内的块都没有，另走一条——那是外来文本，同样不可判定。
-    const driftLeaves = unrecognizedLeaves.filter(key => inCatalogBlocks.has(key.slice(0, key.indexOf('·'))));
+    // 同一口径顺带作为报告里的 catalogDriftLeaves 交出去（接线侧要的就是
+    // 「哪些该查」，它没有能力也不该从合并后的 unrecognizedLeaves 里再拆一次）。
     const leafCount = scan.leaves.length;
-    if (leafCount > 0 && (driftLeaves.length > leafCount * MOSTLY_OUT_OF_CATALOG_RATIO || inCatalogBlocks.size === 0)) {
+    if (leafCount > 0 && (drift.catalogDriftLeaves.length > leafCount * MOSTLY_OUT_OF_CATALOG_RATIO || drift.inCatalogBlocks.size === 0)) {
         throw new ProfileUndecidableError('MOSTLY_OUT_OF_CATALOG', scan.blocks.length, leafCount);
     }
 
     return {
         literal: literalHits(scan.leaves),
         structural: structuralHits(scan.leaves),
-        unrecognizedBlocks,
-        unrecognizedLeaves: [...unrecognizedLeaves, ...scan.orphanLines],
+        unrecognizedBlocks: drift.unrecognizedBlocks,
+        unrecognizedLeaves: [...drift.unrecognizedLeaves, ...scan.orphanLines],
+        catalogDriftLeaves: drift.catalogDriftLeaves,
     };
 }

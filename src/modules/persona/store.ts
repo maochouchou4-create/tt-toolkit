@@ -29,6 +29,7 @@ import { createTtlog } from '@/host/ttlog';
 import { useApisStore } from '@/modules/apis/store';
 import { resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
+import { REVIEW_BRIEF_NOT_RUN, renderReviewBrief, type ReviewBrief } from './review';
 import { TEXT } from './strings';
 import { readPersonaDomain, writePersonaDomain } from './storage';
 
@@ -84,7 +85,8 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
             onProgress: label => { store.processingLabel = label; },
             signal,
         });
-        store.resultText = result;
+        store.resultText = result.profile;
+        store.reviewBrief = result.review;
         store.persistUserContext();
         if (successToast) toast(successToast);
     } catch (err) {
@@ -107,6 +109,15 @@ export const usePersonaStore = defineStore('tt-persona', {
             /** 人设分区：需求框/结果框。 */
             requestText: domain.userContext.request,
             resultText: domain.userContext.result,
+            /**
+             * 最近一次结果的复核简报态（内存态，**不落域**）。
+             *
+             * 不落域有两层理由：它是 UI 文案不是档案数据（落进 userContext 就会
+             * 经 upsertPersona 进宿主 persona_description、经 inject_persona 进
+             * 此后每一轮对话）；而 persona 域的归一是逐字段重建，没在
+             * normalizeUserContext 白名单登记的字段存进去也读不出来。
+             */
+            reviewBrief: REVIEW_BRIEF_NOT_RUN as ReviewBrief,
             /** 生成互斥与进度文案。 */
             isProcessing: false,
             processingLabel: '',
@@ -131,6 +142,16 @@ export const usePersonaStore = defineStore('tt-persona', {
         hasResult(): boolean {
             return this.resultText.trim().length > 0;
         },
+        /**
+         * 复核简报的展示态（四态文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
+         *
+         * 派生而非各处置一份文案：结果框被用户手改清空时 hasResult 为假，简报
+         * 必须回到「未运行」——那一档描述的是结果框，空框上还挂着「已改写 N 个
+         * 字段」是对着不存在的档案报账。
+         */
+        reviewBriefText(): string {
+            return renderReviewBrief(this.hasResult ? this.reviewBrief : REVIEW_BRIEF_NOT_RUN);
+        },
     },
 
     actions: {
@@ -148,6 +169,9 @@ export const usePersonaStore = defineStore('tt-persona', {
             const domain = readPersonaDomain();
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
+            // 读回来的是上一会话落盘的结果，本会话没有复核过它——简报复位成
+            // 未运行（域里根本没有这个字段，落盘的档案不带复核结论）。
+            this.reviewBrief = REVIEW_BRIEF_NOT_RUN;
         },
 
         /**
@@ -197,7 +221,7 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 人设分区：生成/重 roll ----------------
 
-        /** 生成（首次两段链）。互斥：isProcessing 期间静默忽略。 */
+        /** 生成（三轮链：策展→填充→复核）。互斥：isProcessing 期间静默忽略。 */
         async generate() {
             if (this.isProcessing) return;
             const api = buildApiConfig();
@@ -259,6 +283,9 @@ export const usePersonaStore = defineStore('tt-persona', {
         clearAll() {
             this.requestText = '';
             this.resultText = '';
+            // 简报随结果一起复位：结果框空了，它描述的那份档案也不存在了，
+            // 留着上一轮的「已改写 N 个字段」就是对着空框讲上一版的账。
+            this.reviewBrief = REVIEW_BRIEF_NOT_RUN;
             this.lastRun = null;
             this.persistUserContext();
         },

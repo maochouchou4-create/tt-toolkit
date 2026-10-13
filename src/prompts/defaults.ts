@@ -273,8 +273,17 @@ export function createDefaultPromptConfig(): PromptConfig {
 // catalog.ts 的 definitionRowKeysFromSchema），两处都不另抄一份。
 // ---------------------------------------------------------------------------
 
+/**
+ * 策展指令的任务头（首行标记）。
+ *
+ * 抽出常量而不是留在模板首行：它是「这一条消息是策展轮」的机判依据（冒烟的
+ * SSE 桩按末条 user 消息的首行分派三段回执），写在两处时改了模板不必记得回来
+ * 改桩——而漏改的后果是桩认不出段、与被测行为无关地炸。
+ */
+export const PERSONA_CURATOR_TASK_HEAD = '[任务：策展人设 schema]';
+
 /** 策展指令（persona_curator 任务）：只产出 schema 键名，不填值。 */
-const PERSONA_CURATOR_PROMPT = `[任务：策展人设 schema]
+const PERSONA_CURATOR_PROMPT = `${PERSONA_CURATOR_TASK_HEAD}
 [背景：你要为使用者本人（User 自设）设计一份 YAML 人设 schema（只定键名，值为空）。这份人设将与世界书等素材一同被阅读——使用者始终同时看到这两份文档。]
 
 <source_materials>
@@ -371,8 +380,11 @@ const PLACEHOLDER_WORDS: ReadonlyArray<string> = ['未知', 'unknown', 'N/A', '�
  */
 export const PROFILE_PLACEHOLDER_VALUES: ReadonlyArray<string> = [...PLACEHOLDER_WORDS, 'null'];
 
+/** 人设填充指令的任务头（首行标记；机判用途见 PERSONA_CURATOR_TASK_HEAD）。 */
+export const PERSONA_GEN_TASK_HEAD = '[任务：生成用户人设]';
+
 /** 人设填充指令（persona_gen 任务）。 */
-const PERSONA_GEN_PROMPT = `[任务：生成用户人设]
+const PERSONA_GEN_PROMPT = `${PERSONA_GEN_TASK_HEAD}
 [目标对象：User——使用者本人的扮演身份]
 [背景：本档案是使用者本人（User）的长期人设，供 AI 在整个扮演过程中稳定呈现 User——它定义的是不随剧情改变的「他是谁」与「如何扮演」。下方素材定义了 User 所处的世界与他身边的人——素材中出现的其他人物（无论名字与 User 相近与否）都是 User 的关系对象，档案主体永远是 User 本人。当前处境、关系进展与剧情动态由对话演化，档案不追踪。]
 

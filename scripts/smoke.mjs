@@ -607,8 +607,23 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 档案形状放行）＋确定性重复判据 8（契约点名的偷懒占位不算同值；LITERAL_SAMPLE 必
 // 命中含靠标点表才成立的一对、反转版零命中、REDUNDANCY_SAMPLE 的 structural 报出归属
 // 对第 2 对、该样本 literal 零命中是预期而非漏报、未识别块叶 0 在内联目录与默认目录
-// 下各跑一次、归一两段分工机判、标点表里每个字符各一条只有它能成立的断言）。
-const PERSONA_PASS_EXPECTED = 139;
+// 下各跑一次、归一两段分工机判、标点表里每个字符各一条只有它能成立的断言）
+// ＋复核回合 10（判据层零命中仍无条件发出第三段·末段按指令首行认得出是复核段；
+// 指令并进 messages 并携带整份档案＋末条是 user 的查重指令且整份请求里没有任何
+// assistant 模型轮——复核轮不带起手词（读实发 body，不读传入的那份 messages）；
+// 复核轮 400 不触发去起手词重试（三段共 3 次请求）·失败落降级态并保留首轮档案——
+// 「不带起手词是本轮的决定」与「端点不支持起手词」两条路径不混；模型给的
+// 「块.叶 → 值」逐叶直改·断言改后叶值本身而非「报出命中」·未点名叶逐字不动；
+// 「保留」行逐字不动·计数与叶名清单不含保留叶；响应为空降级·结果框仍是首轮
+// 内容·不弹错误；store 路径的结果框是复核后的那一份而非改写前的首轮档案；
+// 复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·不弹错误·真因带栈进
+// 运行日志——降级保证是结构性的不挑失败形态；回复不可用一律回滚·点名不存在的叶
+// 与写出新的完全同值两例；四态文案逐字＋失败原因白名单恰三项＋空结果框显未运行态）
+// ＋目录漂移告警 3（判据层一条：catalogDriftLeaves 只装「目录内块里写出的
+// 目录外叶」，机制挂载块的叶与无主行都不进；接线侧两条：warn 打在复核轮
+// 收尾——模型回「无重复」那条最常见的路也打，载荷只有计数与符号名不带档案
+// 内文；零计数时一条 warn 都不打）。
+const PERSONA_PASS_EXPECTED = 152;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -763,4 +778,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

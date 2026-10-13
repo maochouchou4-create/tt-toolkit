@@ -155,6 +155,11 @@ function isSummarySource(source: InjectionSource): source is SummaryInjectionSou
  * 它的值本次请求现算（按 sources.curatedSchema 收敛出该守边界的叶），落不进
  * 默认模板字面量——模板里放全量行时，每次请求都要为本次 schema 里不可能
  * 出现的键白付一遍边界文字，且这份负担随目录增长只增不减。
+ *
+ * {{profile}}（复核指令用）**不在这条链上**：它是那一轮独有的数据，走复核指令
+ * 模块自己的填充（assemblePersonaReviewMessages，在组装之后填）。放在通用链里
+ * 的代价是本链的所有轮次都要带一个空值参与替换——用户在策展/档案轮自己写的
+ * `{{profile}}` 字面量会被静默抹成空串，而那两轮本来就不该认识这个键。
  */
 function fillPersonaPlaceholders(content: string, sources: PersonaAssemblySources): string {
     return content

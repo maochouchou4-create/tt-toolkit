@@ -17,7 +17,7 @@ import { readJailbreakPreset } from './storage';
 
 const log = createTtlog('modules/apis/preset-inject');
 
-/** 已警示过的悬空预设名（persona 两段链一发两条同文——同名只警一次）。 */
+/** 已警示过的悬空预设名（persona 链每一轮都发同文——同名只警一次）。 */
 const warnedNames = new Set<string>();
 
 /** 解析破限注入前缀（未启用/读不到 → 空序列，生成照常）。 */

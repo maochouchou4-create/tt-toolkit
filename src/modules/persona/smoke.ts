@@ -21,7 +21,7 @@ import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves, ProfileUndecidableError } from './yaml';
-import { analyzeRedundancy, isJudgeableLeaf, isSameLeafValue, normalizeLeafValue } from './redundancy';
+import { analyzeRedundancy, analyzeCatalogDrift, isJudgeableLeaf, isSameLeafValue, normalizeLeafValue } from './redundancy';
 import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
@@ -29,7 +29,7 @@ import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration'
 import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
-import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
+import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
 import {
     CATALOG_DEFINITIONS_CLOSE_TAG,
     CATALOG_DEFINITIONS_OPEN_TAG,
@@ -48,8 +48,73 @@ import {
     renderOwnershipTable,
     type CatalogBlock,
 } from '@/prompts/catalog';
-import { runGeneration, stripYamlFence, collectWorldInfoContext } from './generation';
+import { runGeneration, stripYamlFence, collectWorldInfoContext, type GenerationResult } from './generation';
+import { renderReviewBrief, REVIEW_BRIEF_NOT_RUN } from './review';
+import { TEXT } from './strings';
 import { usePersonaStore } from './store';
+
+interface CapturedRequest {
+    url: string;
+    body: {
+        messages: Array<{ role: string; content: string }>;
+        [key: string]: unknown;
+    };
+}
+
+/**
+ * 段识别：按实发 body 末条 user 消息的首行分派。
+ *
+ * 为什么从消息内容认段、不数「这是第几次调用」：生成链第三段（复核）一进来，
+ * 「第 N 次调用回第 M 段内容」这种派发在任何一段增删时都会整体错位，而错位不
+ * 报错——档案段的 YAML 会被当复核回执解析，降级提示一路绿灯（冒烟本身测不
+ * 出）。按内容认段，加段减段都不必动桩；顺带把「复核指令有没有真进 messages」
+ * 变成桩的可观测前提：认不出复核段，说明那一轮的指令没在场。
+ *
+ * 判据是「首行以该段的任务头**开头**」而非整行相等：复核指令的任务头与它的
+ * 第一句写在同一行，策展段与档案段的任务头则独占一行。
+ *
+ * 三个任务头都从 prompts 侧 import（三段各据自己的那份真相源）：这里再抄一份
+ * 字面量，改了模板就会留下一处与被测行为无关的假红。
+ */
+function stageOfRequest(body: CapturedRequest['body'] | undefined): 'curator' | 'personaGen' | 'personaReview' | 'unknown' {
+    const messages = body?.messages ?? [];
+    const lastUser = [...messages].reverse().find(message => message.role === 'user');
+    const head = (lastUser?.content ?? '').split('\n')[0];
+    if (head.startsWith(PERSONA_CURATOR_TASK_HEAD)) return 'curator';
+    if (head.startsWith(PERSONA_REVIEW_TASK_HEAD)) return 'personaReview';
+    if (head.startsWith(PERSONA_GEN_TASK_HEAD)) return 'personaGen';
+    return 'unknown';
+}
+
+/**
+ * 该段请求是否带着起手词（请求末条是 assistant 轮）。两轮带：策展段与档案段；
+ * 复核轮不带（它的输出格式是「块.叶 → 值」行，起手词锚的是 YAML 续写）。
+ */
+function endsWithPrefill(body: CapturedRequest['body'] | undefined): boolean {
+    const messages = body?.messages ?? [];
+    return messages[messages.length - 1]?.role === 'assistant';
+}
+
+/** SSE 单帧响应（流式恒开——TASK_PARAMS：content 走 delta 帧）；抽到模块级给复核探针段复用。 */
+function sseResponse(content: string): Response {
+    return {
+        ok: true,
+        status: 200,
+        body: {
+            getReader: () => {
+                const encoder = new TextEncoder();
+                const frames = [
+                    encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`),
+                    encoder.encode('data: [DONE]\n\n'),
+                ];
+                return {
+                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
+                    cancel: async () => undefined,
+                };
+            },
+        },
+    } as unknown as Response;
+}
 
 const failures: string[] = [];
 
@@ -1442,6 +1507,15 @@ function runRedundancyChecks(): void {
         && jsonEq(orphanReport.unrecognizedLeaves, ['基本信息·备注', '- 妹妹', '十五岁那年冬天']),
         `叶键=${JSON.stringify(orphanScan.leafKeys)} 无主行=${JSON.stringify(orphanScan.orphanLines)} 未识别块=${JSON.stringify(orphanReport.unrecognizedBlocks)} 未识别叶=${JSON.stringify(orphanReport.unrecognizedLeaves)}`);
 
+    // catalogDriftLeaves＝「目录里这块有、模型多写了一叶」，是复核轮收尾那条
+    // 目录漂移 warn 的触发口径。差集两头各钉一条：机制挂载块的叶**不进**（口径
+    // 若含它，每份挂机制块的正常档案都喊漂移，告警随即失效）；目录内块多写的
+    // 叶**进**，而无主行不算（它不是某个叶的漂移，是模型手滑）。
+    check('yaml 判据：catalogDriftLeaves 只装「目录内块里写出的目录外叶」（机制挂载块的叶与无主行都不算）',
+        jsonEq(mechReport.catalogDriftLeaves, [])
+        && jsonEq(orphanReport.catalogDriftLeaves, ['基本信息·备注']),
+        `机制挂载块那份=${JSON.stringify(mechReport.catalogDriftLeaves)} 无主行那份=${JSON.stringify(orphanReport.catalogDriftLeaves)}`);
+
     // 加固⑥：档案段此前从不跑形状校验。宿主错误正文在这里落成零叶——它有 2 个
     // 顶层「块」，只靠「块数 ≥2」放行等于没校验。
     const envelopeShape = checkProfileShape(HOST_ERROR_ENVELOPE_YAML);
@@ -1794,7 +1868,8 @@ async function runApiChecks(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 6) persona 端到端（统一端点两段链：curator→personaGen 走引擎管线）
+// 6) persona 端到端（统一端点三段链：curator→personaGen→复核，都走引擎管线；
+//    复核回合本身的探针在 7) 段，这里钉的是前两段与整链的面）
 // ---------------------------------------------------------------------------
 
 async function runPersonaE2EChecks(): Promise<void> {
@@ -1807,31 +1882,22 @@ async function runPersonaE2EChecks(): Promise<void> {
 
     const CURATOR_YAML = '```yaml\n基本信息:\n姓名:\n年龄:\n```';
     const PERSONA_YAML = '```yaml\n姓名: 阿德\n年龄: 20\n```';
-    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const REVIEW_NO_DUPLICATE = '无重复';
+    const calls: CapturedRequest[] = [];
     const originalFetch = globalThis.fetch;
-    // 流式 SSE 桩（stream 恒开——TASK_PARAMS）：content 走 delta 帧
-    const sseResponse = (content: string): Response => ({
-        ok: true,
-        status: 200,
-        body: {
-            getReader: () => {
-                const encoder = new TextEncoder();
-                const frames = [
-                    encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`),
-                    encoder.encode('data: [DONE]\n\n'),
-                ];
-                return {
-                    read: async () => frames.length > 0 ? { done: false, value: frames.shift() } : { done: true },
-                    cancel: async () => undefined,
-                };
-            },
-        },
-    } as unknown as Response);
+    // 段→回执派发表。认不出段就抛（不猜）：猜出来的段会把某一段的 YAML
+    // 喂给另一段的解析器，冒烟反而全绿
+    const replyForStage = (body: CapturedRequest['body']): string => {
+        const stage = stageOfRequest(body);
+        if (stage === 'curator') return CURATOR_YAML;
+        if (stage === 'personaGen') return PERSONA_YAML;
+        if (stage === 'personaReview') return REVIEW_NO_DUPLICATE;
+        throw new Error(`冒烟桩认不出请求段：${JSON.stringify(body.messages.slice(-1))}`);
+    };
     globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
         calls.push({ url: String(url), body });
-        const content = calls.length === 1 ? CURATOR_YAML : PERSONA_YAML;
-        return sseResponse(content);
+        return sseResponse(replyForStage(body));
     }) as typeof fetch;
     try {
         await store.generate();
@@ -1846,7 +1912,7 @@ async function runPersonaE2EChecks(): Promise<void> {
             // 错误帧形状，只有 OpenAI 形态带 id 前缀（claude/makersuite 等
             // 支不带，custom 不在其列）——host/api-error.ts 的信封判据有效
             // 性系于此。改此处出站源必须连同那边的判据与核实记录一起复核。
-            calls.length === 2
+            calls.length === 3
             && calls[0].url === '/api/backends/chat-completions/generate'
             && calls[0].body.type === 'quiet' && calls[0].body.chat_completion_source === 'custom'
             && calls[0].body.reverse_proxy === 'https://smoke.example.com/v1' && calls[0].body.proxy_password === 'sk-smoke'
@@ -1864,33 +1930,32 @@ async function runPersonaE2EChecks(): Promise<void> {
             && secondJoined.includes('基本信息:') && secondJoined.includes('[SYSTEM_OP: LOGIC_CONSTRAINT]')
             && !secondJoined.includes('{{template}}')
             && lastSecond?.role === 'assistant' && lastSecond?.content.startsWith('```yaml'));
-        check('端到端：两段链结果落地（结果框 YAML 剥围栏、互斥复位）',
+        check('端到端：三段链结果落地（结果框是最终档案＝末轮复核查重后的那一份、YAML 剥围栏、互斥复位）',
             store.resultText === '姓名: 阿德\n年龄: 20'
             && store.isProcessing === false && store.processingLabel === '',
             `result=${store.resultText}`);
 
-        // 破限注入 e2e：选中「冒烟破限」→ 两段请求的首条消息＝assistant 开场
-        // 原文（SSE 桩按调用序回内容，生成正常完成）。「恰一次」机判锁双注入：
-        // 前缀在每段全文恰出现一次——调用点漏注与重复注都翻红。key 写入放
-        // try/finally 复位：e2e 中途 FAIL 不把键泄漏给后续用例（同进程共享
-        // extension_settings 单例，键状态非隔离）
+        // 破限注入 e2e：选中「冒烟破限」→ 每段请求的首条消息＝assistant 开场
+        // 原文（SSE 桩按消息内容回内容，生成正常完成）。「恰一次」机判锁双注入：
+        // 前缀在每段全文恰出现一次——调用点漏注与重复注都翻红。三段都钉（漏掉
+        // 哪一段都在生成链新增一段时才暴露，而那一段漏注时整轮结果照常回来，
+        // 只有计数红）。key 写入放 try/finally 复位：e2e 中途 FAIL 不把键泄漏给
+        // 后续用例（同进程共享 extension_settings 单例，键状态非隔离）
         const countOccurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
         writeJailbreakPreset('冒烟破限');
         try {
             store.requestText = '破限注入试验';
             await store.generate();
-            const jbFirstMessages = (calls[2]?.body.messages ?? []) as Array<{ role: string; content: string }>;
-            const jbSecondMessages = (calls[3]?.body.messages ?? []) as Array<{ role: string; content: string }>;
-            const jbFirst = jbFirstMessages[0];
-            const jbSecond = jbSecondMessages[0];
-            check('端到端：破限注入前缀按原角色恰一次插两段请求最前（双注入守门）',
-                calls.length === 4
-                && jbFirst.role === 'assistant' && jbFirst.content === '破限开场白'
-                && jbSecond.role === 'assistant' && jbSecond.content === '破限开场白'
-                && countOccurrences(jbFirstMessages.map(m => m.content).join('\n'), '破限开场白') === 1
-                && countOccurrences(jbSecondMessages.map(m => m.content).join('\n'), '破限开场白') === 1
-                && jbFirstMessages.length > 1,
-                `first=${JSON.stringify(jbFirst)} calls=${calls.length}`);
+            const jailbreakStages = calls.map(call => stageOfRequest(call.body));
+            const jailbreakBodies = [calls[3], calls[4], calls[5]].map(call => call?.body.messages ?? []);
+            const jailbreakHeads = jailbreakBodies.map(messages => messages[0]);
+            check('端到端：破限注入前缀按原角色恰一次插每一段请求最前（三段都钉，双注入/漏注入守门）',
+                calls.length === 6
+                && jailbreakStages.slice(3).join(',') === 'curator,personaGen,personaReview'
+                && jailbreakHeads.every(head => head?.role === 'assistant' && head.content === '破限开场白')
+                && jailbreakBodies.every(messages => countOccurrences(messages.map(m => m.content).join('\n'), '破限开场白') === 1)
+                && jailbreakBodies.every(messages => messages.length > 1),
+                `stages=${jailbreakStages.join(',')} heads=${JSON.stringify(jailbreakHeads)}`);
 
             // 观测面收敛（dump 前缀段）：选中预设后 dump 的消息段＝实发序列
             // （前缀＋组装，同一 composeOutbound 实现），头部计数行写「= 破限
@@ -1906,9 +1971,9 @@ async function runPersonaE2EChecks(): Promise<void> {
             writeJailbreakPreset('不存在预设');
             store.requestText = '悬空破限试验';
             await store.generate();
-            const noJbFirst = (calls[4]?.body.messages as Array<{ role: string; content: string }> ?? [])[0];
+            const noJbFirst = (calls[6]?.body.messages ?? [])[0];
             check('端到端：破限预设悬空时生成照常且不注入',
-                calls.length === 6
+                calls.length === 9
                 && noJbFirst.role !== 'assistant' && noJbFirst.content !== '破限开场白'
                 && store.isProcessing === false,
                 `first=${JSON.stringify(noJbFirst)} calls=${calls.length}`);
@@ -1946,20 +2011,21 @@ async function runPersonaE2EChecks(): Promise<void> {
         // ——curator 段 fail-soft 回退默认模板照常，personaGen 段 finalize 抛
         // 「API 返回为空」。用户可见面三件套机判：错误 toast 在场（toastr
         // 间谍临时接管、验毕删除）、结果框保持原值（falsy 判空下纯空白会
-        // 静默成功并置空结果框——保留断言的前提是原值非空）、互斥态干净
+        // 静默成功并置空结果框——保留断言的前提是原值非空）、互斥态干净。
+        // 调用数只 +2：档案段这一关就抛了，第三段（复核）压根没发
         const blankToastErrors: string[] = [];
         const blankWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
         blankWindow.toastr = { error: message => { blankToastErrors.push(message); } };
         const resultBeforeBlank = store.resultText;
         store.requestText = '空白正文试验';
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'] });
             return sseResponse('  \n\t ');
         }) as typeof fetch;
         try {
             await store.generate();
-            check('端到端：空白正文抛「API 返回为空」（两段链走完后错误 toast 在场、结果框保持原值、互斥态干净）',
-                calls.length === 8
+            check('端到端：档案段空白正文抛「API 返回为空」（档案段 finalize 就抛，复核轮压根没发：错误 toast 在场、结果框保持原值、互斥态干净）',
+                calls.length === 11
                 && resultBeforeBlank.length > 0 && store.resultText === resultBeforeBlank
                 && store.isProcessing === false && store.processingLabel === ''
                 && blankToastErrors.length === 1 && blankToastErrors[0].includes('API 返回为空'),
@@ -1979,7 +2045,7 @@ async function runPersonaE2EChecks(): Promise<void> {
         const resultBeforeEnvelope = store.resultText;
         store.requestText = '宿主错误信封试验';
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'] });
             const encoder = new TextEncoder();
             const frames = [
                 encoder.encode(`data: ${JSON.stringify({
@@ -2011,47 +2077,51 @@ async function runPersonaE2EChecks(): Promise<void> {
             delete envelopeWindow.toastr;
         }
 
-        // 流内上游错误帧 e2e（判别性主断言，真跑 runGeneration）：persona 两段
-        // 请求均以 assistant prefill 结尾，curator 首发被网关以「末条是模型轮」
-        // 400 拒收（真实事故帧）——必须触发去 prefill 重试且第二次成功。锁
-        // 用户可见行为（三次实发 fetch body 的末条角色），不锁上游文案形状。
-        // 第三段末条＝user 是轮内即学即用的机判：学习落在策展段重试里，
+        // 流内上游错误帧 e2e（判别性主断言，真跑 runGeneration）：带起手词的段
+        // （curator 与档案段）均以 assistant 起手词结尾，curator 首发被网关以
+        // 「末条是模型轮」400 拒收（真实事故帧）——必须触发去起手词重试且第二次
+        // 成功。锁用户可见行为（实发 fetch body 的末条角色），不锁上游文案形状。
+        // 档案段末条＝user 是轮内即学即用的机判：学习落在策展段重试里，
         // 档案段必须接着不带起手词（读入口快照的实现会在此露馅）。
         // 本例直调 runGeneration：事件回调只记账，设置域必须纹丝不动——能力
         // 记忆是组合根（store）的职责，生成链不反写兄弟域。
         let learnedEvents = 0;
         const prefillRetryBefore = calls.length;
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
-            if (calls.length === prefillRetryBefore + 1) {
+            const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
+            calls.push({ url: String(url), body });
+            // 「末条是模型轮」才拒收——真事故的判别依据在 body 里，不在调用序
+            // 里：端点不收带起手词的请求，去掉起手词的重试即通；后续段因轮内
+            // 即学即用也不再带起手词，桩不必（也不该）再数第几次调用
+            if (endsWithPrefill(body)) {
                 return fakeSSEStream([
                     `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
                 ]);
             }
-            return sseResponse(calls.length === prefillRetryBefore + 2 ? CURATOR_YAML : PERSONA_YAML);
+            return sseResponse(replyForStage(body));
         }) as typeof fetch;
-        const prefillProfile = await runGeneration({
+        const prefillRun = await runGeneration({
             route: { providerId: 'smoke-endpoint', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high', noPrefill: false },
             request: '流内错误帧重试试验',
             wiText: '',
             greetingsText: '',
             onPrefillUnsupported: () => { learnedEvents += 1; },
         });
-        const first400 = (calls[prefillRetryBefore]?.body.messages ?? []) as Array<{ role: string }>;
-        const retry400 = (calls[prefillRetryBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
-        const afterLearn = (calls[prefillRetryBefore + 2]?.body.messages ?? []) as Array<{ role: string }>;
+        const first400 = calls[prefillRetryBefore]?.body.messages ?? [];
+        const retry400 = calls[prefillRetryBefore + 1]?.body.messages ?? [];
+        const afterLearn = calls[prefillRetryBefore + 2]?.body.messages ?? [];
         check('端到端：流内上游错误帧触发去 prefill 重试（首发末条 assistant、重试末条 user、档案段接着不带起手词、成功落地）',
-            calls.length === prefillRetryBefore + 3
+            calls.length === prefillRetryBefore + 4
             && first400[first400.length - 1]?.role === 'assistant'
             && retry400[retry400.length - 1]?.role === 'user'
             && retry400.length === first400.length - 1
             && afterLearn[afterLearn.length - 1]?.role === 'user'
             && learnedEvents === 1
             && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === false
-            && prefillProfile === '姓名: 阿德\n年龄: 20',
+            && prefillRun.profile === '姓名: 阿德\n年龄: 20',
             `firstLast=${first400[first400.length - 1]?.role} retryLast=${retry400[retry400.length - 1]?.role} `
             + `afterLast=${afterLearn[afterLearn.length - 1]?.role} events=${learnedEvents} `
-            + `noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)} profile=${prefillProfile}`);
+            + `noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)} profile=${prefillRun.profile}`);
 
         // 学习写穿设置域（判别性主断言，走组合根 store.generate()）：同一场
         // 400 家族事故重跑一次——事件必须经 store 的 handler 落到服务商条目，
@@ -2059,34 +2129,37 @@ async function runPersonaE2EChecks(): Promise<void> {
         setProviderNoPrefill('smoke-endpoint', false);
         const learnBefore = calls.length;
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
-            if (calls.length === learnBefore + 1) {
+            const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
+            calls.push({ url: String(url), body });
+            if (endsWithPrefill(body)) {
                 return fakeSSEStream([
                     `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
                 ]);
             }
-            return sseResponse(calls.length === learnBefore + 2 ? CURATOR_YAML : PERSONA_YAML);
+            return sseResponse(replyForStage(body));
         }) as typeof fetch;
         store.requestText = '学习触发试验';
         await store.generate();
         check('端到端：去 prefill 重试成功后端点条目落 noPrefill=true（学习经组合根写穿设置域）',
-            calls.length === learnBefore + 3 && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === true,
+            calls.length === learnBefore + 4 && readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === true,
             `calls=${calls.length - learnBefore} noPrefill=${String(readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill)}`);
 
         // 已标记端点（学习后的下一轮）：路由经 resolveTaskRoute 带出 noPrefill
-        // ＝true，两段实发 body 末条都应是 user（起手词被摘、生成照常成功）
+        // ＝true，两条带起手词的段实发 body 末条都应是 user（起手词被摘、生成照常
+        // 成功；复核轮本就不带起手词，末条恒 user 不构成这条的判据）
         const gatedBefore = calls.length;
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
-            return sseResponse(calls.length === gatedBefore + 1 ? CURATOR_YAML : PERSONA_YAML);
+            const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
+            calls.push({ url: String(url), body });
+            return sseResponse(replyForStage(body));
         }) as typeof fetch;
         store.requestText = '已标记端点试验';
         await store.generate();
-        const gatedFirst = (calls[gatedBefore]?.body.messages ?? []) as Array<{ role: string }>;
-        const gatedSecond = (calls[gatedBefore + 1]?.body.messages ?? []) as Array<{ role: string }>;
-        check('端到端：已标记端点两段实发 body 末条均为 user（prefill 被摘、生成照常成功）',
+        const gatedFirst = calls[gatedBefore]?.body.messages ?? [];
+        const gatedSecond = calls[gatedBefore + 1]?.body.messages ?? [];
+        check('端到端：已标记端点两条带起手词的段实发 body 末条均为 user（起手词被摘、生成照常成功）',
             readApiDomain().find(p => p.id === 'smoke-endpoint')?.noPrefill === true
-            && calls.length === gatedBefore + 2
+            && calls.length === gatedBefore + 3
             && gatedFirst[gatedFirst.length - 1]?.role === 'user'
             && gatedSecond[gatedSecond.length - 1]?.role === 'user'
             && store.resultText === '姓名: 阿德\n年龄: 20'
@@ -2103,7 +2176,7 @@ async function runPersonaE2EChecks(): Promise<void> {
         const failWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
         failWindow.toastr = { error: message => { failToastErrors.push(message); } };
         globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+            calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'] });
             return fakeSSEStream([
                 `data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n`,
             ]);
@@ -2134,7 +2207,300 @@ async function runPersonaE2EChecks(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 7) store 互斥＋会话感知
+// 7) 复核回合（AI 调用 3）
+// ---------------------------------------------------------------------------
+
+/** 复核探针夹具：策展段回两块骨架（档案块集是它的子集，档案段才过 finalize）。 */
+const REVIEW_STUB_CURATOR_YAML = '```yaml\n基本信息:\n姓名:\n年龄:\n生活习性:\n起床:\n夜宵:\n```';
+
+/** 复核探针夹具档案：两块四叶，四个叶值互不相同——首轮本身不触发任何判定。 */
+const REVIEW_STUB_PROFILE_YAML = '```yaml\n基本信息:\n  年龄: 26\n  身份: 城南码头的夜班调度\n生活习性:\n  起床: 天没亮就起，先去巷口买豆浆\n  夜宵: 收摊前必去吃一碗热汤面\n```';
+
+/** 同一份档案剥围栏后的正文（结果框该逐字等于它）。 */
+const REVIEW_STUB_PROFILE_TEXT = '基本信息:\n  年龄: 26\n  身份: 城南码头的夜班调度\n生活习性:\n  起床: 天没亮就起，先去巷口买豆浆\n  夜宵: 收摊前必去吃一碗热汤面';
+
+/**
+ * 目录漂移探针夹具：`基本信息`（目录内块）里多写了一叶 `籍贯`，外加一块
+ * 机制挂载块 `生活习性`（整块在目录外，它的叶按设计永远不必补）。两个形状
+ * 各钉一头：前者该进漂移计数，后者不该——触发口径含了它，告警就废了。
+ */
+const REVIEW_STUB_DRIFT_PROFILE_YAML = '```yaml\n基本信息:\n  年龄: 26\n  籍贯: 城南码头镇\n生活习性:\n  起床: 天没亮就起，先去巷口买豆浆\n  夜宵: 收摊前必去吃一碗热汤面\n```';
+
+/**
+ * 复核回执夹具。分隔符与叶名分隔符刻意写字面量、不引 review.ts 的常量——
+ * 引入常量等于用被测实现去构造被测输入，箭头差一个空格就双双假绿。
+ */
+const REVIEW_STUB_REWRITE = '生活习性.起床 → 天亮透了才出门，先给面摊送两碗豆浆过去';
+
+/**
+ * 真实 400 帧（网关「末条是模型轮」那一族）。本探针用它断言**复核轮 400 不
+ * 走去起手词重试**：复核轮本就不带起手词，没有可去的东西，重发只会把同一条
+ * 请求原样再发一遍。
+ */
+const REVIEW_STUB_BAD_REQUEST_FRAME = 'data: {"error":{"message":"upstream status 400: {\\"error\\":{\\"code\\":400,\\"message\\":\\"Requests ending with a model turn are not supported.\\",\\"status\\":\\"INVALID_ARGUMENT\\"}}","type":"invalid_request_error","param":null,"code":"invalid_argument"}}\n\n';
+
+/**
+ * 复核回合探针（真跑公开入口 runGeneration／store，不直接调纯函数）：
+ *   1. 复核请求**无条件**发出（判据层零命中也发——判据层的语义检出率为零，
+ *      它不是触发器；
+ *   2. 实发 body 携带整份档案、指令并进 messages，且**本轮不带起手词**
+ *      （末条是 user 的查重指令）；
+ *   3. 模型给的「块.叶 → 值」被逐叶直改进档案（断言改后叶值本身，不只断言
+ *      「报出命中」）；
+ *   4. 复核失败时结果框仍是首轮内容、简报落降级态（不抛给用户）。
+ * 读的是实发 body（calls[i].body.messages），不是传进 requestOnce 的那份
+ * messages——后者与实发面可以分家，而分家不产生任何报错。
+ */
+async function runPersonaReviewChecks(): Promise<void> {
+    const store = usePersonaStore();
+    writeApiDomain([{ id: 'smoke-endpoint', name: '冒烟服务商', url: 'https://smoke.example.com/v1', key: 'sk-smoke', models: ['smoke-model'], noPrefill: false }]);
+    seedTaskProfiles('smoke-endpoint', 'smoke-model');
+    store.requestText = '复核回合试验';
+    store.isProcessing = false;
+
+    const originalFetch = globalThis.fetch;
+    interface ReviewStubOptions {
+        /** 复核段按尝试序取的回执（首项＝首次复核请求该拿到的内容）。 */
+        reviewReplies: string[];
+        /** 复核段首次请求是否被 400 拒收（用来断言本轮不走去起手词重试）。 */
+        rejectReview?: boolean;
+        /**
+         * 复核段的 fetch 直接 reject（模拟非 400 族的传输失败：网关 5xx 原文、
+         * 中途断流等）。用来断言「档案已经生成成功」时复核怎么失败都只降级。
+         */
+        failReview?: string;
+        /** 档案段的回执（默认 REVIEW_STUB_PROFILE_YAML；漂移那组换一份带目录外叶的）。 */
+        profileYaml?: string;
+    }
+    const installStub = (calls: CapturedRequest[], options: ReviewStubOptions): void => {
+        let rejected = false;
+        let replied = 0;
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
+            calls.push({ url: String(url), body });
+            const stage = stageOfRequest(body);
+            if (stage === 'curator') return sseResponse(REVIEW_STUB_CURATOR_YAML);
+            if (stage === 'personaGen') return sseResponse(options.profileYaml ?? REVIEW_STUB_PROFILE_YAML);
+            if (stage === 'personaReview') {
+                if (options.failReview) throw new Error(options.failReview);
+                if (options.rejectReview && !rejected) {
+                    rejected = true;
+                    return fakeSSEStream([REVIEW_STUB_BAD_REQUEST_FRAME]);
+                }
+                const reply = options.reviewReplies[replied];
+                replied += 1;
+                return sseResponse(reply ?? '');
+            }
+            throw new Error(`复核探针桩认不出请求段：${JSON.stringify(body.messages.slice(-1))}`);
+        }) as typeof fetch;
+    };
+    // 能力记忆不在本段关注面（e2e 已锁它的落档口径），事件回调空实现即可
+    const runReview = (request: string): Promise<GenerationResult> => runGeneration({
+        route: { providerId: 'smoke-endpoint', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high', noPrefill: false },
+        request,
+        wiText: '',
+        greetingsText: '',
+        onPrefillUnsupported: () => { /* 见上方注释 */ },
+    });
+
+    try {
+        const plainCalls: CapturedRequest[] = [];
+        installStub(plainCalls, { reviewReplies: ['无重复'] });
+        const plain = await runReview('无条件复核试验');
+        const stages = plainCalls.map(call => stageOfRequest(call.body));
+        check('复核：判据层零命中仍无条件发出复核轮（三段实发、末段认得出查重指令、回执「无重复」落未发现态、档案逐字未动）',
+            analyzeRedundancy(REVIEW_STUB_PROFILE_TEXT).literal.length === 0
+            && stages.join(',') === 'curator,personaGen,personaReview'
+            && plain.review.kind === 'none'
+            && plain.profile === REVIEW_STUB_PROFILE_TEXT,
+            `stages=${stages.join(',')} review=${JSON.stringify(plain.review)} profile=${JSON.stringify(plain.profile)}`);
+
+        const reviewMessages = plainCalls[2].body.messages;
+        const reviewJoined = reviewMessages.map(message => message.content).join('\n');
+        const reviewLast = reviewMessages[reviewMessages.length - 1];
+        check('复核：指令并进 messages 且携带整份档案、末条是 user 的查重指令（本轮不带起手词：起手词锚的是那一轮的输出格式，复核轮要的是行格式）',
+            reviewJoined.includes(PERSONA_REVIEW_TASK_HEAD)
+            && reviewJoined.includes('<profile>')
+            && reviewJoined.includes(REVIEW_STUB_PROFILE_TEXT)
+            && reviewJoined.includes(PERSONA_GEN_TASK_HEAD)
+            && !reviewMessages.some(message => message.role === 'assistant')
+            && reviewLast?.role === 'user'
+            && reviewLast.content.startsWith(PERSONA_REVIEW_TASK_HEAD),
+            `lastRole=${reviewLast?.role} assistantTurns=${reviewMessages.filter(message => message.role === 'assistant').length} hasProfile=${reviewJoined.includes(REVIEW_STUB_PROFILE_TEXT)}`);
+
+        const rejectCalls: CapturedRequest[] = [];
+        installStub(rejectCalls, { reviewReplies: ['无重复'], rejectReview: true });
+        const rejected = await runReview('复核 400 不重试试验');
+        check('复核：400 不触发去起手词重试（三段共 3 次请求，没有第 4 次重发），失败落降级态并保留首轮档案（不带起手词是本轮的决定，不是端点能力降级）',
+            rejectCalls.length === 3
+            && rejectCalls[2].body.messages[rejectCalls[2].body.messages.length - 1]?.role === 'user'
+            && rejected.review.kind === 'failed'
+            && rejected.review.reason === TEXT.REVIEW_BRIEF.FAILURE_REASON.REQUEST
+            && rejected.profile === REVIEW_STUB_PROFILE_TEXT,
+            `calls=${rejectCalls.length} review=${JSON.stringify(rejected.review)}`);
+
+        const rewriteCalls: CapturedRequest[] = [];
+        installStub(rewriteCalls, { reviewReplies: [REVIEW_STUB_REWRITE] });
+        const rewritten = await runReview('复核直改试验');
+        const rewrittenBrief = renderReviewBrief(rewritten.review);
+        check('复核：模型给的「块.叶 → 值」被逐叶直改进档案（断言改后叶值本身、未点名叶逐字不动、简报落「已改写」态并列出被改的叶名）',
+            rewritten.profile.includes('  起床: 天亮透了才出门，先给面摊送两碗豆浆过去')
+            && !rewritten.profile.includes('天没亮就起')
+            && rewritten.profile.includes('  身份: 城南码头的夜班调度')
+            && rewritten.profile.includes('  夜宵: 收摊前必去吃一碗热汤面')
+            && rewritten.review.kind === 'rewritten'
+            && rewrittenBrief === '模型复核：发现 1 处重复，已改写 1 个字段 —— 生活习性.起床',
+            `profile=${JSON.stringify(rewritten.profile)} brief=${rewrittenBrief}`);
+
+        const keepCalls: CapturedRequest[] = [];
+        installStub(keepCalls, { reviewReplies: [`生活习性.夜宵 → 保留\n${REVIEW_STUB_REWRITE}`] });
+        const kept = await runReview('复核保留行试验');
+        const keptBrief = renderReviewBrief(kept.review);
+        check('复核：「保留」行逐字不动（被保留叶的值原样在档、只有被点名改写的叶换掉、计数与叶名清单不含保留叶）',
+            kept.profile.includes('  夜宵: 收摊前必去吃一碗热汤面')
+            && kept.profile.includes('  起床: 天亮透了才出门，先给面摊送两碗豆浆过去')
+            && keptBrief === '模型复核：发现 1 处重复，已改写 1 个字段 —— 生活习性.起床',
+            `profile=${JSON.stringify(kept.profile)} brief=${keptBrief}`);
+
+        // 降级面走组合根：结果框与简报都是用户可见面，store 这条路才验得到
+        const reviewToastErrors: string[] = [];
+        const reviewWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
+        reviewWindow.toastr = { error: message => { reviewToastErrors.push(message); } };
+        const blankCalls: CapturedRequest[] = [];
+        try {
+            installStub(blankCalls, { reviewReplies: ['  \n\t '] });
+            store.requestText = '复核空白试验';
+            await store.generate();
+        } finally {
+            delete reviewWindow.toastr;
+        }
+        check('复核：响应为空降级（结果框仍是首轮内容、简报落「没能跑完」态且原因取自白名单、不弹错误）',
+            store.resultText === REVIEW_STUB_PROFILE_TEXT
+            && store.reviewBriefText === `模型复核：没能跑完，已保留上一版结果 —— ${TEXT.REVIEW_BRIEF.FAILURE_REASON.EMPTY}`
+            && store.isProcessing === false
+            && reviewToastErrors.length === 0,
+            `result=${JSON.stringify(store.resultText)} brief=${store.reviewBriefText} toast=${JSON.stringify(reviewToastErrors)}`);
+
+        // 降级保证是结构性的、不挑失败形态：这里让复核段的 fetch 直接 reject
+        // （非 400 族——400 族那条已有断言），并盯住两件事——结果框仍是首轮档案
+        // （archive 已生成成功不该被顶成一条错误 toast），以及真因带栈进运行
+        // 日志（ttlog 的 ERROR 走 console.error）。
+        const storeRewriteCalls: CapturedRequest[] = [];
+        installStub(storeRewriteCalls, { reviewReplies: [REVIEW_STUB_REWRITE] });
+        store.requestText = '复核 store 路径改写试验';
+        await store.generate();
+        check('复核：store 路径的结果框是复核后的那一份（不是改写前的首轮档案）：改写叶值在框内、简报落「已改写」态',
+            store.resultText.includes('  起床: 天亮透了才出门，先给面摊送两碗豆浆过去')
+            && !store.resultText.includes('天没亮就起')
+            && store.reviewBriefText === '模型复核：发现 1 处重复，已改写 1 个字段 —— 生活习性.起床'
+            && store.isProcessing === false,
+            `result=${JSON.stringify(store.resultText)} brief=${store.reviewBriefText}`);
+
+        const failedRoundToastErrors: string[] = [];
+        const failedRoundWindow = globalThis as unknown as { toastr?: Record<string, (message: string) => void> };
+        const failedRoundErrors: string[] = [];
+        const originalConsoleError = console.error;
+        failedRoundWindow.toastr = { error: message => { failedRoundToastErrors.push(message); } };
+        console.error = (...args: unknown[]) => { failedRoundErrors.push(args.map(arg => String(arg)).join(' ')); };
+        const failCalls: CapturedRequest[] = [];
+        try {
+            installStub(failCalls, { reviewReplies: [], failReview: '上游 500：复核段传输失败（冒烟注入）' });
+            store.requestText = '复核收尾抛错试验';
+            await store.generate();
+        } finally {
+            console.error = originalConsoleError;
+            delete failedRoundWindow.toastr;
+        }
+        check('复核：复核轮收尾抛错（非 400 族）也只降级不外抛——档案生成成功时结果框仍是首轮内容、简报落「没能跑完」态、不弹错误，真因带栈进运行日志',
+            store.resultText === REVIEW_STUB_PROFILE_TEXT
+            && store.reviewBriefText === `模型复核：没能跑完，已保留上一版结果 —— ${TEXT.REVIEW_BRIEF.FAILURE_REASON.REQUEST}`
+            && store.isProcessing === false
+            && failedRoundToastErrors.length === 0
+            && failCalls.length === 3
+            && failedRoundErrors.some(line => line.includes('复核轮未能完成')),
+            `result=${JSON.stringify(store.resultText)} brief=${store.reviewBriefText} toast=${JSON.stringify(failedRoundToastErrors)} errorLogs=${failedRoundErrors.length}`);
+
+        const unknownLeafCalls: CapturedRequest[] = [];
+        installStub(unknownLeafCalls, { reviewReplies: ['基本信息.籍贯 → 改写'] });
+        const unknownLeaf = await runReview('复核点名不存在的叶试验');
+        const newDuplicateCalls: CapturedRequest[] = [];
+        installStub(newDuplicateCalls, { reviewReplies: ['基本信息.年龄 → 天没亮就起，先去巷口买豆浆'] });
+        const newDuplicate = await runReview('复核制造新同值试验');
+        check('复核：回复不可用一律回滚（点名不存在的叶、写出新的完全同值——两种都留首轮档案，简报落「解析不了复核结果」）',
+            unknownLeaf.profile === REVIEW_STUB_PROFILE_TEXT
+            && newDuplicate.profile === REVIEW_STUB_PROFILE_TEXT
+            && renderReviewBrief(unknownLeaf.review) === `模型复核：没能跑完，已保留上一版结果 —— ${TEXT.REVIEW_BRIEF.FAILURE_REASON.UNUSABLE}`
+            && renderReviewBrief(newDuplicate.review) === `模型复核：没能跑完，已保留上一版结果 —— ${TEXT.REVIEW_BRIEF.FAILURE_REASON.UNUSABLE}`,
+            `unknown=${JSON.stringify(unknownLeaf.profile)} dup=${JSON.stringify(newDuplicate.profile)}`);
+
+        // 目录漂移告警：盯 console.warn——ttlog 的 WARN 就是 console.warn ＋
+        // 环形缓冲，两条路径同一份数据，探针抓前者即可。载荷口径钉两件事：只有
+        // 计数与符号名（**不带档案内文**——运行日志会被用户翻，档案正文是私事），
+        // 触发只认「目录内块里写出的目录外叶」（机制挂载块那两叶不进，否则每份
+        // 正常档案都喊漂移）。
+        const driftWarns: string[] = [];
+        const originalConsoleWarn = console.warn;
+        console.warn = (...args: unknown[]) => { driftWarns.push(args.map(arg => typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' ')); };
+        const driftCalls: CapturedRequest[] = [];
+        let driftRun: GenerationResult | undefined;
+        try {
+            installStub(driftCalls, { reviewReplies: ['无重复'], profileYaml: REVIEW_STUB_DRIFT_PROFILE_YAML });
+            driftRun = await runReview('复核目录漂移告警试验');
+        } finally {
+            console.warn = originalConsoleWarn;
+        }
+        const driftLines = driftWarns.filter(line => line.includes('目录漂移'));
+        const driftPayload = JSON.parse(driftLines[0]?.slice(driftLines[0].indexOf('{')) ?? '{}') as Record<string, unknown>;
+        check('复核：目录漂移 warn 打在复核轮收尾（模型回「无重复」那条路也打：没人改写就没人会发现目录漂了），载荷只有计数与符号名、不带档案内文，机制挂载块的叶不进计数',
+            driftLines.length === 1
+            && driftRun?.review.kind === 'none'
+            && driftPayload.catalogDriftLeaves === 1
+            && driftPayload.mechanismBlocksOutsideCatalog === 1
+            && driftPayload.unrecognizedLeavesTotal === 3
+            && String(driftPayload.symbol).includes('catalogDriftLeaves')
+            && !driftLines[0].includes('城南码头镇')
+            && !driftLines[0].includes('天没亮就起')
+            && !driftLines[0].includes('夜班调度'),
+            `warn=${driftLines[0] ?? '（未打出）'}`);
+        // 零漂移时不打：默认那份档案（目录内块只用目录里的叶 ＋ 一块机制挂载块）
+        // 同样走完整条链，一条目录漂移 warn 都不该有。
+        const cleanWarns: string[] = [];
+        const cleanCalls: CapturedRequest[] = [];
+        console.warn = (...args: unknown[]) => { cleanWarns.push(args.map(arg => typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' ')); };
+        try {
+            installStub(cleanCalls, { reviewReplies: ['无重复'] });
+            await runReview('复核零漂移不告警试验');
+        } finally {
+            console.warn = originalConsoleWarn;
+        }
+        check('复核：目录漂移计数为零时一条 warn 都不打（默认夹具无目录外叶、机制块不计）',
+            cleanWarns.filter(line => line.includes('目录漂移')).length === 0
+            && analyzeCatalogDrift(REVIEW_STUB_PROFILE_TEXT).catalogDriftLeaves.length === 0
+            && analyzeCatalogDrift(REVIEW_STUB_PROFILE_TEXT).mechanismBlocksOutsideCatalog === 1,
+            `warns=${cleanWarns.filter(line => line.includes('目录漂移')).length}`);
+
+        const resultBeforeBriefProbe = store.resultText;
+        const briefBeforeProbe = store.reviewBrief;
+        store.resultText = '';
+        const emptyBoxBrief = store.reviewBriefText;
+        store.resultText = resultBeforeBriefProbe;
+        store.reviewBrief = briefBeforeProbe;
+        check('复核：四态文案逐字（未发现／没能跑完／未运行 ＋ 失败原因白名单恰三项 ＋ 空结果框时显示未运行态）',
+            renderReviewBrief({ kind: 'none' }) === '模型复核：未发现重复'
+            && renderReviewBrief({ kind: 'failed', reason: TEXT.REVIEW_BRIEF.FAILURE_REASON.REQUEST }) === '模型复核：没能跑完，已保留上一版结果 —— 请求失败'
+            && renderReviewBrief(REVIEW_BRIEF_NOT_RUN) === '模型复核：未运行'
+            && Object.values(TEXT.REVIEW_BRIEF.FAILURE_REASON).join('|') === '响应为空|解析不了复核结果|请求失败'
+            && emptyBoxBrief === '模型复核：未运行',
+            `empty=${emptyBoxBrief} reasons=${Object.values(TEXT.REVIEW_BRIEF.FAILURE_REASON).join('|')}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+        writeApiDomain([]);
+        seedTaskProfiles('', '');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8) store 互斥＋会话感知
 // ---------------------------------------------------------------------------
 
 async function runStoreChecks(): Promise<void> {
@@ -2219,7 +2585,7 @@ async function runStoreChecks(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 8) 宿主可变绑定活取用回归（stub 活绑定 setter，快照转出回归红线）
+// 9) 宿主可变绑定活取用回归（stub 活绑定 setter，快照转出回归红线）
 // ---------------------------------------------------------------------------
 
 interface SmokeStubs {
@@ -2268,7 +2634,7 @@ function runHostLiveBindingChecks(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 9) 人设写回渲染通道（宿主描述框/人设列表的刷新调用不能漏）
+// 10) 人设写回渲染通道（宿主描述框/人设列表的刷新调用不能漏）
 // ---------------------------------------------------------------------------
 
 interface PersonaWriteStubs {
@@ -2374,7 +2740,7 @@ async function runPersonaWriteBackChecks(): Promise<void> {
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/全任务引擎/纯函数/api 形状/端到端/互斥/写回渲染机判 ===');
+    console.info('=== persona 迁移/统一端点收编/全任务引擎/纯函数/api 形状/端到端/复核回合＋目录漂移告警/互斥/写回渲染机判 ===');
     runMigrationChecks();
     runPromptsChecks();
     runPersonaAssemblyChecks();
@@ -2384,6 +2750,7 @@ export async function runPersonaSmoke(): Promise<void> {
     await runApiChecks();
     await runPersonaE2EChecks();
     await runStoreChecks();
+    await runPersonaReviewChecks();
     runHostLiveBindingChecks();
     await runPersonaWriteBackChecks();
     if (failures.length > 0) {
@@ -2391,5 +2758,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/「块.叶 → 值」逐叶直改·断言改后叶值·未点名叶逐字不动/「保留」行逐字不动·计数不含保留叶/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写叶值在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/回复不可用一律回滚·点名不存在的叶与写出新完全同值两例/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
 }

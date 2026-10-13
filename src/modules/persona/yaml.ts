@@ -240,6 +240,23 @@ export interface ProfileLeafRow {
     /** 未归一的原始值（首行内联 ＋ 续行，以 \n 连接）。 */
     value: string;
     form: ProfileLeafForm;
+    /**
+     * 该叶在 `splitProfileLines` 结果里的行号跨度（0 基，含首行含末行）。
+     *
+     * 消费方：按「块·叶」精确改写那一轮复核（整叶替换＝替换 [lineStart,
+     * lineEnd] 这段行，而不是全档正则替换——正则替不掉缩进与列位，替了就把
+     * 档案排版改掉）。
+     */
+    lineStart: number;
+    lineEnd: number;
+    /**
+     * 值在 `lines[lineStart]` 里的起始下标（0 基）。
+     *
+     * 为什么给偏移而不是给「键前缀文本」：同一叶在档案里有两种行形态（缩进
+     * 叶行 `  姓名: 阿槐`，块首行内联首叶 `基本信息:姓名: 阿槐`），两者的
+     * 前缀逐字不同，而替换要保留的恰恰是前缀本身——偏移对两种形态同构。
+     */
+    valueStart: number;
 }
 
 export interface ProfileScan {
@@ -334,6 +351,35 @@ function normalizeIndent(line: string): string {
 }
 
 /**
+ * 值在该行里的起始下标（复核轮的整叶替换靠它保留键前缀逐字）。
+ *
+ * 两个键正则都是「从键一路匹配到行尾」，`match[0].length` 量的是**整行剩余
+ * 部分**的长度，不是「键 ＋ 冒号」的长度：直接拿它当值起点，改写会落在原值
+ * 之后（新值被追加到旧值尾部），而两道改后校验照样绿——叶名清单没变，也没
+ * 制造新的完全同值组，只有档案内容错了。所以值起点＝行首偏移＋（匹配长度
+ * －值自身长度）。`value` 必须传**未 trim 的捕获组**：它就是 `match[0]` 的
+ * 尾巴，减它的长度才等于它在行内的起点。
+ */
+function valueStartIn(indent: number, matched: RegExpMatchArray, value: string): number {
+    return indent + matched[0].length - value.length;
+}
+
+/**
+ * 档案正文的行切分（**档案段那一路的唯一定义**，本文件下半段的扫描器与
+ * 复核轮的行级改写共用它）。
+ *
+ * 三件事在这里定死，各消费方不再各做一遍：剥围栏、制表符折算、按物理行切。
+ * 改写那一轮要按 `ProfileLeafRow.lineStart/lineEnd/valueStart` 定位回原行，
+ * 行数组与扫描器看到的那一份必须逐行相同——不同源时「行号」是个没有定义
+ * 的数字，替换会落在别的行上，而档案看上去仍然「是一份档案」。
+ */
+export function splitProfileLines(text: unknown): string[] {
+    if (typeof text !== 'string') return [];
+    const clean = stripFence(text);
+    return clean === '' ? [] : clean.split('\n').map(normalizeIndent);
+}
+
+/**
  * 档案的叶级扫描：逐行取块与叶，并按「块行／叶行／无主行」三路带出键名清单
  * （哪一路算未识别由消费方对目录求差集决定——本层不认目录，它是纯语法层，
  * 目录改名不该让解析层跟着动）。
@@ -353,9 +399,8 @@ function normalizeIndent(line: string): string {
  *     进无主行。
  */
 function scan(text: unknown): ProfileScan | null {
-    if (typeof text !== 'string') return null;
-    const clean = stripFence(text);
-    if (clean === '') return null;
+    const lines = splitProfileLines(text);
+    if (lines.length === 0) return null;
     const blocks: string[] = [];
     const blockKeys: string[] = [];
     const leafKeys: string[] = [];
@@ -366,8 +411,8 @@ function scan(text: unknown): ProfileScan | null {
     /** 该块的叶层基准＝块内首个叶行的缩进；换块即重置。 */
     let leafLayerIndent = -1;
 
-    for (const raw of clean.split('\n')) {
-        const line = normalizeIndent(raw);
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
         const body = line.trim();
         if (body === '') continue;
         const indent = line.search(/\S|$/);
@@ -376,6 +421,7 @@ function scan(text: unknown): ProfileScan | null {
             if (openLeaf) {
                 openLeaf.form = 'list';
                 openLeaf.value = openLeaf.value === '' ? body : `${openLeaf.value}\n${body}`;
+                openLeaf.lineEnd = index;
             } else {
                 orphanLines.push(body);
             }
@@ -386,25 +432,39 @@ function scan(text: unknown): ProfileScan | null {
         if (!key) {
             // 非键行：缩进的算当前叶的续行（无叶可并时进无主行），顶格的不建任何键
             if (indent > 0) {
-                if (openLeaf) openLeaf.value = openLeaf.value === '' ? body : `${openLeaf.value}\n${body}`;
-                else orphanLines.push(body);
+                if (openLeaf) {
+                    openLeaf.value = openLeaf.value === '' ? body : `${openLeaf.value}\n${body}`;
+                    openLeaf.lineEnd = index;
+                } else {
+                    orphanLines.push(body);
+                }
             }
             continue;
         }
 
         const name = key[1].trim();
-        const rest = (key[2] ?? '').trim();
+        const rawRest = key[2] ?? '';
+        const rest = rawRest.trim();
         if (indent === 0) {
             openLeaf = null;
             leafLayerIndent = -1;
             currentBlock = name;
             blocks.push(name);
             blockKeys.push(name);
-            const inline = rest.match(PROFILE_KEY_RE);
+            const inline = rawRest.match(PROFILE_KEY_RE);
             if (inline) {
                 const leaf = inline[1].trim();
                 leafKeys.push(`${name}·${leaf}`);
-                leaves.push({ block: name, leaf, value: (inline[2] ?? '').trim(), form: 'scalar' });
+                leaves.push({
+                    block: name,
+                    leaf,
+                    value: (inline[2] ?? '').trim(),
+                    form: 'scalar',
+                    lineStart: index,
+                    lineEnd: index,
+                    // 块名与内联首叶之间的偏移：(行内块后缀起点) + (内联值起点)
+                    valueStart: valueStartIn(indent + (body.length - rawRest.length), inline, inline[2] ?? ''),
+                });
             }
             continue;
         }
@@ -415,10 +475,20 @@ function scan(text: unknown): ProfileScan | null {
         }
         if (openLeaf && indent > leafLayerIndent) {
             openLeaf.value = openLeaf.value === '' ? body : `${openLeaf.value}\n${body}`;
+            openLeaf.lineEnd = index;
             continue;
         }
         if (leafLayerIndent < 0) leafLayerIndent = indent;
-        openLeaf = { block: currentBlock, leaf: name, value: rest, form: 'scalar' };
+        openLeaf = {
+            block: currentBlock,
+            leaf: name,
+            value: rest,
+            form: 'scalar',
+            lineStart: index,
+            lineEnd: index,
+            // 键前缀（缩进与叶名与冒号与其后的空白）逐字保留，值从其后开始
+            valueStart: valueStartIn(indent, key, rawRest),
+        };
         leafKeys.push(`${currentBlock}·${name}`);
         leaves.push(openLeaf);
     }

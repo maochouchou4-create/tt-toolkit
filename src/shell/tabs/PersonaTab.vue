@@ -10,7 +10,7 @@
   -->
   <div class="tt-persona-tab">
     <!-- ================= 卡：人设编织 ================= -->
-    <TTCard title="人设编织" sub="两段 AI 生成人设 YAML → 手改 → 写回宿主人设">
+    <TTCard title="人设编织" sub="AI 生成人设 YAML（末轮模型复核查重）→ 手改 → 写回宿主人设">
       <!-- 需求框（有结果时折叠） -->
       <details :open="!store.hasResult" class="tt-persona-details">
         <summary>生成需求</summary>
@@ -38,6 +38,16 @@
         rows="12"
         placeholder="生成结果（YAML）……"
       />
+
+      <!-- 复核简报（常驻一行；文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
+           文案只读 store 派生，不进结果框：结果框经 upsertPersona 进宿主
+           persona_description、经 inject_persona 进此后每一轮对话，一行 UI
+           文案混进去就是每轮提示词里都漂着它。常驻渲染（不 v-if），
+           卡片高度不随结果有无跳变。字号/弱化走 TTStatus 原语，
+           本 tab 只管它作为一行的位置。 -->
+      <div class="tt-persona-brief">
+        <TTStatus tone="muted">{{ store.reviewBriefText }}</TTStatus>
+      </div>
     </TTCard>
 
     <!-- ================= 折叠：生成参考 ================= -->
@@ -62,7 +72,7 @@
 <script setup lang="ts">
 import { onActivated, onMounted } from 'vue';
 import { usePersonaStore } from '@/modules/persona/store';
-import { TTCard } from '@/shell/ui';
+import { TTCard, TTStatus } from '@/shell/ui';
 
 const store = usePersonaStore();
 
@@ -104,6 +114,11 @@ onActivated(() => { store.refreshHostData(); });
 
 .tt-persona-area--result {
     min-height: 12em;
+}
+
+/* 复核简报行：只留行块位置（上边距），字号与弱化由 TTStatus 原语承担 */
+.tt-persona-brief {
+    padding: var(--tt-sp-1) 0 0;
 }
 
 .tt-persona-details {
