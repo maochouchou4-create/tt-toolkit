@@ -50,5 +50,11 @@ if (hits === 0) {
     throw new Error('dev-harness: dist/index.js 未匹配到任何外部 import——dist 形态变化，先复跑 pnpm run build');
 }
 
-writeFileSync(outFile, `// 本文件由 build.mjs 生成（源＝dist/index.js）——勿手改\n${rewritten}`);
+// dist 的 ESM 产物含 import.meta.url（main.ts 的 resolveBootId 拿它取入口
+// 查询串作 boot 标识）。import.meta 在经典脚本里是解析期语法错——不替换
+// 的话整个 app.js 不执行。location.href 在浏览器里语义等价（当前入口 URL
+// 的查询串）；node 冒烟分支不走本产物，不受影响。
+const classicSafe = rewritten.replaceAll('import.meta.url', 'location.href');
+
+writeFileSync(outFile, `// 本文件由 build.mjs 生成（源＝dist/index.js）——勿手改\n${classicSafe}`);
 console.log(`dev-harness: app.js 已生成（重写 ${hits} 条外部 import）`);
