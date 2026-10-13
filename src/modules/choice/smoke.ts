@@ -671,6 +671,17 @@ function runAssemblyChecks(): string {
         assemblyTags.every(tag => ASSEMBLY_SEGMENT_TAGS.includes(tag)),
         `标签=${assemblyTags.join(',')}`,
     );
+    // 模板正文引用的段标签（如慢热闸提 <external_memory>、任务指令提
+    // <persona>/<current_scene>）必须指向已登记段：标签名由 engine 的
+    // wrapTag 拥有、模板文本手写引用，两处无编译期关联——engine 改标签
+    // 名时这条把规则里的静默悬空引用拦下来
+    const templateTagRefs = [...new Set(config.modules
+        .flatMap(m => (m.kind === 'text' ? [...m.content.matchAll(/<([a-z_]+)>/g)].map(x => x[1]) : [])))];
+    check(
+        '模板段标签引用全部指向已登记段（规则里的标签引用不悬空）',
+        templateTagRefs.every(t => ASSEMBLY_SEGMENT_TAGS.includes(t)),
+        `引用=${templateTagRefs.join(',')}`,
+    );
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
     // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
     check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件') && allText.includes('主动行为'));
@@ -1236,9 +1247,9 @@ function runTaskRouteChecks(): void {
 }
 
 /**
- * 生成参数按值迁移机判：存量 raw 的条数／正文字数三值逐值等于旧默认时读侧
- * 换成新默认；任一值不同＝用户自设，原样保留。判据锁的是「按值判」这层
- * 契约——写成无条件覆盖或版本号计数时第二个用例翻红。
+ * 生成参数换代迁移机判：按值判只对换代标记（genDefaultsV）缺席的存量档
+ * 生效一次，标记随首个读通道落盘——用户此后显式写回旧默认值也守得住
+ * （按值判本身区分不了「旧默认存量」与「用户写旧值」，标记把时代分开）。
  */
 function runGenParamMigrationChecks(): void {
     const saved = getGlobal<unknown>(GLOBAL_CHOICE_KEY);
@@ -1249,16 +1260,29 @@ function runGenParamMigrationChecks(): void {
         writeRawGen({ count: 4, minChars: 10, maxChars: 60 });
         const migrated = choiceStorage.readDomain().gen;
         check(
-            '生成参数迁移：raw 三值＝旧默认（4/10/60）→ 读侧换成新默认（30/120）',
+            '生成参数迁移：存量档三值＝旧默认（4/10/60）→ 读侧换成新默认（30/120）',
             migrated.count === 4 && migrated.minChars === 30 && migrated.maxChars === 120,
             `count=${migrated.count} min=${migrated.minChars} max=${migrated.maxChars}`,
+        );
+        const persisted = getGlobal<Partial<{ genDefaultsV: number; gen: { minChars: number } }>>(GLOBAL_CHOICE_KEY);
+        check(
+            '生成参数迁移：存量档迁移随读通道落盘（值换新＋换代标记写入）',
+            persisted?.genDefaultsV === 1 && persisted?.gen?.minChars === 30,
+            `v=${String(persisted?.genDefaultsV)} min=${String(persisted?.gen?.minChars)}`,
         );
         writeRawGen({ count: 6, minChars: 10, maxChars: 60 });
         const kept = choiceStorage.readDomain().gen;
         check(
-            '生成参数迁移：任一值自设（count=6）→ 三值原样保留',
+            '生成参数迁移：存量档任一值自设（count=6）→ 三值原样保留',
             kept.count === 6 && kept.minChars === 10 && kept.maxChars === 60,
             `count=${kept.count} min=${kept.minChars} max=${kept.maxChars}`,
+        );
+        setGlobal(GLOBAL_CHOICE_KEY, { gen: { count: 4, minChars: 10, maxChars: 60 }, genDefaultsV: 1 });
+        const held = choiceStorage.readDomain().gen;
+        check(
+            '生成参数迁移：换代标记在场 → 用户显式写旧默认（4/10/60）也原样守住',
+            held.count === 4 && held.minChars === 10 && held.maxChars === 60,
+            `count=${held.count} min=${held.minChars} max=${held.maxChars}`,
         );
     } finally {
         // 还原存回原值（不存 readDomain 的归一投影：那会把夹具没写过的

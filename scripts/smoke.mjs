@@ -523,7 +523,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＋解析 3（主契约提取／缺键不带且回退路径同形／null 与空白归一为缺席）
 // ＋存档 3（无 aim 旧档读回仍缺席／aim 往返／aim 在场非字符串判坏档）
 // ＋发送面 1（applyOption 三分支的发送内容不含 aim）＝ +9。
-const CHOICE_PASS_EXPECTED = 151;
+// ＝ 终审修复：迁移换代标记用例 2（迁移随读通道落盘／标记在场守旧值）
+// ＋模板段标签引用不悬空 1 ＝ +3。
+const CHOICE_PASS_EXPECTED = 154;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

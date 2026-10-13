@@ -336,6 +336,11 @@ function resolveInjectContent(
             const note = `固定 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条${pool.pinned.length >= sources.count ? '（固定条目已覆盖数量规则）' : ''}`;
             return { content: wrapTag('pool_entries', parts.join('\n\n'), sources), note };
         }
+        // 存档不可信：非 default 配置不经版本整键重建（storage 只认
+        // default id），退役源可能残留——按「跳过留痕、不静默吞」纪律
+        // 空段留痕，不让解构炸在组装中段（形态对齐 persona 解析的 default）
+        default:
+            return { content: '', note: `未知注入源 ${String(source)}（存档残留）` };
     }
 }
 

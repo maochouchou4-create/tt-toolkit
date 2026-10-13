@@ -25,10 +25,10 @@
       </TTField>
       <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
       <TTField label="选项字数下限">
-        <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, 10) })">
+        <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, DEFAULT_GEN_PARAMS.minChars) })">
       </TTField>
       <TTField label="选项字数上限">
-        <input class="tt-ctrl" :value="settings.gen.maxChars" type="number" min="10" max="500" @change="settings.updateGen({ maxChars: clampInt($event, 10, 500, 60) })">
+        <input class="tt-ctrl" :value="settings.gen.maxChars" type="number" min="10" max="500" @change="settings.updateGen({ maxChars: clampInt($event, 10, 500, DEFAULT_GEN_PARAMS.maxChars) })">
       </TTField>
       <TTField label="点击选项后">
         <select class="tt-ctrl" :value="settings.gen.clickBehavior" @change="onBehaviorChange">
@@ -86,7 +86,7 @@
 import { computed, onBeforeUnmount } from 'vue';
 import { useChoiceSettingsStore } from '@/modules/choice/settings';
 import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
-import type { ChoiceGenParams } from '@/modules/choice/api';
+import { DEFAULT_GEN_PARAMS, type ChoiceGenParams } from '@/modules/choice/api';
 import { TTCard, TTField } from '@/shell/ui';
 
 const settings = useChoiceSettingsStore();
