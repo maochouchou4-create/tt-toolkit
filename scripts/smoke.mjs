@@ -533,16 +533,20 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 保持原值＋互斥态干净）＋宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误
 // 正文/拦下空与散文/拦下散言前导换皮形态/拦下与切块口径分歧的 1 空格散言行；
 // 传输层信封 3：流式抛错＋runlog 记失败/非流式抛错/正常产出以标签开头不误杀；
-// 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展目录 8（骨架块集合＝
-// 目录骨架块集合、骨架逐块叶集合＝字面量期望、渲染行数＝目录条目数、L0 目录
-// 叶集与手写清单逐叶相等、渲染文本整段逐字节等于现行清单、机制挂载开放段
-// 在场、新口径上限 16＋元层剥离、gen 值
-// 厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）＋流内上游
+// 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展目录与提示词正文 14
+// （骨架逐块叶集合＝字面量期望、渲染行数＝目录条目数、L0 目录叶集与策展目录逐叶
+// 相等（含块序与块内叶序）、叶总数＝196 绝对量、L0 旧叶名逐个不在目录里、
+// L0 归属优先级对 10 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
+// 之前·叶数段字面量、目录 definition 非空率 100%、countText 覆盖词面只配模板叶块、
+// L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死含档案段不得引用策展段
+// 编号、行为心理类块名串＝字面量九块、机制挂载开放段在场、新口径上限 16＋元层剥离、
+// gen 值厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）
+// ＋流内上游
 // 错误帧 4＋
 // 端点 prefill 能力记忆 4＋人设写回渲染通道 4（建档 initPersona 恰一次＋
 // personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
 // 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
-const PERSONA_PASS_EXPECTED = 99;
+const PERSONA_PASS_EXPECTED = 106;
 const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
