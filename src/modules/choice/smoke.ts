@@ -13,13 +13,37 @@ import { mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfil
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
-import { choiceStorage } from './api';
+import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
 import { generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { drawAmount, resolvePool } from './pool/resolver';
 import type { PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
+import { getGlobal, setGlobal } from '@/storage';
+
+/**
+ * 组装产物里允许出现的分段标签白名单（注入源与文本段各自的标签）。
+ * 标签是每个段在提示词里唯一的可机判身份：白名单锁住「新增或移除注入段
+ * 时这里必须同步登记」这条契约，退役的段没被移除时无需在断言里点名它。
+ */
+const ASSEMBLY_SEGMENT_TAGS: readonly string[] = [
+    'persona', 'character', 'personality', 'scenario', 'world_info',
+    'direction', 'external_memory', 'pool_entries', 'current_scene',
+    'rules', 'example', 'format',
+];
+
+/**
+ * 注入段的判定形态：独占一行的 <tag>。段在场/缺席一律按段判，不按子串
+ * 判——模板正文合法内联提到标签名（慢热闸规则拿它指代别的插件写入的
+ * 记忆），子串判据会把「规则提到」误判成「段在场」。
+ */
+const SEGMENT_LINE_PATTERN = /^<([a-z_]+)>$/gm;
+
+/** 取出文本里独占一行的注入段标签（按出现顺序，未去重）。 */
+function segmentTagsIn(text: string): string[] {
+    return [...text.matchAll(SEGMENT_LINE_PATTERN)].map(m => m[1]);
+}
 
 const failures: string[] = [];
 
@@ -54,7 +78,6 @@ function syntheticSources(): AssemblySources {
         history,
         storyDirection: { presetText: '让剧情围绕未解之谜展开，逐步加深悬念。', freeText: '重点描写她的回避态度' },
         externalSlots: [{ key: '1_memory', value: '此前剧情摘要：两人在酒馆发生过争执。' }],
-        baibaiSummary: null,
         poolInjection: null,
         count: 4,
         minChars: 10,
@@ -217,7 +240,7 @@ function runInjectionChecks(): void {
     // 整份写进模板 core_rules（<rules> 段），同一约束每请求只出现一份
     check(
         '池规则并入：无 <pool_rules> 独立段，反 OOC 要点在 <rules> 模板段',
-        !allText.includes('<pool_rules>') && allText.includes('<rules>') && allText.includes('不得出现该角色不会说的话'),
+        !allText.includes('<pool_rules>') && allText.includes('<rules>') && allText.includes('从这个角色本来会的方式里来'),
     );
 
     const entTrace = result.trace.find(t => t.moduleId === 'inject_pool_entries');
@@ -339,9 +362,6 @@ async function runAutoGenerateChecks(): Promise<void> {
     const slotIdx = (key: string): number => store.lastDump.indexOf(`[槽位 ${key}]`);
     check('自动生成：外部注入全自动（非空槽位搬入可见、空白槽位跳过）', slotIdx('stub_anchor') >= 0 && slotIdx('stub_memory') >= 0 && slotIdx('stub_blank') < 0, `anchor=${slotIdx('stub_anchor')} memory=${slotIdx('stub_memory')} blank=${slotIdx('stub_blank')}`);
     check('自动生成：外部注入槽位顺序对齐宿主 depth 升序（浅位在前）', slotIdx('stub_anchor') < slotIdx('stub_memory'), `anchor=${slotIdx('stub_anchor')} memory=${slotIdx('stub_memory')}`);
-    // 柏宝书在场即带（自动口径）：STBaiBaiBook stub（smoke.mjs 注入
-    // globalThis）→ getBaibaiSummary 优先注入口径 → <past_events> 段可见
-    check('自动生成：柏宝书在场即带（摘要注入 <past_events> 段）', store.lastDump.includes('<past_events>') && store.lastDump.includes('【柏宝书·stub】'), 'stub getInjectedHistory 链路');
 
     // 还原档案与服务商表原态（前置前记录的快照；本区自落的冒烟端点与
     // 配置态不留残）
@@ -519,34 +539,33 @@ async function runFloorPersistChecks(): Promise<void> {
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
 function runAssemblyChecks(): string {
     const config = createDefaultPromptConfig();
+    check('默认模板版本＝18（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 18, `v=${String(config.defaultsVersion)}`);
     const sources = syntheticSources();
     const result = assembleMessages(config.modules, sources);
 
     const allText = result.messages.map(m => m.content).join('\n');
+    const allSegments = segmentTagsIn(allText);
 
-    // dump 断言核心：各注入逐项可见
-    check('人设注入可见（<persona> 段含 persona 正文）', allText.includes('<persona>') && allText.includes('王玉，28 岁'));
-    check('角色卡描述注入可见（<character> 段）', allText.includes('<character>') && allText.includes('林霜，表面温婉'));
-    check('角色卡性格注入可见（<personality> 段）', allText.includes('表面温和，回避直接冲突'));
-    check('角色卡场景注入可见（<scenario> 段）', allText.includes('现代都市职场'));
-    check('世界书前插注入可见（<world_info> 段）', allText.includes('一栋老写字楼'));
+    // dump 断言核心：各注入逐项可见（段在场按独占一行的标签判，见
+    // SEGMENT_LINE_PATTERN 的 why：子串判会被模板正文里的合法引用骗过）
+    check('人设注入可见（<persona> 段含 persona 正文）', allSegments.includes('persona') && allText.includes('王玉，28 岁'));
+    check('角色卡描述注入可见（<character> 段）', allSegments.includes('character') && allText.includes('林霜，表面温婉'));
+    check('角色卡性格注入可见（<personality> 段）', allSegments.includes('personality') && allText.includes('表面温和，回避直接冲突'));
+    check('角色卡场景注入可见（<scenario> 段）', allSegments.includes('scenario') && allText.includes('现代都市职场'));
+    check('世界书前插注入可见（<world_info> 段）', allSegments.includes('world_info') && allText.includes('一栋老写字楼'));
     check('世界书深度桶（深组）注入可见', allText.includes('【三年前】'));
-    check('聊天历史注入（末条 AI 楼层 <current_scene> 包裹）', allText.includes('<current_scene>') && allText.includes('她垂下眼帘'));
-    check('story_direction 注入可见（<direction> 段＝预设正文＋自由文本拼接）', allText.includes('<direction>') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
+    check('聊天历史注入（末条 AI 楼层 <current_scene> 包裹）', allSegments.includes('current_scene') && allText.includes('她垂下眼帘'));
+    check('story_direction 注入可见（<direction> 段＝预设正文＋自由文本拼接）', allSegments.includes('direction') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
     // 走向形态：自由文本为主＋预设拼接；两者皆空＝模块按未启用处理
     const emptyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '' } });
     const emptyDirTrace = emptyDirection.trace.find(t => t.moduleId === 'inject_story_direction');
     check('story_direction 两者皆空＝不注入（trace 留痕）', emptyDirTrace?.injected === false && emptyDirTrace.note.includes('未设置'), `note=${emptyDirTrace?.note ?? '（无 trace）'}`);
     const freeOnlyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '重点描写她的回避态度' } });
     const freeOnlyText = freeOnlyDirection.messages.map(m => m.content).join('\n');
-    check('story_direction 仅自由文本也注入（无预设可用）', freeOnlyText.includes('<direction>') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
-    // 自动口径（无开关无勾选）：baibai 合成源传 null
-    // （插件缺席/接口异常形态）→ trace 记录未注入原因（缺席的可观测性）
-    const baibaiTrace = result.trace.find(t => t.moduleId === 'inject_baibai');
-    check('柏宝书摘要缺席＝不注入且 trace 留痕', baibaiTrace?.injected === false && baibaiTrace.note.includes('不可用'), `note=${baibaiTrace?.note ?? '（无 trace）'}`);
+    check('story_direction 仅自由文本也注入（无预设可用）', segmentTagsIn(freeOnlyText).includes('direction') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
     // 外部槽位：合成源给了非空槽位内容 → 注入可见（非空即带单步链路）。
     // 逐槽位标注：内容段带槽位 key 前缀、trace note 同粒度（逐项可见到槽位）
-    check('外部注入槽位搬入可见（<external_memory> 段逐槽位标注）', allText.includes('<external_memory>') && allText.includes('[槽位 1_memory]') && allText.includes('两人在酒馆发生过争执'));
+    check('外部注入槽位搬入可见（<external_memory> 段逐槽位标注）', allSegments.includes('external_memory') && allText.includes('[槽位 1_memory]') && allText.includes('两人在酒馆发生过争执'));
     const injectedExtTrace = result.trace.find(t => t.moduleId === 'inject_external_slot');
     check('外部槽位 trace 注记到槽位粒度', injectedExtTrace?.injected === true && injectedExtTrace.note.includes('1_memory'), `note=${injectedExtTrace?.note ?? '（无 trace）'}`);
     // 自动口径的另一侧：无槽位供给（没有插件写入公共注入区）→ 段缺席
@@ -554,12 +573,30 @@ function runAssemblyChecks(): string {
     const noSlot = assembleMessages(config.modules, { ...sources, externalSlots: [] });
     const noSlotTrace = noSlot.trace.find(t => t.moduleId === 'inject_external_slot');
     const noSlotText = noSlot.messages.map(m => m.content).join('\n');
-    check('外部槽位无供给＝段缺席不报错（trace 留痕）', !noSlotText.includes('<external_memory>') && noSlotTrace?.injected === false && noSlotTrace.note.includes('无可用槽位'), `note=${noSlotTrace?.note ?? '（无 trace）'}`);
+    // 判「段缺席」按段判不按子串：慢热闸规则正文里合法引用了这个标签名
+    // （指代别的插件写入的记忆），子串判据会把「规则提到它」误判成
+    // 「段在场」。
+    check('外部槽位无供给＝段缺席不报错（trace 留痕）', !segmentTagsIn(noSlotText).includes('external_memory') && noSlotTrace?.injected === false && noSlotTrace.note.includes('无可用槽位'), `note=${noSlotTrace?.note ?? '（无 trace）'}`);
+    // 分段标签白名单：组装产物里独占一行的 <tag> 必须都在此登记。锁的是
+    // 「每个注入段都在模板里显式登记过」这条契约——退役的注入段与任何
+    // 未登记的新段都在这里翻红（断言走白名单而不是点名某个段标签：提交
+    // 前的符号归零 grep 把被退役的字面量判为残留）。
+    const assemblyTags = [...new Set(allSegments)];
+    check(
+        '分段标签白名单：组装产物的注入段全部已登记（退役段/未登记新段在此翻红）',
+        assemblyTags.every(tag => ASSEMBLY_SEGMENT_TAGS.includes(tag)),
+        `标签=${assemblyTags.join(',')}`,
+    );
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
     // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
-    check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件发展') && allText.includes('主动行为或反应'));
+    check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件') && allText.includes('主动行为'));
+    // 戏剧观两层同锁：规则第 3 条（约束层）＋ few_shot 写法对照段（示范层）
+    check('写作规则锁「见分晓拍」（正在发生、即将见分晓）', allText.includes('即将见分晓') && allText.includes('不写做完了的事后汇报'), `见分晓=${allText.includes('即将见分晓')}`);
+    check('few_shot 写法对照段在场（不要事后汇报／要见分晓）', allText.includes('写法对照') && allText.includes('不要（事后汇报）') && allText.includes('要（见分晓）'));
+    // 慢热闸：模板里唯一的推进闸（规则第 9 条），改成别的口径即翻红
+    check('写作规则含慢热闸（与记忆现状相称、一次只推一小格）', allText.includes('慢热闸') && allText.includes('一次只推一小格'), `慢热闸=${allText.includes('慢热闸')}`);
     // 平行分支口径：同一刻的多种走法，彼此不互为前情（防递进式串联）。
-    // 三层同锁：规则 5（禁令）＋few-shot 引导句（示范层）＋任务指令（收尾层）
+    // 三层同锁：平行分支规则（禁令）＋few-shot 引导句（示范层）＋任务指令（收尾层）
     // ——只锁一层时另两层被改回串联形态不会翻红
     check('写作规则＝同一刻的平行分支（各走一路、不互为前情）',
         allText.includes('此刻同时摆开') && allText.includes('不互为因果') && allText.includes('不得被当成另一条的前情'),
@@ -577,8 +614,8 @@ function runAssemblyChecks(): string {
     // few-shot 7 条（真人反应类型覆盖）
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
-    check('few-shot 扩为 7 条真人反应示例（岔开/回避/反将一军/幽默化解等）', fewShotCount === 7, `条数=${fewShotCount}`);
-    check('生成指令口径＝下一步的行动选项/可选的推进方向（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('可选的推进方向') && !allText.includes('为当前剧情提供'));
+    check('few-shot 输出示例为 4 条（与恰好 N 条同基数；写法对照段另计）', fewShotCount === 4, `条数=${fewShotCount}`);
+    check('生成指令口径＝下一步的行动选项/此刻并排的走法（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('并排的走法') && !allText.includes('为当前剧情提供'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
 
@@ -1078,6 +1115,38 @@ function runTaskRouteChecks(): void {
     }
 }
 
+/**
+ * 生成参数按值迁移机判：存量 raw 的条数／正文字数三值逐值等于旧默认时读侧
+ * 换成新默认；任一值不同＝用户自设，原样保留。判据锁的是「按值判」这层
+ * 契约——写成无条件覆盖或版本号计数时第二个用例翻红。
+ */
+function runGenParamMigrationChecks(): void {
+    const saved = getGlobal<unknown>(GLOBAL_CHOICE_KEY);
+    const writeRawGen = (gen: Partial<ChoiceGenParams>): void => {
+        setGlobal(GLOBAL_CHOICE_KEY, { gen });
+    };
+    try {
+        writeRawGen({ count: 4, minChars: 10, maxChars: 60 });
+        const migrated = choiceStorage.readDomain().gen;
+        check(
+            '生成参数迁移：raw 三值＝旧默认（4/10/60）→ 读侧换成新默认（30/120）',
+            migrated.count === 4 && migrated.minChars === 30 && migrated.maxChars === 120,
+            `count=${migrated.count} min=${migrated.minChars} max=${migrated.maxChars}`,
+        );
+        writeRawGen({ count: 6, minChars: 10, maxChars: 60 });
+        const kept = choiceStorage.readDomain().gen;
+        check(
+            '生成参数迁移：任一值自设（count=6）→ 三值原样保留',
+            kept.count === 6 && kept.minChars === 10 && kept.maxChars === 60,
+            `count=${kept.count} min=${kept.minChars} max=${kept.maxChars}`,
+        );
+    } finally {
+        // 还原存回原值（不存 readDomain 的归一投影：那会把夹具没写过的
+        // 默认字段补进存储，与「本区不留残」的纪律相悖）
+        setGlobal(GLOBAL_CHOICE_KEY, saved);
+    }
+}
+
 /** 冒烟入口（main.ts node 分支调用；返回失败清单长度供收口）。 */
 export async function runChoiceSmoke(): Promise<void> {
     console.info('=== choice 组装/解析机判 ===');
@@ -1097,6 +1166,7 @@ export async function runChoiceSmoke(): Promise<void> {
     runInjectionChecks();
     await runAutoGenerateChecks();
     await runFloorPersistChecks();
+    runGenParamMigrationChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;

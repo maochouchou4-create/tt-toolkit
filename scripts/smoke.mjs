@@ -139,14 +139,6 @@ const stubContext = {
     },
 };
 
-// 柏宝书 stub：在场即带口径的机判供给——
-// getInjectedHistory 优先口径返回 relativeText（getHistory 降级路径
-// 不触发；缺席路径由 choice-smoke 合成源传 null 覆盖）
-globalThis.STBaiBaiBook = {
-    apiVersion: 1,
-    getInjectedHistory: () => ({ relativeText: '【柏宝书·stub】王玉与林霜曾在旧货铺发生过一场争执，此后两人各自回避提起。' }),
-};
-
 // 生成端点 fetch 桩（按请求体分发）：choice 形状（temperature 1.0＋
 // response_format json_object）回固定 4 条选项 JSON；summary 形状
 // （temperature 0.7、无契约键）回定稿测试摘要文本——两任务不能共用
@@ -490,7 +482,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ v1.9.0 任务模型卡新增 8（任务路由 fail fast 三态 3＋写档带出 1＋
 // 缺席默认档 1＋normalize 钳制/剔除 3）
 // ＝ v1.14.1 删权重死代码：E-S 加权分布/safeWeight/无停用条目 −3，等权均摊断言 +1
-const CHOICE_PASS_EXPECTED = 137;
+// ＝ 模板重制＋退役桥清理：默认模板版本断言 1／见分晓拍与写法对照段 2／慢热闸 1／
+// 分段标签白名单 1／生成参数按值迁移 2 ＝ +7，退役记忆桥的合成源与缺席 trace −2。
+const CHOICE_PASS_EXPECTED = 142;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -533,9 +527,9 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 }
 
 // 提示词配置初始化：默认模板落进全局域 storage（choice
-// 18 模块——inject_pool_rules 已删，反 OOC 要点并入 core_rules）。
-// 存储形态 Record<taskKey, PromptConfig> 五任务键：choice 18 模块红线
-// 不变，persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
+// 17 模块——反 OOC 要点并入 core_rules，退役的记忆桥注入模块已删）。
+// 存储形态 Record<taskKey, PromptConfig> 五任务键：choice 17 模块红线；
+// persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
 // 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
 // 读侧出局，写回自然清除），summary 两任务键在场（任务指令＋源文本注入；
 // 已退休的 summary_judge 任务键不在期望清单——存量配置读侧出局，
@@ -545,8 +539,8 @@ const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
 const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
 const summaryKeyOk = ['summary_small', 'summary_big'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0 && promptDomain[k].modules.some(m => m?.source === 'summary_source'));
-if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk || !summaryKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 五任务键、choice 18 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
+if (promptTaskKeys.length !== 5 || promptChoiceModules !== 17 || !personaKeyOk || !summaryKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 五任务键、choice 17 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +551,7 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含旧
 // endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重映射/
 // choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动清空
-// 1＋prompts 5（全任务键齐备含 choice 18 模块红线/旧数组一次写迁移/旧默认快照
+// 1＋prompts 5（全任务键齐备含 choice 17 模块红线/旧数组一次写迁移/旧默认快照
 // 版本化重建按 module id 在场且不多余/curator 与 persona_gen 两任务默认占位符）
 // ＋persona 组装
 // 7（curator 管线/persona_gen 管线占位符全填＋档案段正文零跨段引用「原则 N·要求

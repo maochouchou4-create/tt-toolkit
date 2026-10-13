@@ -426,10 +426,10 @@ function runPromptsChecks(): void {
     const raw = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
     const record = (raw ?? {}) as Record<string, unknown>;
     const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
-    check('prompts：全任务键 Record 齐备（choice 18 模块回归红线）',
+    check('prompts：全任务键 Record 齐备（choice 17 模块回归红线）',
         !Array.isArray(raw) && typeof raw === 'object' && raw !== null
         && TASK_KEYS.every(k => record[k] !== undefined)
-        && Array.isArray(choiceModules) && choiceModules.length === 18
+        && Array.isArray(choiceModules) && choiceModules.length === 17
         && prompts.configFor('persona_curator') !== null
         && prompts.configFor('persona_gen') !== null,
         `keys=${Object.keys(record).join('/')}`);
@@ -448,7 +448,7 @@ function runPromptsChecks(): void {
     check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 两键）',
         migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
         && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
-    // 还原 choice 18 模块红线（恢复默认＝smoke 直调写通道，store 无编辑面 action）
+    // 还原 choice 17 模块红线（恢复默认＝smoke 直调写通道，store 无编辑面 action）
     const restored = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
     setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...restored, choice: createTaskDefaultConfig('choice') });
     // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）

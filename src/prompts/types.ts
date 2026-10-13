@@ -43,7 +43,6 @@ export type InjectionSource =
     | 'chat_history'
     | 'story_direction'
     | 'external_slot'
-    | 'baibai'
     | 'pool_entries'
     // ---- persona 任务注入源——内容在 PersonaAssemblySources ----
     /** persona 世界书参考（独立 system 消息，XiTa 式围栏包装）。预设 system 段

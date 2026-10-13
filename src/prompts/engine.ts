@@ -49,8 +49,6 @@ export interface AssemblySources {
     storyDirection: StoryDirection | null;
     /** 自动搬入的宿主通用注入槽位（非空即带；顺序＝宿主 depth 升序＋key 字典序，见 sources 收集处） */
     externalSlots: Array<{ key: string; value: string }>;
-    /** 柏宝书摘要文本（插件缺席/接口异常传 null） */
-    baibaiSummary: string | null;
     /**
      * 池注入供给。null＝池整体未启用（pool_entries 模块按未启用
      * 处理）；条目由 generator 现场抽取后传入——prompts 层不回读
@@ -311,19 +309,6 @@ function resolveInjectContent(
             const keys = filled.map(s => s.key).join('、');
             return { content: wrapTag('external_memory', blocks.join('\n\n'), sources), note: `已搬入槽位：${keys}` };
         }
-        case 'baibai':
-            return sources.baibaiSummary && sources.baibaiSummary.trim()
-                ? {
-                      content: wrapTag(
-                          'past_events',
-                          // 引导句措辞自写（AFPL：fork 对此句有同义近句，不搬其表达）。
-                          // 语义保留＝说明这段是旧剧情摘录＋用途（衔接前情）
-                          `这段文字来自记忆插件，概括的是较早前发生、已不在当前上下文里的剧情。利用它可以衔接前情、避免与旧事件矛盾，但不要在选项里复述或引用它的原文：\n${sources.baibaiSummary.trim()}`,
-                          sources,
-                      ),
-                      note: '',
-                  }
-                : { content: '', note: '柏宝书摘要不可用（插件缺席或未返回）' };
         case 'pool_entries': {
             // 分区呈现：pinned＝固定条目（固定纳入每轮选项），drawn＝候选
             // 菜单（多于所需，AI 按场景贴合挑选）——菜单模式语义写在提示

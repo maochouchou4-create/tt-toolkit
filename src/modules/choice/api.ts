@@ -42,12 +42,20 @@ export interface ChoiceDomain {
 
 export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     count: 4,
-    minChars: 10,
-    maxChars: 60,
+    minChars: 30,
+    maxChars: 120,
     clickBehavior: 'fill',
     debugForceRaw: false,
     ...DEFAULT_POOL_GEN_PARAMS,
 };
+
+/**
+ * 上一版的三个产出参数默认值（条数／正文字数上下限）。存量 raw 的这三值
+ * 逐值全等于它们时，读侧换成新默认——按值判而非版本计数：默认模板有版本
+ * 号机制可整键覆盖（任务键无编辑面），gen 域没有，用户自设值与默认值同形
+ * 时无从区分；「用户恰好自设成旧默认」这种极端情形按旧值保留。
+ */
+const LEGACY_DEFAULT_GEN_PARAMS = { count: 4, minChars: 10, maxChars: 60 } as const;
 
 /**
  * gen 域逐字段重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
@@ -56,7 +64,18 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
  * （泛型透传多余字段）。
  */
 function normalizeGenParams(raw: Partial<ChoiceGenParams>): ChoiceGenParams {
-    const merged = normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...raw });
+    const legacyShaped = raw.count === LEGACY_DEFAULT_GEN_PARAMS.count
+        && raw.minChars === LEGACY_DEFAULT_GEN_PARAMS.minChars
+        && raw.maxChars === LEGACY_DEFAULT_GEN_PARAMS.maxChars;
+    const migrated = legacyShaped
+        ? {
+            ...raw,
+            count: DEFAULT_GEN_PARAMS.count,
+            minChars: DEFAULT_GEN_PARAMS.minChars,
+            maxChars: DEFAULT_GEN_PARAMS.maxChars,
+        }
+        : raw;
+    const merged = normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...migrated });
     return {
         ...merged,
         count: merged.count,

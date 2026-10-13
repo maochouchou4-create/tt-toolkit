@@ -30,6 +30,5 @@ export {
     PERSONA_GEN_TASK_HEAD,
 } from './defaults';
 export { ensurePromptConfigs, GLOBAL_PROMPT_CONFIGS_KEY } from './storage';
-export { getBaibaiSummary } from './external';
 export { usePromptsStore } from './store';
 export { renderDump, renderTraceCompact } from './dump';

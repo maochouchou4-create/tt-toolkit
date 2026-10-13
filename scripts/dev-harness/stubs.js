@@ -5,7 +5,7 @@
  *
  * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（12 条）
  * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
- * SillyTavern.getContext / quickReplyApi / toastr / STBaiBaiBook）按
+ * SillyTavern.getContext / quickReplyApi / toastr）按
  * 宿主挂载形态放到 globalThis 上。
  */
 (() => {
@@ -418,12 +418,6 @@
         info: m => console.info('[toastr.info]', m),
         warning: m => console.warn('[toastr.warning]', m),
         error: m => console.error('[toastr.error]', m),
-    };
-
-    // 柏宝书桥（getInjectedHistory 优先口径，一次性文本）
-    window.STBaiBaiBook = {
-        apiVersion: 1,
-        getInjectedHistory: () => ({ relativeText: '【柏宝书·stub】上一幕：斗篷人在巷口与林霜擦身而过，留下半枚铜符。' }),
     };
 
     // --------------------------------------------------------

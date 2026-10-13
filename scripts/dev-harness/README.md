@@ -20,7 +20,7 @@ pnpm run harness        # 生成 scripts/dev-harness/app.js（dist 重写产物�
 | --- | --- |
 | `index.html` | 宿主 DOM 骨架（顶栏/#chat/#send_form/#extensionsMenu/#movingDivs）＋加载顺序锚 |
 | `harness.css` | 宿主骨架与皮肤模拟：SmartTheme 变量双主题、.drawer-content/.mes 等 |
-| `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 各键（与 dist 的全部外部 import 一一对应，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`/`STBaiBaiBook`）＋假聊天数据 |
+| `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 各键（与 dist 的全部外部 import 一一对应，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`）＋假聊天数据 |
 | `app.js` | **生成物**（build.mjs 产出，勿手改） |
 | `build.mjs` | 把 `dist/index.js` 的外部 import 重写为 `const {...} = globalThis.__TT_HARNESS__.<key>` 解构（经典脚本形态，绕开 file:// 下 ESM 相对路径的 CORS 限制） |
 | `serve.mjs` | 仓根静态 HTTP 服务（默认 4173，路径穿越守门）——自动化浏览器（Playwright 等）需走 HTTP，file:// 会被封 |
@@ -39,7 +39,7 @@ build.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更新 
 - `RossAscends-mods.js`：`dragElement`（**真拖拽**：把手拖动壳并把位置写入 movingUIState，验证拖动与自恢复链路）
 - `power-user.js`：`power_user`（persona_description/movingUI/movingUIState）
 - `world-info.js`：`getWorldInfoPrompt`（固定桶返回）
-- 窗口全局：`window.$`（最小选择器→数组包装）、`SillyTavern.getContext`、`quickReplyApi`（内存 QR 集，含 deleteQuickReply）、`toastr`（console）、`STBaiBaiBook`（getInjectedHistory 固定摘要）
+- 窗口全局：`window.$`（最小选择器→数组包装）、`SillyTavern.getContext`、`quickReplyApi`（内存 QR 集，含 deleteQuickReply）、`toastr`（console）
 
 全部内存态：刷新即重置。ttlog 的 Tauri invoke ABI 在 harness 内缺席，自动熔断降级（只影响持久日志，不影响功能）。
 

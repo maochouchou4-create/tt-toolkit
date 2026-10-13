@@ -15,7 +15,6 @@ import {
     runWorldInfoScan,
     substituteMacros,
 } from '@/host';
-import { getBaibaiSummary } from './external';
 import type { AssemblySources, PoolInjectionSupply } from './engine';
 import type { StoryDirection } from './types';
 
@@ -94,8 +93,11 @@ export async function collectAssemblySources(params: {
     const depthBefore = depthEntries.filter(e => e.depth > WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
     const depthAfter = depthEntries.filter(e => e.depth <= WI_DEPTH_AFTER_MAXDEPTH).sort(byDepthDesc).map(e => e.content).join('\n\n');
 
-    // 外部注入搬运（全自动——无开关无勾选）。槽位
-    // 枚举口径（宿主源码核实锚点，D:\code\repos\TauriTavern\src）：
+    // 外部注入搬运（全自动——无开关无勾选）。本层自接外部内容的根因：
+    // 独立 API 旁路请求不会自动带上酒馆的注入（宿主只为宿主生成装配
+    // extension_prompts），外部内容只能逐条自接；「自动」＝每次组装枚举在
+    // 场内容全带，记忆/摘要类标准插件零代码接入。
+    // 槽位枚举口径（宿主源码核实锚点，D:\code\repos\TauriTavern\src）：
     //   - openai.js:1484 populationInjectionPrompts：depth 升序循环
     //     （i=0..maxDepth，depth 0 最贴近生成点）——自动搬入的排序对齐
     //     该顺序：depth 升序在前＝浅位先出。
@@ -106,13 +108,10 @@ export async function collectAssemblySources(params: {
     //     ——非空即带的「非空」＝trim 后有内容。
     // 兼容不了（context 缺席/表空）→ 空列表，引擎段缺席不报错。每次
     // 组装现取（不启动时缓存，插件可能后加载/切卡重建）。
-    // 柏宝书：在场即带（auto 口径）——getBaibaiSummary 插件缺席/接口
-    // 异常返回 null（external.ts 取数纪律），引擎按不注入处理。
     const extSlots = listExtensionPromptSlots()
         .filter(s => s.value.trim() !== '')
         .sort((a, b) => a.depth - b.depth || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
         .map(s => ({ key: s.key, value: substituteMacros(s.value) }));
-    const baibai = getBaibaiSummary();
 
     return {
         persona: substituteMacros(persona),
@@ -132,7 +131,6 @@ export async function collectAssemblySources(params: {
         history,
         storyDirection: params.storyDirection,
         externalSlots: extSlots,
-        baibaiSummary: baibai,
         // 池供给：调用方（generator）现场抽取后直传——null＝池未启用
         poolInjection: params.poolInjection ?? null,
         count: params.count,
