@@ -593,8 +593,22 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 错误帧 4＋
 // 端点 prefill 能力记忆 4＋人设写回渲染通道 4（建档 initPersona 恰一次＋
 // personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
-// 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
-const PERSONA_PASS_EXPECTED = 119;
+// 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）
+// ＋目录键集 1（条件叶按裸键名入集、模板叶块给「块名·」前缀哨兵：任一处退回
+// `'name' in leaf` 或自剥方括号即翻红）＋档案叶级解析 11（叶层缩进取块内首叶：混合
+// 缩进时拿上一个叶当基准会把末叶吞进中叶；列表承载叶与空值叶先排除：不排除即
+// 4 叶两两互判 6 对假命中；块首行内联的首叶不丢：档案段 prefill 从冒号之后接写，
+// 首叶不在缩进行上；1 空格缩进的叶仍算叶＋反向用例：切块口径缩进 ≤1 算块界，该文本
+// 走切块两块皆空即零叶而报告与「无重复」不可区分；单块档案按分类码 SINGLE_BLOCK
+// 拒判＋反向用例：单顶层键整块去缩进分支会丢顶层键；机制挂载块的原生叫法不再整行
+// 丢弃且未识别块与未识别叶分开计；裸列表项与无主续行进无主行、不再静默丢弃；宿主
+// 错误正文报 NO_LEAVES：它有 2 个顶层「块」，只靠块数放行等于没校验；错误正文凑够
+// 两个顶层块时形状闸放行、判据层按目录外叶过半降级为 MOSTLY_OUT_OF_CATALOG；填好的
+// 档案形状放行）＋确定性重复判据 8（契约点名的偷懒占位不算同值；LITERAL_SAMPLE 必
+// 命中含靠标点表才成立的一对、反转版零命中、REDUNDANCY_SAMPLE 的 structural 报出归属
+// 对第 2 对、该样本 literal 零命中是预期而非漏报、未识别块叶 0 在内联目录与默认目录
+// 下各跑一次、归一两段分工机判、标点表里每个字符各一条只有它能成立的断言）。
+const PERSONA_PASS_EXPECTED = 139;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

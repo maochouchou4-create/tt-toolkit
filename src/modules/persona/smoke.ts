@@ -20,7 +20,9 @@ import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
-import { isSchemaSkeleton, parseYamlToBlocks } from './yaml';
+import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves, ProfileUndecidableError } from './yaml';
+import { analyzeRedundancy, isJudgeableLeaf, isSameLeafValue, normalizeLeafValue } from './redundancy';
+import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration';
@@ -39,9 +41,12 @@ import {
     REFERENCE_MODULES_CLOSE_TAG,
     REFERENCE_MODULES_OPEN_TAG,
     definitionRowKeysFromSchema,
+    catalogKeyName,
+    catalogKeySet,
     renderCatalog,
     renderCatalogDefinitions,
     renderOwnershipTable,
+    type CatalogBlock,
 } from '@/prompts/catalog';
 import { runGeneration, stripYamlFence, collectWorldInfoContext } from './generation';
 import { usePersonaStore } from './store';
@@ -51,6 +56,14 @@ const failures: string[] = [];
 function check(label: string, ok: boolean, detail = ''): void {
     console.info(`[persona-smoke] ${ok ? 'PASS' : 'FAIL'} ${label}${detail ? ` —— ${detail}` : ''}`);
     if (!ok) failures.push(label);
+}
+
+/**
+ * 结构逐项相等（夹具期望值一律字面量写死，不从被测对象反推——反推的期望值
+ * 只会把实现变成它自己的断言）。
+ */
+function jsonEq(actual: unknown, expected: unknown): boolean {
+    return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
 /** localStorage 存根访问（smoke.mjs 提供 Map 形态）。 */
@@ -1059,9 +1072,455 @@ function runPureFunctionChecks(): void {
     // 会被宽松切块当新顶层块，校验若把它当「缩进内容从宽」就出现
     // 「判据说这是骨架、切块给出的却不是这个形状」的分歧（双复核实锤）。
     // 该形态必须出局——它的块值会截断真骨架并多出空块进第二段注入。
-    check('yaml：骨架判据与切块共用块界定义（1 空格缩进的散言行不得放行）',
+    // 作用域：策展段那一路（`parseYamlToBlocks` 与 `isSchemaSkeleton` 共享的
+    // `isTopLevelKeyLine`）。档案段那一路由 `scanProfileLeaves` 自带另一条块界
+    // 定义（缩进 0 ＝ 块，其余都是叶），本条不断言它——判据层那侧的对照由
+    // 下面 4b 段的加固③（及其反向用例）把关。
+    check('yaml：策展段骨架判据与切块共用块界定义（1 空格缩进的散言行不得放行）',
         !isSchemaSkeleton('基本信息:\n 年龄:\n 备注，注意如下:\n外貌:\n  整体印象:'),
         '该行会被切块当顶层块，校验必须同判');
+}
+
+// ---------------------------------------------------------------------------
+// 4b) 档案叶级解析加固六处 ＋ 确定性重复判据探针
+// ---------------------------------------------------------------------------
+
+/**
+ * 夹具自带内联目录：手挑的 12 块 35 叶（A-2 回退骨架的常用块，加上
+ * REDUNDANCY_SAMPLE 要用的 既有关系 三键与 底线雷区·禁触话题）——刻意不与
+ * 逐字档 A-2 的 11 块 31 叶逐一对齐：那份骨架是「够用就好」的回退集合，
+ * 而本组探针要的是一份**自有节奏**的目录，好让「目录外叶」这类期望值不被
+ * 目录增删带着抖。策展目录那 196 叶的增删改名同样抖不到这组断言；真目录漂移
+ * 另由末尾那条「按默认目录跑」断言把关。
+ */
+const FIXTURE_CATALOG_SPEC: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+    ['基本信息', ['年龄', '性别', '身份', '别名与名号']],
+    ['外貌', ['整体印象', '标志性特征', '形体细节']],
+    ['性格', ['核心矛盾', '情绪反应', '说话风格', '待人差异']],
+    ['情绪光谱', ['情绪外露程度', '生气外显信号', '有效安抚手段', '笑点哭点']],
+    ['自我认知', ['自我评价', '他人眼中形象', '认知盲区']],
+    ['恐惧软肋', ['最深恐惧', '软肋人或物', '会失态的威胁方式']],
+    ['底线雷区', ['绝不做的事', '道德底线', '禁触话题']],
+    ['言谈习惯', ['口头禅', '语气词']],
+    ['技能专长', ['专业技能', '技能盲区']],
+    ['喜恶', ['喜欢', '讨厌']],
+    ['目标动机', ['表层想要', '深层需要']],
+    ['既有关系', ['关系定性', '专属称谓', '共同经历']],
+];
+const FIXTURE_CATALOG: ReadonlyArray<CatalogBlock> = FIXTURE_CATALOG_SPEC.map(([name, leafNames]) => ({
+    name,
+    tier: 'common' as const,
+    leaves: leafNames.map(leafName => ({ name: leafName, definition: '' })),
+}));
+
+/**
+ * 形态夹具一（加固①）：三处空值叶 ＋ 一个列表承载叶。两者取到的都是空串，
+ * 不先排除就是 4 叶两两互判「完全同值」＝6 对命中，且这 6 对会点着自动改写
+ * ——对着留白的档案批量覆写。
+ */
+const EMPTY_AND_LIST_LEAF_YAML = [
+    '基本信息:',
+    '  年龄:',
+    '  性别:',
+    '  身份:',
+    '喜恶:',
+    '  喜欢:',
+    '    - 旧版平装书',
+    '    - 手冲咖啡',
+    '兴趣嗜好:',
+    '  爱好:',
+].join('\n');
+
+/**
+ * 形态夹具二（加固②）：档案段 prefill 起首是「基本信息:」，模型从冒号之后接写，
+ * 首叶因此落在**块首行**上而不是缩进行上——只认缩进的读法把它整条丢掉。
+ */
+const INLINE_FIRST_LEAF_YAML = [
+    '基本信息:年龄: 三十四',
+    '  性别: 男',
+    '外貌:',
+    '  整体印象: 瘦高，肩线绷得很直',
+].join('\n');
+
+/** 形态夹具三（加固③）：模型常用 1 空格缩进子键。 */
+const ONE_SPACE_INDENT_YAML = [
+    '基本信息:',
+    ' 年龄: 三十四',
+    ' 性别: 男',
+    '外貌:',
+    ' 整体印象: 瘦高，肩线绷得很直',
+].join('\n');
+
+/** 形态夹具四（加固④）：单块档案——会踩「单顶层键整块去缩进」的修复分支。 */
+const SINGLE_BLOCK_YAML = ['基本信息:', '  年龄: 三十四', '  性别: 男'].join('\n');
+
+/** 形态夹具五（加固⑤）：机制挂载块按该世界的原生词汇命名，键名带空格与连字符。 */
+const MECHANISM_NAMED_YAML = [
+    '基本信息:',
+    '  年龄: 三十四',
+    '底牌机制:',
+    '  HP 成长: 每场交手后上限加一格',
+    '  冷却-判定: 连续命中三次才生效',
+].join('\n');
+
+/** 形态夹具六（加固⑥）：宿主错误正文——顶格散文与整行键，档案段此前从不跑形状校验。 */
+const HOST_ERROR_ENVELOPE_YAML = [
+    '[API 错误]',
+    '连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。',
+    '',
+    '请求地址: https://api.example.com/v1/chat/completions',
+].join('\n');
+
+/**
+ * 形态夹具七（裁决⑨）：宿主错误正文的另一种形态——**凑够两个顶层块**就能混过
+ * 形状闸的「块数 ≥2 且有叶」这一关（下面那行 `请求超时: 请重试` 正是它凑出来的
+ * 那一叶）。目录是「什么算档案叶」的唯一权威，两个块整块都不在目录里即降级。
+ */
+const HOST_ERROR_MULTI_BLOCK_YAML = [
+    '连接失败:',
+    '  请求超时: 请重试',
+    '请求地址:',
+    '  https://api.example.com/v1/chat/completions',
+].join('\n');
+
+/**
+ * 形态夹具八（叶层缩进基准）：同一块里叶缩进一深一浅，末叶还带一个更深的子键。
+ * 基准取「块内首叶」而不取「上一个叶」——后者会把末叶（4 空格）吞进中叶（2 空格）
+ * 的值里：既不进叶也不进未识别，静默全绿。第二块只为了让形状闸放行（顶层块 <2
+ * 即 SINGLE_BLOCK），不参与本断言。
+ */
+const MIXED_INDENT_YAML = [
+    '基本信息:',
+    '    年龄: 三十四',
+    '  性别: 男',
+    '    身份: 夜校代课老师',
+    '      来源: 街坊介绍',
+    '外貌:',
+    '  整体印象: 瘦高，肩线绷得很直',
+].join('\n');
+
+/**
+ * 形态夹具九（裁决③）：生成契约点名的偷懒占位。两叶都写「待定」——不排除占位
+ * 值的话它们就是一对「完全同值」，而它们承载的事实是「作者没写」而不是
+ * 「同一件事写了两遍」。
+ */
+const PLACEHOLDER_VALUES_YAML = [
+    '基本信息:',
+    '  年龄: 三十四',
+    '  身份: 待定',
+    '恐惧软肋:',
+    '  最深恐惧: 待定',
+    '  软肋人或物: N/A',
+].join('\n');
+
+/**
+ * 形态夹具十（裁决④）：裸列表项与无主续行——块下还没有叶可以并入时，这两行
+ * 从前被静默丢弃。丢弃即看不见：未识别行是目录漂移的体检信号，丢了就只剩
+ * 「看起来都认得了」。
+ */
+const ORPHAN_LINE_YAML = [
+    '基本信息:',
+    '  备注:',
+    '    - 街坊介绍',
+    '  年龄: 三十四',
+    '  身份: 夜校代课老师',
+    '既有关系:',
+    '  - 妹妹',
+    '    十五岁那年冬天',
+].join('\n');
+
+/**
+ * 目录键集夹具：一个带条件叶的普通块 ＋ 一个模板叶块（叶名由模型自造，键集里
+ * 只能给「块名·」前缀哨兵）。它证的是「目录认这两种叶」这条规则本身，与
+ * 策展目录的增删无关。
+ */
+const KEYSET_CATALOG: ReadonlyArray<CatalogBlock> = [
+    {
+        name: '性格',
+        tier: 'common',
+        leaves: [{ name: '核心矛盾', definition: '' }],
+        optionalLeaf: { name: '类型学速记叶', definition: '' },
+    },
+    { name: '状态机', tier: 'conditional', when: '行为或人格反差时', countText: '≤4 态', leaves: [] },
+];
+
+/**
+ * LITERAL_SAMPLE（人工构造）：两叶归一后完全同值。身份那叶句尾是全角逗号、职业
+ * 那叶是半角逗号——原串不等，成不成立全看 PUNCTUATION_FOLD 有没有落到代码里，
+ * 只比原串的话这对就不会被报出来。
+ */
+const LITERAL_SAMPLE = [
+    '基本信息:',
+    '  年龄: 三十四',
+    '  身份: 夜校代课老师，',
+    '职业经济:',
+    '  职业: 夜校代课老师,',
+    '  收入档位: 课时费过活，存款不到五位数',
+].join('\n');
+
+/** LITERAL_SAMPLE 的反转版：两叶是近义改写而非同值，必须零命中（本层不判语义）。 */
+const LITERAL_REVERSED_SAMPLE = [
+    '基本信息:',
+    '  年龄: 三十四岁',
+    '  身份: 夜校代课老师',
+    '职业经济:',
+    '  职业: 夜校老师',
+    '  收入档位: 课时费过活，存款不到五位数',
+].join('\n');
+
+/**
+ * REDUNDANCY_SAMPLE（脱敏用户样本，块叶形态按逐字档 A-2 对齐；素材与提示词里
+ * 那三组反例同源：替妹妹瞒着家里许人的事。假名「阿槐」是合成值，样本内无真实
+ * 姓名）。
+ *
+ * 覆盖面刻意只留归属对的第 2 对：第 4 对（技能专长·技能盲区 × 自我认知·认知盲区）
+ * 与第 8 对（成长弧·待解心结 × 既有关系·未说破的心结）涉及的叶一个都不在本样本里
+ * ——那两组是同一母题的不同维度（别人怎么看他／他内心缺什么），用户已拍板不判
+ * 重复，故对那两对不构成任何断言。
+ */
+const REDUNDANCY_SAMPLE = [
+    '基本信息:',
+    '  年龄: 三十四',
+    '  性别: 男',
+    '  身份: 夜校代课老师，白天在巷口小饭馆看后厨',
+    '  别名与名号: 街面上都叫他「阿槐」，他从不纠正',
+    '外貌:',
+    '  整体印象: 瘦高，肩线绷得很直，说话前习惯先停半拍',
+    '  标志性特征: 左手虎口一道旧疤，端盘子时格外显眼',
+    '性格:',
+    '  核心矛盾: 见不得人难堪／受不了被人当提款机',
+    '  情绪反应: 有人提起家里时先笑一下，再把话岔开',
+    '  说话风格: 慢，说三句留半句给人接',
+    '  待人差异: 对生人客气，对熟人直接，对妹妹没辙',
+    '情绪光谱:',
+    '  情绪外露程度: 内敛到要靠眼神才看得出',
+    '  生气外显信号: 先把杯子放回桌上，放得比平时响',
+    '  有效安抚手段: 给他一件具体能做的事，比道歉有用',
+    '  笑点哭点: 笑点是妹妹小时候的胡话，哭点是婚约那张纸',
+    '自我认知:',
+    '  自我评价: 我这点本事，够护住一个人',
+    '  他人眼中形象: 街坊眼里他是能扛事的年轻人',
+    '底线雷区:',
+    '  绝不做的事: 绝不向外人道出妹妹被家里许人的事',
+    '  道德底线: 不拿妹妹的名誉换自己的好处',
+    '  禁触话题: 妹妹的婚约、家里的打算',
+    '言谈习惯:',
+    '  口头禅: 到时候再说吧',
+    '  语气词: 句尾常挂一个「吧」',
+    '技能专长:',
+    '  专业技能: 后厨刀工与灶上调度',
+    '喜恶:',
+    '  喜欢: 旧版平装书、后厨的清晨',
+    '  讨厌: 酒桌上的应酬话',
+    '目标动机:',
+    '  表层想要: 把夜校的课时排满，攒够钱把那间店盘下来',
+    '  深层需要: 他受够了必须有用，要的是有人把他当人看',
+    '既有关系:',
+    '  关系定性: 亲兄妹，从小一起长大',
+    '  专属称谓: 只在两人之间用的称呼——妹妹叫他「哥」，他回「小妹」',
+    '  共同经历: 十五岁那年冬天，两人一起守着火炉等她妈回来',
+].join('\n');
+
+/**
+ * 取判据入口抛出的不可判定异常；没抛返回 null。
+ *
+ * 探针一律断 `err.code` 与两个计数（裁决⑤），不碰 `err.message`：文案是给人看的，
+ * 一改就断，而按文案匹配的失效方向正是「把不可判定当没重复」。
+ */
+function undecidableError(text: string, catalog?: ReadonlyArray<CatalogBlock>): ProfileUndecidableError | null {
+    try {
+        analyzeRedundancy(text, catalog);
+        return null;
+    } catch (e) {
+        if (e instanceof ProfileUndecidableError) return e;
+        throw e;
+    }
+}
+
+function runRedundancyChecks(): void {
+    // 目录键集是解析层与判据层唯一的「什么算档案叶」权威（裁决②）：条件叶在清单
+    // 里以【…】成文、在档案里以裸键出现，键名归一收在一处；模板叶块的叶名由模型
+    // 自造，键集里只能给「块名·」前缀哨兵。任一处退回 `'name' in leaf` 或自剥
+    // 方括号，这两条断言立刻翻红。
+    const keyset = catalogKeySet(KEYSET_CATALOG);
+    check('目录键集：条件叶按裸键名入集、模板叶块给「块名·」前缀哨兵',
+        keyset.has('性格') && keyset.has('性格·核心矛盾') && keyset.has('性格·类型学速记叶')
+        && keyset.has('状态机·') && catalogKeyName('【类型学速记叶】') === '类型学速记叶'
+        && !keyset.has('状态机·工作态'),
+        `keys=${JSON.stringify([...keyset])}`);
+
+    // 叶层缩进基准取块内首叶（裁决⑫）：三叶都取到，末叶带的那条更深的子键并进
+    // 它的值而不是把它并进中叶。拿「上一个叶」当基准时，末叶会整个消失——
+    // 既不进叶也不进未识别，静默全绿。
+    const mixedScan = scanProfileLeaves(MIXED_INDENT_YAML);
+    check('yaml 叶级：块内叶层缩进以块内首叶为基准（混合缩进·末叶不被并进中叶）',
+        jsonEq(mixedScan.leaves.map(row => [row.block, row.leaf, row.value]),
+            [['基本信息', '年龄', '三十四'], ['基本信息', '性别', '男'],
+                ['基本信息', '身份', '夜校代课老师\n来源: 街坊介绍'], ['外貌', '整体印象', '瘦高，肩线绷得很直']])
+        && jsonEq(mixedScan.leafKeys,
+            ['基本信息·年龄', '基本信息·性别', '基本信息·身份', '外貌·整体印象']),
+        `叶=${JSON.stringify(mixedScan.leaves.map(row => [row.block, row.leaf, row.value]))}`);
+
+    // 加固①：列表承载叶与空值叶先排除。不排除时这四叶（年龄/性别/身份/爱好）
+    // 取到的都是空串，两两互判即 6 对「完全同值」——期望值里的 form 序列同时
+    // 证明这些空叶确实在场上、确实被判成了空值而不是没解析出来。
+    const emptyScan = scanProfileLeaves(EMPTY_AND_LIST_LEAF_YAML);
+    const emptyLeafForms = emptyScan.leaves.map(row => `${row.block}·${row.leaf}:${row.form}`);
+    const emptyReport = analyzeRedundancy(EMPTY_AND_LIST_LEAF_YAML, FIXTURE_CATALOG);
+    check('yaml 叶级＋判据：列表承载叶与空值叶先排除（加固①·不排除即 6 对假命中）',
+        jsonEq(emptyLeafForms,
+            ['基本信息·年龄:scalar', '基本信息·性别:scalar', '基本信息·身份:scalar', '喜恶·喜欢:list', '兴趣嗜好·爱好:scalar'])
+        && emptyReport.literal.length === 0,
+        `叶=${JSON.stringify(emptyLeafForms)} literal=${JSON.stringify(emptyReport.literal)}`);
+
+    // 裁决③的占位那一类：两叶都写「待定」必须零对。占位词表取自
+    // PROFILE_PLACEHOLDER_VALUES（由生成契约同一份词插值成文），判据层不另抄。
+    const placeholderScan = scanProfileLeaves(PLACEHOLDER_VALUES_YAML);
+    const placeholderRows = placeholderScan.leaves.filter(row => normalizeLeafValue(row.value) === '待定');
+    const placeholderReport = analyzeRedundancy(PLACEHOLDER_VALUES_YAML, FIXTURE_CATALOG);
+    check('判据：契约点名的偷懒占位不算「完全同值」（裁决③·两叶都写待定仍零对）',
+        placeholderRows.length === 2 && placeholderRows.every(row => !isJudgeableLeaf(row))
+        && PROFILE_PLACEHOLDER_VALUES.includes('待定') && PROFILE_PLACEHOLDER_VALUES.includes('N/A')
+        && placeholderReport.literal.length === 0,
+        `待定叶=${placeholderRows.length} literal=${JSON.stringify(placeholderReport.literal)}`);
+
+    // 加固②：块首行内联的首叶。只认缩进的读法在这份夹具上只能解析出 2 叶，
+    // 期望值写的是 3 叶——差的那一叶就是首叶。
+    const inlineScan = scanProfileLeaves(INLINE_FIRST_LEAF_YAML);
+    check('yaml 叶级：块首行内联的首叶不被丢（加固②·只认缩进则首叶消失）',
+        jsonEq(inlineScan.leaves.map(row => [row.block, row.leaf, row.value]),
+            [['基本信息', '年龄', '三十四'], ['基本信息', '性别', '男'], ['外貌', '整体印象', '瘦高，肩线绷得很直']]),
+        `叶=${JSON.stringify(inlineScan.leaves.map(row => `${row.block}·${row.leaf}`))}`);
+
+    // 加固③：1 空格缩进的叶仍算叶。
+    const oneSpaceScan = scanProfileLeaves(ONE_SPACE_INDENT_YAML);
+    const oneSpaceBlocks = parseYamlToBlocks(ONE_SPACE_INDENT_YAML);
+    check('yaml 叶级：1 空格缩进的叶仍算叶（加固③·反向用例见下一条）',
+        jsonEq(oneSpaceScan.blocks, ['基本信息', '外貌'])
+        && jsonEq(oneSpaceScan.leaves.map(row => [row.block, row.leaf]),
+            [['基本信息', '年龄'], ['基本信息', '性别'], ['外貌', '整体印象']]),
+        `块=${JSON.stringify(oneSpaceScan.blocks)} 叶=${JSON.stringify(oneSpaceScan.leaves.map(row => `${row.block}·${row.leaf}`))}`);
+    // 加固③的反向用例：同一份文本走切块口径（缩进 ≤1 算块界），两个块的值都成
+    // 了空串——叶被读成顶层块、整块零叶，而零叶的报告与「确实没重复」不可区分。
+    check('yaml 叶级：加固③反向用例（切块口径下 1 空格叶被当顶层块·两块零叶）',
+        oneSpaceBlocks.get('基本信息') === '' && oneSpaceBlocks.get('外貌') === '',
+        `keys=${[...oneSpaceBlocks.keys()].join('/')}`);
+
+    // 加固④：顶层块 <2 报 SINGLE_BLOCK，判据层拒判而不是给一份空报告。
+    // 反向用例同在：这份文本会踩单顶层键的整块去缩进分支，顶层键被丢掉。
+    const singleShape = checkProfileShape(SINGLE_BLOCK_YAML);
+    const singleError = undecidableError(SINGLE_BLOCK_YAML, FIXTURE_CATALOG);
+    check('yaml 形状＋判据：单块档案报 SINGLE_BLOCK 且判据拒判（加固④）',
+        !singleShape.ok && singleShape.code === 'SINGLE_BLOCK'
+        && singleShape.topLevelBlocks === 1 && singleShape.leafCount === 2
+        && singleError?.code === 'SINGLE_BLOCK' && singleError.topLevelBlocks === 1 && singleError.leafCount === 2
+        && ![...parseYamlToBlocks(SINGLE_BLOCK_YAML).keys()].includes('基本信息'),
+        `shape=${JSON.stringify(singleShape)} code=${singleError?.code ?? '（未抛）'}`);
+
+    // 加固⑤：机制挂载块的原生叫法不再整行被当块内容丢掉。两个未识别计数分开取：
+    // 「整块在目录外」（机制挂载块，永远不必补叶）与「目录里这块有、模型多写了
+    // 一叶」（要查）是两类处置，合进一个计数就分不出来了。
+    const mechScan = scanProfileLeaves(MECHANISM_NAMED_YAML);
+    const mechReport = analyzeRedundancy(MECHANISM_NAMED_YAML, FIXTURE_CATALOG);
+    check('yaml 叶级＋判据：机制挂载块的原生叫法不再整行丢弃（加固⑤·未识别块/叶分开计）',
+        jsonEq(mechScan.blocks, ['基本信息', '底牌机制'])
+        && jsonEq(mechScan.leaves.map(row => [row.block, row.leaf]),
+            [['基本信息', '年龄'], ['底牌机制', 'HP 成长'], ['底牌机制', '冷却-判定']])
+        && jsonEq(mechReport.unrecognizedBlocks, ['底牌机制'])
+        && jsonEq(mechReport.unrecognizedLeaves, ['底牌机制·HP 成长', '底牌机制·冷却-判定']),
+        `块=${JSON.stringify(mechScan.blocks)} 未识别块=${JSON.stringify(mechReport.unrecognizedBlocks)} 未识别叶=${JSON.stringify(mechReport.unrecognizedLeaves)}`);
+
+    // 裁决④：块下还没有叶可并时，裸列表项与缩进散文都不再静默丢弃——它们连同
+    // 目录外的那一叶（备注）一起进未识别叶，两个未识别计数各归其位（两个块名本身
+    // 都在目录里，所以未识别块为空——这一条同时钉住「未识别块」只装整块在目录外的）。
+    const orphanScan = scanProfileLeaves(ORPHAN_LINE_YAML);
+    const orphanReport = analyzeRedundancy(ORPHAN_LINE_YAML, FIXTURE_CATALOG);
+    check('yaml 叶级＋判据：裸列表项与无主续行进无主行、不再静默丢弃（裁决④）',
+        jsonEq(orphanScan.leafKeys, ['基本信息·备注', '基本信息·年龄', '基本信息·身份'])
+        && jsonEq(orphanScan.orphanLines, ['- 妹妹', '十五岁那年冬天'])
+        && jsonEq(orphanReport.unrecognizedBlocks, [])
+        && jsonEq(orphanReport.unrecognizedLeaves, ['基本信息·备注', '- 妹妹', '十五岁那年冬天']),
+        `叶键=${JSON.stringify(orphanScan.leafKeys)} 无主行=${JSON.stringify(orphanScan.orphanLines)} 未识别块=${JSON.stringify(orphanReport.unrecognizedBlocks)} 未识别叶=${JSON.stringify(orphanReport.unrecognizedLeaves)}`);
+
+    // 加固⑥：档案段此前从不跑形状校验。宿主错误正文在这里落成零叶——它有 2 个
+    // 顶层「块」，只靠「块数 ≥2」放行等于没校验。
+    const envelopeShape = checkProfileShape(HOST_ERROR_ENVELOPE_YAML);
+    const envelopeError = undecidableError(HOST_ERROR_ENVELOPE_YAML, FIXTURE_CATALOG);
+    check('yaml 形状＋判据：宿主错误正文报 NO_LEAVES（加固⑥）',
+        !envelopeShape.ok && envelopeShape.code === 'NO_LEAVES'
+        && envelopeError?.code === 'NO_LEAVES' && envelopeError.leafCount === 0,
+        `shape=${JSON.stringify(envelopeShape)} code=${envelopeError?.code ?? '（未抛）'}`);
+
+    // 裁决⑬：形状闸只看得见块数与叶数，宿主错误正文凑够两个顶层块就能混过去。
+    // 降级判定看目录：两个块整块都不在目录里即 MOSTLY_OUT_OF_CATALOG。
+    const multiShape = checkProfileShape(HOST_ERROR_MULTI_BLOCK_YAML);
+    const multiError = undecidableError(HOST_ERROR_MULTI_BLOCK_YAML, FIXTURE_CATALOG);
+    check('yaml 形状＋判据：错误正文凑够两块时形状闸放行、判据层降级拒判（裁决⑬）',
+        multiShape.ok && multiShape.topLevelBlocks === 2 && multiShape.leafCount === 1
+        && multiError?.code === 'MOSTLY_OUT_OF_CATALOG' && multiError.topLevelBlocks === 2,
+        `shape=${JSON.stringify(multiShape)} code=${multiError?.code ?? '（未抛）'}`);
+
+    const sampleShape = checkProfileShape(REDUNDANCY_SAMPLE);
+    check('yaml 形状：填好的档案形状校验放行（加固⑥的放行侧）',
+        sampleShape.ok && sampleShape.code === null
+        && sampleShape.topLevelBlocks === 11 && sampleShape.leafCount === 29,
+        `shape=${JSON.stringify(sampleShape)}`);
+
+    // LITERAL_SAMPLE：归一后完全同值必命中（身份那叶句尾是全角逗号、职业那叶是
+    // 半角逗号——这一对正是「靠标点表才成立」的用例：两边都折成半角才同值）。
+    const literalReport = analyzeRedundancy(LITERAL_SAMPLE, FIXTURE_CATALOG);
+    check('判据：LITERAL_SAMPLE 必命中（归一后完全同值·含靠标点表才成立的一对）',
+        jsonEq(literalReport.literal, [{
+            block: '基本信息',
+            leaf: '身份',
+            group: [{ block: '基本信息', leaf: '身份' }, { block: '职业经济', leaf: '职业' }],
+        }]),
+        `literal=${JSON.stringify(literalReport.literal)}`);
+    // 反转版必零命中：近义改写不由本层判定（判据的语义检出率为零，这是既定边界）。
+    const reversedReport = analyzeRedundancy(LITERAL_REVERSED_SAMPLE, FIXTURE_CATALOG);
+    check('判据：LITERAL_SAMPLE 反转版必零命中（近义改写不由本层判定）',
+        reversedReport.literal.length === 0,
+        `literal=${JSON.stringify(reversedReport.literal)}`);
+
+    // REDUNDANCY_SAMPLE：只报出归属对第 2 对（别名与名号 × 专属称谓两端同在场）。
+    const sampleReport = analyzeRedundancy(REDUNDANCY_SAMPLE, FIXTURE_CATALOG);
+    check('判据：REDUNDANCY_SAMPLE 的 structural 报出归属对第 2 对（既有关系·专属称谓 × 基本信息·别名与名号）',
+        jsonEq(sampleReport.structural, [['既有关系·专属称谓', '基本信息·别名与名号']]),
+        `structural=${JSON.stringify(sampleReport.structural)}`);
+    // 该样本上 literal 零命中是**预期**：三组反例里那些「同一份素材被写重」的叶
+    // 用的都是同义改写，本层按定义抓不到。断言写成「必须零命中」——写成「应当
+    // 命中」等于把砍判据这件事做回来。
+    check('判据：REDUNDANCY_SAMPLE 的 literal 零命中是预期（语义重复不由本层判定·不是漏报）',
+        sampleReport.literal.length === 0,
+        `literal=${JSON.stringify(sampleReport.literal)}`);
+    const defaultCatalogReport = analyzeRedundancy(REDUNDANCY_SAMPLE);
+    check('判据：REDUNDANCY_SAMPLE 未识别块/叶 0（内联目录与默认目录下各跑一次·叶名未漂移）',
+        sampleReport.unrecognizedBlocks.length === 0 && sampleReport.unrecognizedLeaves.length === 0
+        && defaultCatalogReport.unrecognizedBlocks.length === 0 && defaultCatalogReport.unrecognizedLeaves.length === 0,
+        `内联目录=块${JSON.stringify(sampleReport.unrecognizedBlocks)}／叶${JSON.stringify(sampleReport.unrecognizedLeaves)}`
+        + ` 默认目录=块${JSON.stringify(defaultCatalogReport.unrecognizedBlocks)}／叶${JSON.stringify(defaultCatalogReport.unrecognizedLeaves)}`);
+
+    // 归一规则机判（上半段）：NFKC 折全角拉丁与**全角标点**、连续空白（含全角
+    // 空格）折成一个半角空格——所以 `，`／`：／`；／`？／`!／`（）` 这些在
+    // PUNCTUATION_FOLD 里不许留条目（NFKC 已经折了，留着即不可达的死配置）。
+    // 另钉死两条**不做**的猜测：大小写不折叠（`MBTI` 与 `mbti` 不是一个事实），
+    // 句尾标点也不剔除（`不喝酒，` 与 `不喝酒` 是两个值，剔除尾部标点靠猜）。
+    check('判据：归一规则机判·NFKC 与空白段（大小写与句尾标点不折叠）',
+        normalizeLeafValue('Ａｇｅ') === 'Age'
+        && normalizeLeafValue('夜校，') === '夜校,'
+        && isSameLeafValue('夜校　代课老师', '夜校 代课老师')
+        && !isSameLeafValue('不喝酒，', '不喝酒')
+        && !isSameLeafValue('MBTI', 'mbti'),
+        `Age=${normalizeLeafValue('Ａｇｅ')} 全角逗号=${normalizeLeafValue('夜校，')} 全角空格=${normalizeLeafValue('夜校　代课老师')}`);
+
+    // 归一规则机判（下半段）：PUNCTUATION_FOLD 里每一个字符各配一条断言，且这
+    // 三条**只有表能成立**——NFKC 都不碰它们（`“”《》—` 的半角形都不是它们），
+    // 把哪一条从表里删掉，对应的那一条立刻翻红。表里新增字符照此补一条。
+    check('判据：PUNCTUATION_FOLD 表内字符逐条机判（每条只有标点表能成立·NFKC 不碰它们）',
+        isSameLeafValue('他说“好”', '他说"好"')
+        && isSameLeafValue('《夜校代课》', '<夜校代课>')
+        && normalizeLeafValue('HP—成长') === 'HP-成长',
+        `引号=${normalizeLeafValue('他说“好”')} 书名号=${normalizeLeafValue('《夜校代课》')} 破折号=${normalizeLeafValue('HP—成长')}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1921,6 +2380,7 @@ export async function runPersonaSmoke(): Promise<void> {
     runPersonaAssemblyChecks();
     await runPersonaAssemblyDumpChecks();
     runPureFunctionChecks();
+    runRedundancyChecks();
     await runApiChecks();
     await runPersonaE2EChecks();
     await runStoreChecks();
@@ -1931,5 +2391,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
 }

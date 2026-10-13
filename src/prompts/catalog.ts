@@ -855,6 +855,16 @@ export function renderCatalogDefinitions(keys?: ReadonlySet<string>): string {
 }
 
 /**
+ * 键名归一：`【…】` 只是一种成文包装，方括号里的才是键名。
+ *
+ * 归在这一层而不是各调用方各剥一次：条件叶在清单里以【…】成文、在档案里以裸
+ * 键名成文，两处各剥各的就会在「哪边忘了剥」时静默对不上。
+ */
+export function catalogKeyName(raw: string): string {
+    return raw.trim().replace(/^【(.+)】$/, '$1');
+}
+
+/**
  * 策展产出的 schema → 叶边界段的行键集（定义段的收敛口径逐字定死）：
  *   - 顶层块名进键集——模板叶（状态机）的行首就是块名，它的边界只在块入选
  *     时才有意义；
@@ -872,8 +882,7 @@ export function definitionRowKeysFromSchema(schema: string): ReadonlySet<string>
         const indent = raw.length - raw.trimStart().length;
         const at = raw.search(/[:：]/);
         if (at < 0) continue;
-        // 【…】 只是一种成文包装，方括号里的才是键名。
-        const name = raw.slice(indent, at).trim().replace(/^【(.+)】$/, '$1');
+        const name = catalogKeyName(raw.slice(indent, at));
         if (!name) continue;
         if (indent === 0) {
             currentBlock = name;
@@ -881,6 +890,39 @@ export function definitionRowKeysFromSchema(schema: string): ReadonlySet<string>
         } else if (indent === 2 && currentBlock) {
             keys.add(`${currentBlock}·${name}`);
         }
+    }
+    return keys;
+}
+
+/**
+ * 目录键集：目录里有哪几块、哪几叶（块名＋「块名·叶名」＋条件叶）。
+ *
+ * 这是「什么算档案叶」的唯一权威，解析层与判据层都从这里取，不各自重推——
+ * 手抄一份键名规则的第二处在目录改名后会静默失效，而失效方向永远是少认。
+ *
+ * 模板叶块（`状态机`）的叶名由模型自造、属目录内命名空间：这类块没有可枚举的
+ * 叶键，键集里放**「块名·」这个前缀哨兵**，消费方按「键精确命中，或键以某个哨兵
+ * 前缀开头」来认它的叶（哨兵只可能以中点结尾，真实键名不会，故不会误吞）。
+ *
+ * 联合判别走 `'name' in leaf`：模板叶没有 name 字段，这是它与 CatalogLeaf 的
+ * 唯一形态特征（同 `isSkeletonLeaf` 的口径；那条额外要求骨架标记，用途不同）。
+ */
+export function catalogKeySet(catalog: ReadonlyArray<CatalogBlock> = PERSONA_BLOCK_CATALOG): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (const block of catalog) {
+        keys.add(block.name);
+        let namedLeaf = false;
+        for (const leaf of block.leaves) {
+            if ('name' in leaf) {
+                keys.add(`${block.name}·${catalogKeyName(leaf.name)}`);
+                namedLeaf = true;
+            }
+        }
+        if (block.optionalLeaf) {
+            keys.add(`${block.name}·${catalogKeyName(block.optionalLeaf.name)}`);
+            namedLeaf = true;
+        }
+        if (!namedLeaf) keys.add(`${block.name}·`);
     }
     return keys;
 }
