@@ -72,6 +72,17 @@ export const REFERENCE_MODULES_OPEN_TAG = '<reference_modules>';
 export const REFERENCE_MODULES_CLOSE_TAG = '</reference_modules>';
 
 /**
+ * 档案段的两个派生段的开闭标签，与策展清单段同款理由（两边各写一份字面量
+ * 就会漂成对不上的段切分）：
+ *   - 边界定义段：叶的「不装」半句，与策展清单段的定义段同源不同裁；
+ *   - 归属优先级段：OWNERSHIP_PAIRS 的成文。
+ */
+export const CATALOG_DEFINITIONS_OPEN_TAG = '<catalog_definitions>';
+export const CATALOG_DEFINITIONS_CLOSE_TAG = '</catalog_definitions>';
+export const OWNERSHIP_TABLE_OPEN_TAG = '<ownership_priority_table>';
+export const OWNERSHIP_TABLE_CLOSE_TAG = '</ownership_priority_table>';
+
+/**
  * 策展目录数据。块头四段（块名／叶数／档位或块级条件限定语／括号归类说明）
  * 与叶行成文格式都由 renderCatalog 拆字段落实，改词面改这里即可，不必改
  * 渲染函数。定义段（叶定义）逐叶成文接在行末——策展模型看不到没被渲染的
@@ -108,14 +119,18 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
             { name: '说话风格', definition: '说话的整体调子与节奏（慢条斯理／爱插科打诨）。不装：口头禅与句式细节（言谈习惯）、听说读写能力（言谈习惯·听说读写水平）。', skeleton: true },
             { name: '待人差异', definition: '对生人、熟人、亲近者三种对象分别呈现的不同面貌，各一条。不装：对所有人一致的稳定特质（那是核心矛盾）。', skeleton: true },
         ],
-        optionalLeaf: { name: '类型学速记叶', definition: '用户在素材或需求里明确给出的类型学测试结果（MBTI／九型／大五等）照写，附一句他对这套标签的私下看法。' },
+        optionalLeaf: { name: '类型学速记叶', definition: '用户在素材或需求里明确给出的类型学测试结果（MBTI／九型／大五等）照写，附一句他对这套标签的私下看法；不装：素材没给过的结果一律不推断，也不写类型学常识科普与测试原理。' },
     },
     {
         name: '状态机',
         tier: 'conditional',
         when: '行为或人格反差时',
         countText: '≤4 态',
-        leaves: [{ template: '每态含三键：状态名｜该态下的行为特征｜触发切换到该态的条件', definition: '该块不是一个值，而是至多 4 个命名状态，每态固定三键。不装：静态特质（那是性格）。≤4 态由策展段保证，档案段不得自行加第 5 态。' }],
+        // 排除半句不许提策展段：definition 的排除半句会随叶边界段进入档案段
+        // 正文，而档案段读不到策展段的任何职责交代（要填的键集合由
+        // <target_schema> 定死），照本段职责写等于让它引用一条本请求不存在的
+        // 约束。上限就写在本块上，模型自己看得到。
+        leaves: [{ template: '每态含三键：状态名｜该态下的行为特征｜触发切换到该态的条件', definition: '该块不是一个值，而是至多 4 个命名状态，每态固定三键。不装：静态特质（那是性格）。至多 4 态是本块上限，第 5 态不入档案。' }],
     },
     {
         name: '情绪光谱',
@@ -759,6 +774,133 @@ function renderBlockLine(block: CatalogBlock): string {
 /** 策展清单全文（一块一行）：成文进策展指令的 reference_modules 段。 */
 export function renderCatalog(): string {
     return PERSONA_BLOCK_CATALOG.map(renderBlockLine).join('\n');
+}
+
+/**
+ * 叶定义里的排除半句分隔符：「装什么」与「不装什么」两半句靠它分开。
+ * 档案段的定义段只取后半句——策展段选块要靠「装什么」，档案段填值时
+ * schema 已经是策展段裁好的键，它要守的只有「别把什么也塞进来」。
+ */
+const EXCLUSION_MARK = '不装：';
+
+/**
+ * 没有排除半句时的兜底成文：本批目录数据里不该出现，冒烟按 0 判。真出现
+ * 了（新增叶时漏写「不装：」）这里给出的是一句可执行的边界指令，而不是空行
+ * 或半个定义句。它随档案段正文出厂（万一触发即是给用户看的正文），所以对外
+ * 导出给冒烟当期望值用——冒烟另抄一份就是在断言一份可能已改口的字符串。
+ */
+export const NO_EXCLUSION_TEXT = '按 definition 边界写，别越界';
+
+/**
+ * 排除半句的成文：先走 definitionTextOf 的同一条单行化通道再切分，另写一套
+ * 解析就会在定义里出现换行时切成两半。切的是数据里那一处分隔符，判定与成文
+ * 同源不构成问题（这一段只有一份数据可切）。
+ */
+function exclusionTextOf(leaf: { definition: string }): string {
+    const definition = definitionTextOf(leaf);
+    const at = definition.indexOf(EXCLUSION_MARK);
+    return at < 0 ? '' : definition.slice(at + EXCLUSION_MARK.length).trim();
+}
+
+/**
+ * 档案段叶边界定义段的段头说明行：这一段是什么、怎么读、作用域多大。落在
+ * 渲染函数里而不落调用方正文——放调用方就等于把段头排除在「整段逐字节」那条
+ * 锁之外，那条锁是本段唯一的同源保证，段头漏改/被改都不会翻红。
+ *
+ * 段头不许出现「下方」「上面」「以上」这类对版面的位置指代：归属表挪个位置
+ * 它就成假话，而没有断言会翻红。要指就指名道姓写「归属优先级表」（表标题的
+ * 成文名，全档只此一个叫法）。
+ */
+const CATALOG_DEFINITIONS_HEADER = '[下面是本次 schema 里每个叶子键的边界——只出「这个键不装什么」。schema 里没有的键一律不输出。同一类事实按「归属优先级表」只写进一端，别处不重复叙述。]';
+
+/**
+ * 叶边界段一行：定位键＋成文。模板叶没有键名，出块名（与 renderBlockLine 同一
+ * 口径）——拼成「块名·块名」会读成块里有一个与块同名的叶。
+ */
+function definitionRow(block: CatalogBlock, leaf: { name?: string; definition: string }): { key: string; line: string } {
+    const key = leaf.name ? `${block.name}·${leaf.name}` : block.name;
+    return { key, line: `${key}：${exclusionTextOf(leaf) || NO_EXCLUSION_TEXT}` };
+}
+
+/**
+ * 档案段的叶边界定义段（段头一行＋一叶一行）：行首「块名·叶名」定位到具体
+ * 键，行身是该叶的排除半句。与策展清单段的定义段同源不同裁，两处都是
+ * renderCatalog 的上游——各抄一份就会在叶定义改字时各说各的。
+ *
+ * 条件叶（optionalLeaf）同样出行：它有边界要守。它虽不占声明叶数、挂不挂
+ * 全看用户有没有给类型学测试结果，但策展段真给出结果时这个键就会出现在
+ * <target_schema> 里——档案段拿不到任何边界提示，只能照要求 5「绝不留空」
+ * 硬编，而模型写这类叶的惯性正是补一段类型学常识科普。出行成「性格·类型学
+ * 速记叶」这一行，点名与声明叶同一口径。
+ *
+ * 键集参数＝随请求收敛的开关（见 definitionRowKeysFromSchema）：档案段要守
+ * 的只有本次 schema 里那几个键的边界，全量里 70～80% 是本次不可能出现的键，
+ * 且体积随目录单调增长永不回落。不传＝全量（策展失败回退默认模板、以及冒烟
+ * 的静态形态都走这条）。
+ *
+ * 过滤后零行时回落全量：schema 与目录毫无交集（策展整份挂了机制挂载块之类）
+ * 时出「只有段头没有一行」的段，等于把本段要防的「模型拿不到边界」原样放行，
+ * 那时宁可多给一屏边界。
+ */
+export function renderCatalogDefinitions(keys?: ReadonlySet<string>): string {
+    const rows = PERSONA_BLOCK_CATALOG.flatMap(block => [
+        ...block.leaves.map(leaf => definitionRow(block, leaf)),
+        ...(block.optionalLeaf ? [definitionRow(block, block.optionalLeaf)] : []),
+    ]);
+    const kept = keys ? rows.filter(row => keys.has(row.key)) : rows;
+    return [
+        CATALOG_DEFINITIONS_HEADER,
+        ...(kept.length ? kept : rows).map(row => row.line),
+    ].join('\n');
+}
+
+/**
+ * 策展产出的 schema → 叶边界段的行键集（定义段的收敛口径逐字定死）：
+ *   - 顶层块名进键集——模板叶（状态机）的行首就是块名，它的边界只在块入选
+ *     时才有意义；
+ *   - 两格缩进的叶名按「块名·叶名」进键集；
+ *   - 【…】 形态的条件叶按方括号里的名字匹配（清单里它就以【…】成文）；
+ *   - 缩进更深的行为状态机的子键不进键集——叶边界段一行对应一个块或一个叶子
+ *     键，深层子键没有各自的目录定义。
+ * 只读顶层块名与叶名就够了（策展段输出是本仓自产的固定形状，不引 YAML 解析
+ * 库）；值侧一律丢弃。
+ */
+export function definitionRowKeysFromSchema(schema: string): ReadonlySet<string> {
+    const keys = new Set<string>();
+    let currentBlock = '';
+    for (const raw of schema.split('\n')) {
+        const indent = raw.length - raw.trimStart().length;
+        const at = raw.search(/[:：]/);
+        if (at < 0) continue;
+        // 【…】 只是一种成文包装，方括号里的才是键名。
+        const name = raw.slice(indent, at).trim().replace(/^【(.+)】$/, '$1');
+        if (!name) continue;
+        if (indent === 0) {
+            currentBlock = name;
+            keys.add(name);
+        } else if (indent === 2 && currentBlock) {
+            keys.add(`${currentBlock}·${name}`);
+        }
+    }
+    return keys;
+}
+
+/**
+ * 归属优先级表的标题：表说「同一类事实只写进一端」，标题说清每行两端哪端该
+ * 写——两者是一体的，标题必须与表体同处同源。标题落在调用方正文里就成了第二
+ * 份手抄，改表不改标题时无从察觉。
+ */
+const OWNERSHIP_TABLE_TITLE = '归属优先级表（同一类事实只写进一端。每行＝该写的那一端 ｜ 同类事实里不该复述的那一端）';
+
+/**
+ * 归属优先级表成文（一行一对，成对顺序＝归属顺序）：档案段的规则说「按顺序
+ * 走」，这张表是同一件事的「块·叶」对照，与规则共用 OWNERSHIP_PAIRS 一份数据。
+ */
+export function renderOwnershipTable(): string {
+    return [
+        OWNERSHIP_TABLE_TITLE,
+        ...OWNERSHIP_PAIRS.map(([owner, other]) => `${owner} ｜ ${other}`),
+    ].join('\n');
 }
 
 /**

@@ -6,6 +6,13 @@
  * scripts/smoke.mjs 收口断言）。全部走合成数据——不依赖宿主在场数据，
  * 断言确定性；与浏览器真实数据共用同一条 storage/generation 代码路径
  * （dist 加载即覆盖）。
+ *
+ * 本文件（连同 [persona-smoke] 这些标记）随 dist 出包：它经 persona/index.ts
+ * 进 main.ts 的 node 分支，产物里跑得起来，但整份代码与全部夹具都会随发布
+ * 外发给所有装扩展的人。运行时分支保证它不在浏览器里执行，却保证不了它
+ * 不被人读到——所以夹具里绝不许出现真实姓名、真实 token、真实 endpoint，
+ * 一律用合成值。反例素材同理：反例正文会进提示词出厂，夹具里的「素材人名」
+ * 等于把真实用户素材带进发布产物（脱敏由仓外验收命令把关，见方案判据表）。
  */
 import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages, upsertPersona } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
@@ -21,7 +28,21 @@ import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, wr
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, type PersonaAssemblySources } from '@/prompts';
-import { OWNERSHIP_PAIRS, PERSONA_BLOCK_CATALOG, REFERENCE_MODULES_CLOSE_TAG, REFERENCE_MODULES_OPEN_TAG, renderCatalog } from '@/prompts/catalog';
+import {
+    CATALOG_DEFINITIONS_CLOSE_TAG,
+    CATALOG_DEFINITIONS_OPEN_TAG,
+    NO_EXCLUSION_TEXT,
+    OWNERSHIP_PAIRS,
+    OWNERSHIP_TABLE_CLOSE_TAG,
+    OWNERSHIP_TABLE_OPEN_TAG,
+    PERSONA_BLOCK_CATALOG,
+    REFERENCE_MODULES_CLOSE_TAG,
+    REFERENCE_MODULES_OPEN_TAG,
+    definitionRowKeysFromSchema,
+    renderCatalog,
+    renderCatalogDefinitions,
+    renderOwnershipTable,
+} from '@/prompts/catalog';
 import { runGeneration, stripYamlFence, collectWorldInfoContext } from './generation';
 import { usePersonaStore } from './store';
 
@@ -284,6 +305,44 @@ function runMigrationChecks(): void {
 // 2) 全任务提示词引擎（存储形态＋默认模板＋任务键）
 // ---------------------------------------------------------------------------
 
+/**
+ * 提示词里三种键形态的目录基准集。键名与块名的真相源就是目录本身：从目录
+ * 推出的键集在这里是对的基准（要判的是「提示词有没有指向目录外的键」，
+ * 不是「提示词有没有抄对目录」）——不能拿来反推该出现哪些键，那才是同源恒绿。
+ */
+const CATALOG_LEAF_KEYS: ReadonlySet<string> = new Set(PERSONA_BLOCK_CATALOG.flatMap(block => [
+    ...block.leaves.flatMap(leaf => ('name' in leaf ? [`${block.name}·${leaf.name}`] : [])),
+    ...(block.optionalLeaf ? [`${block.name}·${block.optionalLeaf.name}`] : []),
+]));
+const CATALOG_BLOCK_NAMES: ReadonlySet<string> = new Set(PERSONA_BLOCK_CATALOG.map(block => block.name));
+const CATALOG_LEAF_NAMES: ReadonlySet<string> = new Set([
+    ...PERSONA_BLOCK_CATALOG.flatMap(block => block.leaves.flatMap(leaf => ('name' in leaf ? [leaf.name] : []))),
+    ...PERSONA_BLOCK_CATALOG.flatMap(block => (block.optionalLeaf ? [block.optionalLeaf.name] : [])),
+]);
+
+/**
+ * 档案段正文里的「块名·叶名」形态串（键指针与括注互指的公共提取口径）。两侧
+ * 贪到非汉字数字为止——键名全是中文，所以右界干净；左界会连带前导散文，那由
+ * resolveCatalogKey 回退到真实块名后缀解决。
+ */
+const DOT_KEY_PATTERN = /[\p{Script=Han}A-Za-z0-9]+·[\p{Script=Han}A-Za-z0-9]+/gu;
+
+/**
+ * 把正文里切出的「X·Y」候选还原成目录键：X 侧常带前导散文（「动手层面不会归
+ * 技能专长·技能盲区」），从长到短试它的后缀，第一个能命中真实叶子键的即成键。
+ * 全部后缀都落空则原样退回 null——那才是真的指向目录外（或者块名写错了），
+ * 由判据报错，不在这里悄悄放过。
+ */
+function resolveCatalogKey(token: string): string | null {
+    const at = token.indexOf('·');
+    const left = token.slice(0, at);
+    for (let i = 0; i < left.length; i++) {
+        const candidate = `${left.slice(i)}·${token.slice(at + 1)}`;
+        if (CATALOG_LEAF_KEYS.has(candidate)) return candidate;
+    }
+    return null;
+}
+
 function runPromptsChecks(): void {
     const prompts = usePromptsStore();
     const raw = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
@@ -347,9 +406,10 @@ function runPromptsChecks(): void {
     const genText = (genConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
     check('prompts：curator 默认模板占位符（{{charInfo}}/{{userRequirements}}）',
         curatorText.includes('{{charInfo}}') && curatorText.includes('{{userRequirements}}'));
-    check('prompts：persona_gen 默认模板占位符（{{charInfo}}/{{greetings}}/{{template}}/{{input}}）',
+    check('prompts：persona_gen 默认模板占位符（{{charInfo}}/{{greetings}}/{{template}}/{{catalog_definitions}}/{{input}}）',
         genText.includes('{{charInfo}}')
         && genText.includes('{{greetings}}') && genText.includes('{{template}}')
+        && genText.includes('{{catalog_definitions}}')
         && genText.includes('{{input}}'));
 
     // 回退骨架机判：判「每块的叶对不对」。
@@ -487,8 +547,8 @@ function runPromptsChecks(): void {
     const CATALOG_TEXT_SNAPSHOT = [
     '基本信息——年龄/性别/身份/别名与名号；4 叶；几乎必选｜年龄：本人当前年龄与生辰。不装：身体状况（健康体质）、外表显出的年龄（年龄错位·外表年龄）。；性别：本人认同的性别与生理性别。不装：气质与呈现方式（性别表达）。；身份：在世界里被认定的身份与社会角色（学生／刑警／庶出／退役军人）。不装：职业的日常内容（职业经济）、所属组织（组织归属）。；别名与名号：与在场任何人无关、普遍适用于本人的别名、绰号、尊称。不装：只对某个具体人成立的叫法（既有关系·专属称谓）。',
     '外貌——整体印象/标志性特征/形体细节；3 叶；几乎必选｜整体印象：第一眼给人的整体观感，一条带行为方向的标签。不装：单点细节（标志性特征、形体细节）。；标志性特征：最容易被认出来的一两个特征（疤、发色、眼镜、笔迹）。不装：完整身形。；形体细节：身形、姿态、着装习惯留下的身体轮廓印象。不装：与某个人专属的互动痕迹。',
-    '性格——核心矛盾/情绪反应/说话风格/待人差异/【类型学速记叶】；4 叶；几乎必选（可附类型学速记叶）｜核心矛盾：身上同时存在、互相拉扯的两股力量，各写一条行为向标签。不装：单纯的缺点或单纯的优点。；情绪反应：情绪被触发时的可见反应，按触发源分条写。不装：某一次的具体场面叙述。；说话风格：说话的整体调子与节奏（慢条斯理／爱插科打诨）。不装：口头禅与句式细节（言谈习惯）、听说读写能力（言谈习惯·听说读写水平）。；待人差异：对生人、熟人、亲近者三种对象分别呈现的不同面貌，各一条。不装：对所有人一致的稳定特质（那是核心矛盾）。；【类型学速记叶】：用户在素材或需求里明确给出的类型学测试结果（MBTI／九型／大五等）照写，附一句他对这套标签的私下看法。',
-    '状态机——每态含三键：状态名｜该态下的行为特征｜触发切换到该态的条件；≤4 态；行为或人格反差时｜状态机：该块不是一个值，而是至多 4 个命名状态，每态固定三键。不装：静态特质（那是性格）。≤4 态由策展段保证，档案段不得自行加第 5 态。',
+    '性格——核心矛盾/情绪反应/说话风格/待人差异/【类型学速记叶】；4 叶；几乎必选（可附类型学速记叶）｜核心矛盾：身上同时存在、互相拉扯的两股力量，各写一条行为向标签。不装：单纯的缺点或单纯的优点。；情绪反应：情绪被触发时的可见反应，按触发源分条写。不装：某一次的具体场面叙述。；说话风格：说话的整体调子与节奏（慢条斯理／爱插科打诨）。不装：口头禅与句式细节（言谈习惯）、听说读写能力（言谈习惯·听说读写水平）。；待人差异：对生人、熟人、亲近者三种对象分别呈现的不同面貌，各一条。不装：对所有人一致的稳定特质（那是核心矛盾）。；【类型学速记叶】：用户在素材或需求里明确给出的类型学测试结果（MBTI／九型／大五等）照写，附一句他对这套标签的私下看法；不装：素材没给过的结果一律不推断，也不写类型学常识科普与测试原理。',
+    '状态机——每态含三键：状态名｜该态下的行为特征｜触发切换到该态的条件；≤4 态；行为或人格反差时｜状态机：该块不是一个值，而是至多 4 个命名状态，每态固定三键。不装：静态特质（那是性格）。至多 4 态是本块上限，第 5 态不入档案。',
     '情绪光谱——情绪外露程度/生气外显信号/有效安抚手段/笑点哭点；4 叶；需要读空气或哄人戏时｜情绪外露程度：情绪在脸上的可见度（内敛到一眼看不出／什么都写在脸上）。不装：某个具体情绪的表现（性格·情绪反应）。；生气外显信号：动怒时第一个可被察觉的动作或语气变化。不装：动怒的原因（心理防御·危机优先级）。；有效安抚手段：什么方式真的能让这个人平静下来，按有效性排序。不装：安抚者的身份。；笑点哭点：什么样的话／事真的能让他笑、让他哭，各一到两个具体触发点。不装：笑哭时的一般性格（性格·核心矛盾）。',
     '自我认知——自我评价/他人眼中形象/认知盲区；3 叶；常选（破防与洞察戏的基座）｜自我评价：他怎么评价自己，写行为向标签而非四字评语。不装：别人怎么看他（他人眼中形象）。；他人眼中形象：常接触的人怎么看他。不装：他自己信不信这个评价。；认知盲区：心智上的短路：他理解不了、想不通的那类事。不装：动手层面不会（技能专长·技能盲区）、学科知识不懂（教育知识·知识盲区）。',
     '耻感与面子——羞耻触发点/面子敏感度/当众出丑反应；3 叶；调戏羞辱当众桥段指向时｜羞耻触发点：哪类行为或言语会让他觉得羞耻。不装：他自己不做的事（底线雷区·绝不做的事）、别人不许对他做的事（底线雷区·行为禁区）。；面子敏感度：多大程度上在意别人怎么看他。不装：当众出丑当下他会做什么（当众出丑反应）。；当众出丑反应：出丑当下他会做什么（当场走开／硬撑装没事／反咬一口）。不装：事后如何补救（成长弧·可松动面）。',
@@ -634,16 +694,17 @@ function runPromptsChecks(): void {
     // 提示词正文锁：策展段与档案段是两次独立请求。档案段正文引用「原则 7」这类
     // 只有策展段才有的规则编号＝引用一个本请求读不到的判据（要填的键集合由
     // <target_schema> 定死，它拿不到「哪些键本该空」），所以反向守门锁死这条。
-    // 期望值全部写字面量——从模板反推出来的期望与模板同源，改回去照样恒绿。
+    // 跨段标记的完整三类扫描（原则 N／要求 N／策展段）在组装段那条断言里做——
+    // 它得扫填充后的档案段正文：模板正文里没有叶边界段成文，只扫模板等于把
+    // 「策展段保证」这类引用漏在射程外。期望值全部写字面量——从模板反推出来的
+    // 期望与模板同源，改回去照样恒绿。
     const CURATOR_PRINCIPLE_7_KEYS = ['结构层键不自造、不改名', '不输出该键', '未入选的叶'];
     const GEN_FILL_KEYS = ['绝不留空', '每个叶子键都必须有非空值'];
     const missingCuratorKeys = CURATOR_PRINCIPLE_7_KEYS.filter(k => !curatorText.includes(k));
     const missingGenKeys = GEN_FILL_KEYS.filter(k => !genText.includes(k));
-    check('prompts：策展/档案两段正文锁死（原则 7 逐叶裁叶＋档案段原口径绝不留空·档案段不得引用策展段编号）',
-        missingCuratorKeys.length === 0
-        && missingGenKeys.length === 0
-        && !genText.includes('原则 7'),
-        `策展段缺=${missingCuratorKeys.join('/') || '无'} 档案段缺=${missingGenKeys.join('/') || '无'} 档案段引用策展段编号=${genText.includes('原则 7')}`);
+    check('prompts：策展/档案两段正文锁死（原则 7 逐叶裁叶＋档案段原口径绝不留空）',
+        missingCuratorKeys.length === 0 && missingGenKeys.length === 0,
+        `策展段缺=${missingCuratorKeys.join('/') || '无'} 档案段缺=${missingGenKeys.join('/') || '无'}`);
 
     // 行为心理类块名串：behaviorBlockList() 私有的，全仓唯一消费面就是生成指令里
     // 的这一处成文，所以判据落在成文上——期望是字面量九块串，函数里多一块、
@@ -656,6 +717,158 @@ function runPromptsChecks(): void {
     check('prompts：gen 值厚度与行为心理类传导',
         genText.includes('≤40 个汉字') && genText.includes('长度上限 40 个汉字') && genText.includes('行为心理类')
         && !genText.includes('≤20 个汉字') && !genText.includes('长度上限 30 个汉字'));
+
+    // 档案段的生成契约（事实唯一归属）。期望值全部写字面量——从模板反推出来的
+    // 期望与模板同源，把模板改回旧版照样恒绿；归属顺序还要按序在场：① 挪到
+    // ⑦ 之后仍是一张归属表，却是一张判错的表。
+    const countOf = (needle: string): number => genText.split(needle).length - 1;
+    const REQUIRE_7_ORDER_LINES = [
+        '① 通用底线、原则性的不做与不许 → 底线雷区',
+        '② 他怎么称呼对方 → 既有关系·专属称谓',
+        '③ 对自己的误解与想不通 → 自我认知·认知盲区',
+        '④ 做不好的事 → 动手层面不会归技能专长·技能盲区',
+        '⑤ 压在他身上的外部要求 → 目标动机·外部义务',
+        '⑥ 长期放不下、一直没解决的 → 恩怨执念',
+        '⑦ 当下的相处方式与心动反应 → 恋爱',
+    ];
+    const REQUIRE_7_KEYS = [
+        '7. 事实唯一归属——同一条事实只写进一个叶，别处不再复述',
+        '走通顺序的第一条即归属处，不再往下问',
+        '归属顺序解决的是「这条事实归谁」',
+        '不适用归属顺序，那三件事本来就都要写，只是不能共用同一句素材',
+    ];
+    let orderLineAt = -1;
+    const orderKeptInOrder = REQUIRE_7_ORDER_LINES.every(line => {
+        const at = genText.indexOf(line);
+        if (at <= orderLineAt) return false;
+        orderLineAt = at;
+        return true;
+    });
+    const missingRequire7 = REQUIRE_7_KEYS.filter(k => !genText.includes(k));
+    const missingOrderLines = REQUIRE_7_ORDER_LINES.filter(l => !genText.includes(l));
+    check('prompts：档案段要求 7 事实唯一归属在场（归属顺序 ①–⑦ 按序＋关键条款与末句三维度例外）',
+        orderKeptInOrder && missingRequire7.length === 0 && missingOrderLines.length === 0,
+        `按序=${orderKeptInOrder} 缺条款=${missingRequire7.join('/') || '无'} 缺归属顺序行=${missingOrderLines.join('/') || '无'}`);
+
+    // 要求 7 每个「→」后面的归属处必须落在目录里：①⑥⑦ 指的是块（块内怎么分
+    // 由同一条里的分句随后细分），②③④⑤ 指的是叶子键。裸块名与带前导散文的键
+    // （「动手层面不会归技能专长·技能盲区」）都在这里归位；带散文的键交给
+    // resolveCatalogKey 从后缀回退，不靠放宽正则蒙过去。
+    const require7Text = genText.slice(genText.indexOf('7. 事实唯一归属'), genText.indexOf(OWNERSHIP_TABLE_OPEN_TAG));
+    const arrowAtoms = [...require7Text.matchAll(/→\s*([^；，。\s（(]+)/g)].map(m => m[1]);
+    const unknownTargets = arrowAtoms.filter(a => (a.includes('·') ? resolveCatalogKey(a) === null : !CATALOG_BLOCK_NAMES.has(a)));
+    check('prompts：档案段要求 7 的归属处全落在目录（每个「→」目标是真实块名或「块名·叶名」）',
+        arrowAtoms.length > 0 && unknownTargets.length === 0,
+        `目标数=${arrowAtoms.length} 目录外=${unknownTargets.join('/') || '无'}`);
+
+    // 跨叶不复述半句挂在规则 4 的跨叶互补之后：它是那一条的续句（两半都管
+    // 「同一个事实不许写两遍」），挪到别的规则下面会被读成另一条规则的约束。
+    const noRestateAt = genText.indexOf('跨叶不复述：同一条事实已经在别的叶写明时');
+    const complementAt = genText.indexOf('跨叶互补：行为心理类块的叶合起来不许整体同向');
+    const noRestateTail = '呼应可以有，抄写没有——回应方向不同即不算复读，原句照搬才算';
+    check('prompts：档案段规则 4 追加「跨叶不复述」半句（原句保留·追加在跨叶互补之后）',
+        noRestateAt > 0 && complementAt > 0 && noRestateAt > complementAt && genText.includes(noRestateTail),
+        `跨叶互补位=${complementAt} 跨叶不复述位=${noRestateAt} 末句在场=${genText.includes(noRestateTail)}`);
+
+    // 三组反例同构：每组都要有「重复写法／为什么不合格／重写的版本」三栏，外加
+    // 各自的尾栏。抽象规则对模型的约束力弱于真实反例，这三组是这一层唯一真正
+    // 管用的约束力来源——少一栏即判红，不接受「规则条目已经写了」这种替代。
+    // 尾栏形态不统一：反例一/三收在「改法：」，反例二收在「为什么合格：」——
+    // 后者是唯一告诉模型「那组三个维度本就该同时在场」的一句，被删或被改写都
+    // 翻红，所以按（栏位, 处数）逐条判而不是只数前三栏。
+    const COUNTEREXAMPLE_COLUMNS: ReadonlyArray<readonly [string, number]> = [
+        ['  重复写法——', 3],
+        ['  为什么不合格：', 3],
+        ['  重写的版本——', 3],
+        ['  改法：', 2],
+        ['  为什么合格：', 1],
+    ];
+    const COUNTEREXAMPLE_TITLES = ['反例一 · ', '反例二 · ', '反例三 · '];
+    const brokenColumns = COUNTEREXAMPLE_COLUMNS.filter(([c, n]) => countOf(c) !== n);
+    const missingExTitles = COUNTEREXAMPLE_TITLES.filter(t => !genText.includes(t));
+    check('prompts：档案段三组反例五栏同构（重复写法/为什么不合格/重写的版本 各三处＋改法 2 处＋为什么合格 1 处＋三组标题在场）',
+        brokenColumns.length === 0 && missingExTitles.length === 0,
+        `栏数异常=${brokenColumns.map(([c, n]) => `${c.trim()}×${countOf(c)}≠${n}`).join(',') || '无'} 缺标题=${missingExTitles.join('/') || '无'}`);
+
+    // 归属优先级表：提示词里那份必须是 catalog 从 OWNERSHIP_PAIRS 渲染出来的。
+    // 整段逐字节相等锁住「表体没被手抄改字」；「段只能有一份」由 scripts/smoke.mjs
+    // 的标签符号计数断言兜住——在正文别处再摆一段完整表，那条锁的红是看不出来的
+    // （切片比较只看 OPEN 标签到 CLOSE 标签之间那一段）。
+    const ownershipSection = genText.split(OWNERSHIP_TABLE_OPEN_TAG)[1]?.split(OWNERSHIP_TABLE_CLOSE_TAG)[0] ?? '';
+    check('prompts：档案段归属优先级表由 catalog 渲染（标签在场＋整段逐字节＝renderOwnershipTable）',
+        ownershipSection === `\n${renderOwnershipTable()}\n`,
+        `段长=${ownershipSection.length} 渲染=${renderOwnershipTable().length} 对数=${OWNERSHIP_PAIRS.length}`);
+
+    // 叶边界段在档案段是宏位成文（本次请求按策展 schema 收敛出行），所以模板
+    // 里判的是「段体只有宏位、标签在外」：宏位把段标签一起吞掉的话，切片比
+    // 就再也看不到标签有没有被填；标签在外则宏位只负责段体，填充值空到只剩段
+    // 标签这一层结构仍然在场。段头逐字＝逐字档 C-1b 原文（成文名与作用域交代
+    // 都钉在这一行）。
+    const definitionSection = genText.split(CATALOG_DEFINITIONS_OPEN_TAG)[1]?.split(CATALOG_DEFINITIONS_CLOSE_TAG)[0] ?? '';
+    const CATALOG_DEFINITIONS_HEADER_LITERAL = '[下面是本次 schema 里每个叶子键的边界——只出「这个键不装什么」。schema 里没有的键一律不输出。同一类事实按「归属优先级表」只写进一端，别处不重复叙述。]';
+    const staticDefinitionLines = renderCatalogDefinitions().split('\n');
+    // 叶行＝带「：」的行；段头说明行里没有全角冒号，天然不落进来（判据靠形状
+    // 而非靠「看起来像说明」，段头改字时这条不会误判）。
+    const definitionRows = staticDefinitionLines.filter(l => l.indexOf('：') > 0);
+    const declaredLeafCount = PERSONA_BLOCK_CATALOG.reduce((n, block) => n + block.leaves.length, 0);
+    const optionalLeafCount = PERSONA_BLOCK_CATALOG.filter(block => block.optionalLeaf).length;
+    // 行首点名必须落在真实块上：模板叶出块名，其余叶出「块名·叶名」。
+    const rowNamesValid = definitionRows.every(row => {
+        const name = row.slice(0, row.indexOf('：'));
+        return PERSONA_BLOCK_CATALOG.some(block => name === block.name || name.startsWith(`${block.name}·`));
+    });
+    check('prompts：档案段叶边界段是宏位（模板段体逐字节＝{{catalog_definitions}}·段头首行＝逐字档 C-1b 原文·无位置指代）',
+        definitionSection === '\n{{catalog_definitions}}\n'
+        && staticDefinitionLines[0] === CATALOG_DEFINITIONS_HEADER_LITERAL
+        && !/[下上]方|以上/.test(staticDefinitionLines[0]),
+        `模板段=${JSON.stringify(definitionSection)} 段头逐字=${staticDefinitionLines[0] === CATALOG_DEFINITIONS_HEADER_LITERAL}`);
+
+    check('prompts：叶边界段静态成文一叶一行（行数＝声明叶 196＋条件叶 1＝197·每行一个「块名·叶名」冒号·行首落在真实块）',
+        definitionRows.length === 197
+        && definitionRows.length === declaredLeafCount + optionalLeafCount
+        && optionalLeafCount === 1
+        && rowNamesValid,
+        `行数=${definitionRows.length} 声明叶=${declaredLeafCount} 条件叶=${optionalLeafCount} 点名=${rowNamesValid}`);
+
+    // 跨叶互指（设计层 F3 的真缺口，不做归属表合并）：排除半句里的「（…）」指着
+    // 别的叶，叶改名后这些指针会静默失效——档案段照着排除一个根本不存在的键，
+    // 本叶真正的边界反而没人守。解析规则按形态逐类定死：
+    //   ① 含「·」的原子＝「块名·叶名」键指针，必须命中 CATALOG_LEAF_KEYS；
+    //   ② 带「」的原子＝散文连写里的指针（「家人属「待人差异」的亲近者一档」），
+    //      只判引号内那半句，命中叶名或块名即可；
+    //   ③ 其余裸原子必须命中叶名或块名；
+    //   ④ 那四个散文尾（那是性格／那是核心矛盾／那是往事／那是之后）不参与判据：
+    //      它们指概念不指键（逐字档 A 钉死其原文，改字即改逐字档）。
+    const PROSE_TAIL_POINTERS = ['那是性格', '那是核心矛盾', '那是往事', '那是之后'];
+    const parenProblems: string[] = [];
+    for (const row of definitionRows) {
+        const body = row.slice(row.indexOf('：') + 1);
+        for (const paren of body.matchAll(/（([^（）]*)）/g)) {
+            for (const atom of paren[1].split(/[、，]/).map(a => a.trim()).filter(Boolean)) {
+                if (PROSE_TAIL_POINTERS.includes(atom)) continue;
+                const quoted = atom.match(/「([^」]+)」/);
+                const pointer = quoted ? quoted[1] : atom;
+                if (pointer.includes('·')) {
+                    if (!CATALOG_LEAF_KEYS.has(pointer)) parenProblems.push(`${pointer}（键）`);
+                } else if (!CATALOG_LEAF_NAMES.has(pointer) && !CATALOG_BLOCK_NAMES.has(pointer)) {
+                    parenProblems.push(`${pointer}（裸名）`);
+                }
+            }
+        }
+    }
+    check('prompts：叶边界段排除半句的跨叶互指全落在目录真实键上（块·叶／裸叶名／裸块名·散文尾豁免）',
+        parenProblems.length === 0,
+        `目录外指针=${parenProblems.join(',') || '无'}`);
+
+    // 没有「不装：」半句的叶必须为 0：这类叶在定义段只能落兜底句，而兜底句换
+    // 不到任何边界信息（目录数据漏写「不装：」时该叶的边界即失守且无声）。
+    // 与上一条的 197 互为交叉校验——行数对得上、边界也真的写进去了。兜底句从
+    // catalog 导入：它是随提示词出厂的正文，不是普通期望值，抄第二份就等于
+    // 允许它两边各漂各的。
+    const fallbackLines = definitionRows.filter(l => l.endsWith(NO_EXCLUSION_TEXT));
+    check('prompts：叶边界定义段无「不装」半句的叶＝0（兜底句零处）',
+        fallbackLines.length === 0,
+        `兜底叶=${fallbackLines.map(l => l.split('：')[0]).join('/') || '无'}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -663,12 +876,16 @@ function runPromptsChecks(): void {
 //    choice/smoke.ts 的 90 条断言）
 // ---------------------------------------------------------------------------
 
+// 策展 schema 夹具：普通叶（年龄）、目录外的叶（姓名）、条件叶（【类型学速记叶】）
+// 与模板叶块（状态机）各带一处，状态机下再挂一个缩进更深的子键——收敛口径的
+// 四条边界一条都不靠猜：命中、出行（模板块出行块名）、不出行（目录外叶、深层
+// 子键）。
 const assemblySources: PersonaAssemblySources = {
     wiText: '> [FILE: 设定书]\n"""\n魔法世界\n"""',
     charInfo: '林霜，温柔',
     greetings: '「你好，旅行者」',
     userRequest: '写个侦探',
-    curatedSchema: '基本信息:\n姓名:\n年龄:',
+    curatedSchema: '基本信息:\n  姓名:\n  年龄:\n性格:\n  核心矛盾:\n  【类型学速记叶】:\n状态机:\n  工作态:\n    行为特征:',
     userName: '王玉',
     charName: '林霜',
 };
@@ -694,8 +911,51 @@ function runPersonaAssemblyChecks(): void {
     check('persona 组装：persona_gen 管线（占位符全部填充＋User 锚定行在场）',
         gen.messages.length === 2 && gen.messages[1].role === 'user'
         && genUser.includes('User——使用者本人的扮演身份') && genUser.includes('林霜，温柔')
-        && genUser.includes('「你好，旅行者」') && genUser.includes('基本信息:\n姓名:\n年龄:')
+        && genUser.includes('「你好，旅行者」') && genUser.includes('性格:\n  核心矛盾:\n  【类型学速记叶】:')
         && genUser.includes('写个侦探') && !genUser.includes('{{'));
+
+    // 反向守门（扩成三类跨段标记）：「原则 N」「要求 N」「策展段」都只存在于策展段，
+    // 档案段引用它们＝写一条本次请求里不存在的约束（要填的键集合由
+    // <target_schema> 定死，它既读不到策展段的职责交代，也读不到策展段的规则
+    // 编号）。扫填充后的整条 user 消息而不是模板正文：模板里叶边界段还是宏位，
+    // 只扫模板会把「由策展段保证」这类引用漏在射程外——那正是这条守门要拦的。
+    const CROSS_SECTION_MARKERS = [/原则\s*\d/u, /要求\s*\d/u, /策展段/u];
+    const crossSectionHits = CROSS_SECTION_MARKERS.filter(re => re.test(genUser)).map(re => re.source);
+    check('persona 组装：档案段正文零跨段引用（原则 N／要求 N／策展段三类标记全扫）',
+        crossSectionHits.length === 0,
+        `命中=${crossSectionHits.join(',') || '无'}`);
+
+    // 档案段正文里每一个「块名·叶名」形态串都必须落在目录真实键上：要求 7 的
+    // 归属顺序、三组反例的叶键、叶边界段的行首点名走的是同一个口径。手抄的键
+    // 名在目录改名后不会自己跟着改（归属表会改、这些不会），模型于是拿到一份自相
+    // 矛盾的档案段指令：边界段与归属表讲新键，指令讲旧键。全域扫而不是分区扫——
+    // 分区清单以外那些静默失效的正是漏网的部分。
+    const bodyKeyTokens = [...new Set(genUser.match(DOT_KEY_PATTERN) ?? [])];
+    const unknownKeyTokens = bodyKeyTokens.filter(t => resolveCatalogKey(t) === null);
+    check('persona 组装：档案段正文的「块名·叶名」全落在目录真实键上（含要求 7／三组反例／叶边界段行首）',
+        bodyKeyTokens.length > 0 && unknownKeyTokens.length === 0,
+        `键指针=${bodyKeyTokens.length} 目录外=${unknownKeyTokens.join('/') || '无'}`);
+
+    // 收敛形态：行集写成字面量，不从过滤函数反推（反推即同源恒绿，只证明两边
+    // 一致）。四条各有来路——普通叶命中、条件叶按方括号名命中、模板叶块出块名、
+    // 目录外的叶（姓名）与状态机的深层子键（行为特征）不出行：「schema 里没有的
+    // 键一律不输出」这条口径就靠后两条守。
+    const assembledDefinitionSection = genUser.split(CATALOG_DEFINITIONS_OPEN_TAG)[1]?.split(CATALOG_DEFINITIONS_CLOSE_TAG)[0] ?? '';
+    const assembledRowNames = assembledDefinitionSection.split('\n')
+        .filter(l => l.indexOf('：') > 0)
+        .map(l => l.slice(0, l.indexOf('：')));
+    const CONVERGED_ROW_EXPECT = ['基本信息·年龄', '性格·核心矛盾', '性格·类型学速记叶', '状态机'];
+    check('persona 组装：档案段叶边界段随本次 schema 收敛（行集＝字面量四行·目录外的叶与深层子键不出行）',
+        assembledRowNames.length === CONVERGED_ROW_EXPECT.length
+        && assembledRowNames.every((n, i) => n === CONVERGED_ROW_EXPECT[i]),
+        `行集=${assembledRowNames.join('/') || '无'}`);
+
+    // 逐字节锁跟着形态改：比的是填充后的成文（原来比的是模板里的宏位——那已经
+    // 不是成文了），期望取自同一个收敛函数，兜住「行集对但行身被换过」。
+    const convergedDefinitions = renderCatalogDefinitions(definitionRowKeysFromSchema(assemblySources.curatedSchema));
+    check('persona 组装：档案段叶边界段整段逐字节＝按本次 schema 收敛的成文（段头同源·无第二份手抄）',
+        assembledDefinitionSection === `\n${convergedDefinitions}\n`,
+        `段长=${assembledDefinitionSection.length} 收敛渲染=${convergedDefinitions.length}`);
 
     // 模块开关闭环：关指令模块→user 消失 trace 留痕；开回→恢复。
     // 提示词编辑面已删（toggleModule action 同删）——
@@ -1671,5 +1931,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/任务组装管线/模块开关闭环/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场、档案段不得引用策展段编号）＋行为心理类块名串＝字面量九块、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 18 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端两段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
 }

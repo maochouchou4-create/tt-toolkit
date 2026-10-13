@@ -560,7 +560,9 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 1＋prompts 5（全任务键齐备含 choice 18 模块红线/旧数组一次写迁移/旧默认快照
 // 版本化重建按 module id 在场且不多余/curator 与 persona_gen 两任务默认占位符）
 // ＋persona 组装
-// 3＋persona dump 观测口 2＋纯函数 12＋api 16（含 finish_reason=length 截断
+// 7（curator 管线/persona_gen 管线占位符全填＋档案段正文零跨段引用「原则 N·要求
+// N·策展段」三类标记全扫/档案段正文「块名·叶名」全落目录真实键/叶边界段随本次
+// schema 收敛且行集＝字面量四行/叶边界段整段逐字节＝收敛成文/模块开关闭环）＋persona dump 观测口 2＋纯函数 12＋api 16（含 finish_reason=length 截断
 // 显式报错回归＋破限预设解析 2：角色保真/marker·停用剔除、悬空名 null，
 // ＋stub 同构机判 2：同一实例双方法 this 内部互调、保留接收者按名取预设）＋
 // e2e 7（含取消通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段
@@ -576,19 +578,48 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // 相等（含块序与块内叶序）、叶总数＝196 绝对量、L0 旧叶名逐个不在目录里、
 // L0 归属优先级对 10 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
 // 之前·叶数段字面量、目录 definition 非空率 100%、countText 覆盖词面只配模板叶块、
-// L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死含档案段不得引用策展段
-// 编号、行为心理类块名串＝字面量九块、机制挂载开放段在场、新口径上限 16＋元层剥离、
+// L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死（原则 7 逐叶裁叶＋
+// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、新口径上限 16＋元层剥离、
 // gen 值厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）
+// ＋档案段生成契约 11（要求 7 事实唯一归属：归属顺序 ①–⑦ 按序＋关键条款与末句
+// 三维度例外；每个「→」归属处落在真实块名或「块名·叶名」；规则 4 跨叶不复述
+// 半句追加在跨叶互补之后；三组反例五栏同构——重复写法/为什么不合格/重写的版本
+// 各三处＋改法 2 处＋为什么合格 1 处；归属优先级表整段逐字节＝catalog 渲染；
+// 叶边界段在模板里是宏位（段体逐字节＝{{catalog_definitions}}）且段头首行逐字
+// ＝逐字档 C-1b、无位置指代；静态成文一叶一行且行数＝197（声明叶 196＋条件叶
+// 1）；排除半句里的跨叶互指全落在目录真实键上（块·叶／裸叶名／裸块名·散文尾
+// 豁免）；无「不装」半句的叶 0 兜底句零处——行数与兜底数互为交叉校验）
 // ＋流内上游
 // 错误帧 4＋
 // 端点 prefill 能力记忆 4＋人设写回渲染通道 4（建档 initPersona 恰一次＋
 // personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
 // 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
-const PERSONA_PASS_EXPECTED = 106;
+const PERSONA_PASS_EXPECTED = 119;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
     failures.push(`persona 机判异常：期望恰好 ${PERSONA_PASS_EXPECTED} 条 PASS，实际 ${personaPassLines.length} 条 / FAIL ${personaFailLines.length} 条${personaFailLines.length ? `（首条：${personaFailLines[0]}）` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// 目录派生段只有一份（标签符号计数）：叶边界段与归属优先级表各由 catalog 的
+// 渲染函数成文一次，而两条逐字节锁都只在 OPEN 标签到 CLOSE 标签的切片里比
+// ——模板正文别处再手抄一整段进去，两条锁一声不吭，出去的档案段里同一个边界
+// 列表出现两遍且能各自漂。判据＝符号在 defaults.ts 正文（去掉 import 块，
+// 数的是「用了几处」而不是「声明＋用了」）里的出现次数：两个标签各恰好一处，
+// CATALOG_DEFINITIONS_HEADER 零处（段头只活在 catalog 的渲染函数里，它在模板
+// 源码里出现即说明有人把段头抄进去了）。
+// ---------------------------------------------------------------------------
+const defaultsBody = readFileSync(new URL('../src/prompts/defaults.ts', import.meta.url), 'utf8')
+    .replace(/import\s*\{[^}]*\}\s*from\s*'\.\/catalog';/, '');
+const SEGMENT_SYMBOL_MAX = [
+    ['CATALOG_DEFINITIONS_OPEN_TAG', 1],
+    ['OWNERSHIP_TABLE_OPEN_TAG', 1],
+    ['CATALOG_DEFINITIONS_HEADER', 0],
+];
+const overusedSymbols = SEGMENT_SYMBOL_MAX.filter(([symbol, max]) => (defaultsBody.split(symbol).length - 1) > max);
+if (overusedSymbols.length > 0) {
+    failures.push(`目录派生段只有一份：defaults.ts 里 ${overusedSymbols.map(([s, m]) => `${s} 出现 ${defaultsBody.split(s).length - 1} 次（上限 ${m}）`).join('、')}——同段被手抄了第二份`);
 }
 
 // ---------------------------------------------------------------------------
@@ -718,4 +749,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/两段链端到端/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

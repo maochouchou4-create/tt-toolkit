@@ -18,6 +18,7 @@ import type {
     SummaryInjectionSource,
 } from './types';
 import { PERSONA_INJECTION_SOURCES, SUMMARY_INJECTION_SOURCES } from './types';
+import { definitionRowKeysFromSchema, renderCatalogDefinitions } from './catalog';
 
 /** 聊天历史条目（原始 user/assistant 楼层；<current_scene> 包裹在引擎内做）。 */
 export interface HistoryEntry {
@@ -149,6 +150,11 @@ function isSummarySource(source: InjectionSource): source is SummaryInjectionSou
  * persona 文本模块占位符替换。fork 提示词正文的占位符键名是组装契约
  * （{{charInfo}}/{{greetings}}/{{template}}/{{input}}/{{userRequirements}}），
  * 原样保留——键名即管线接口，改名＝破坏模板兼容。
+ *
+ * {{catalog_definitions}} 是本仓自有的第二个档案段占位符，与 fork 那批不同：
+ * 它的值本次请求现算（按 sources.curatedSchema 收敛出该守边界的叶），落不进
+ * 默认模板字面量——模板里放全量行时，每次请求都要为本次 schema 里不可能
+ * 出现的键白付一遍边界文字，且这份负担随目录增长只增不减。
  */
 function fillPersonaPlaceholders(content: string, sources: PersonaAssemblySources): string {
     return content
@@ -157,6 +163,7 @@ function fillPersonaPlaceholders(content: string, sources: PersonaAssemblySource
         .replaceAll('{{charInfo}}', sources.charInfo)
         .replaceAll('{{greetings}}', sources.greetings)
         .replaceAll('{{template}}', sources.curatedSchema)
+        .replaceAll('{{catalog_definitions}}', renderCatalogDefinitions(definitionRowKeysFromSchema(sources.curatedSchema)))
         .replaceAll('{{input}}', sources.userRequest)
         .replaceAll('{{userRequirements}}', sources.userRequest);
 }
