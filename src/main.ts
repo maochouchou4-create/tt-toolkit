@@ -15,7 +15,8 @@
  * runLegacyWipeSmoke()（机判须先于 runPersonaSmoke——后者会中途回收旧键
  * 并重置 persona 域）→ runPersonaSmoke() → initSummaryMinimal()（总结
  * 设置缺席键回填落盘）→ runSummarySmoke()（算术/状态机/槽/守卫/端到端）
- * → runApisSmoke()（apis 域机判收尾：批量设置行五断言，夹具自持清场）。
+ * → runApisSmoke()（apis 域机判收尾：批量设置行五断言，夹具自持清场）
+ * → boot 收尾标记（消费侧等待面）。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
  * node 下 @sillytavern 外置导入由冒烟脚本的 loader 存根承载，
@@ -41,6 +42,15 @@ import { version } from '@/version';
 /** 存储域 dump 挂入统一排障口（devtools 直取 __TT_TOOLKIT__.storage.dump()）。 */
 function installStoragePort(): void {
     toolkitGlobalPort().storage = Object.freeze({ dump: dumpStorage });
+}
+
+/**
+ * node 冒烟 boot 标识：dist 入口 URL 的 query 串——scripts/smoke.mjs 二次
+ * 启动以 `dist/index.js?boot2` 作 cache-buster 整图重求值，同一份模块代码
+ * 因此会跑两遍，无 query 即首启。
+ */
+function resolveBootId(): string {
+    return new URL(import.meta.url).search.slice(1) || 'boot1';
 }
 
 async function runNodeSmoke(): Promise<void> {
@@ -81,6 +91,12 @@ async function runNodeSmoke(): Promise<void> {
     await runSummarySmoke();
     // apis 域机判收尾（批量设置行五断言；夹具自持清场，置于末位不扰动前序域）
     runApisSmoke();
+    // boot 收尾标记（唯一出口信号）：「这一轮跑完了没有」只能由生产侧回答。
+    // 消费侧若拿 OK：/N 项 FAIL： 之类正文行去猜，任一模块提前出红就会把
+    // 等待判据误触发——断言抢在本串行链跑完前开跑，boot2 与未收尾的 boot1
+    // 并发共用同一份宿主存根，真 FAIL 落在计数区间之外，计出 FAIL 0 条的
+    // 假绿。标记置于最后一个模块 await 之后，消费侧只认它、等不到即硬失败。
+    console.info(`[node-smoke] BOOT DONE boot=${resolveBootId()}`);
 }
 
 async function main(): Promise<void> {

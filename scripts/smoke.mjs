@@ -9,7 +9,9 @@
  * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
  * 另含：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
  * 预种 7 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（cache-buster
- * URL 整图重求值 dist，验标记短路 no-op 不炸）。
+ * URL 整图重求值 dist，验标记短路 no-op 不炸）。两轮各自等生产侧的 boot
+ * 收尾标记 `[node-smoke] BOOT DONE boot=<id>` 才开始取断言（等不到即硬
+ * 失败），不靠正文行猜「跑完了没」。
  * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
  *
  * 边界：node 冒烟验证「产物可加载、导入链可解析、storage 逻辑正确、
@@ -364,28 +366,64 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// 等 node 冒烟分支收尾再断言：入口 `void main()` 是 fire-and-forget，动态
-// import 的解析先于后台异步链完成。自动生成断言含 setTimeout 轮询（宏任务），
-// 断言会抢在轮询前执行——截断输出。改为显式等收尾行（OK/FAIL）或超时；
-// apis 冒烟排在 choice/persona/summary 之后——收尾判据盯末段 [apis-smoke]
-// OK 行（choice/persona/summary 的 FAIL 行同样提前触发收口）。
+// 等 node 冒烟分支的 boot 收尾标记再断言：入口 `void main()` 是
+// fire-and-forget，动态 import 的解析先于后台异步链完成。
+//
+// 判据只能是生产侧的收尾标记，不能拿正文行猜「跑完了没」：任一模块提前
+// 出红（形如 `[xxx-smoke] N 项 FAIL：`）都会立刻触发这类猜测判据，断言
+// 于是抢在串行冒烟链跑完前开跑，boot2 的段起点也取在偏早的位置——
+// boot2 与未收尾的 boot1 并发跑、共用同一份宿主存根，真 FAIL 落在计数
+// 区间之外，计出「FAIL 0 条」的假绿。故只认 src/main.ts runNodeSmoke
+// 末位发出的 `[node-smoke] BOOT DONE boot=<id>`。
+//
+// 等不到标记＝硬失败：超时后继续断言，等于把「没跑完」当「跑完了」，
+// 正是本判据要根除的那条路径。
 // ---------------------------------------------------------------------------
-const SMOKE_DONE_RE = l => l.startsWith('[apis-smoke] OK：') || l.includes('项 FAIL：');
-const deadline = Date.now() + 15000;
-while (!outputLines.some(SMOKE_DONE_RE) && Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 50));
+const BOOT_DONE_PREFIX = '[node-smoke] BOOT DONE boot=';
+const BOOT_TIMEOUT_MS = 15000;
+
+/** 段内 boot 收尾标记的行号；未发出记 -1。 */
+function bootDoneIndex(from, bootId) {
+    const prefix = BOOT_DONE_PREFIX + bootId;
+    for (let i = from; i < outputLines.length; i++) {
+        if (outputLines[i].startsWith(prefix)) return i;
+    }
+    return -1;
 }
-if (!outputLines.some(SMOKE_DONE_RE)) {
-    console.error('[smoke] FAIL: node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）');
-    process.exit(1);
+
+/**
+ * 等本 boot 的收尾标记，返回标记行号＝本 boot 行段的闭端。
+ * 行序以 outputLines 的 push 序（console 调用序）为准，与 stdout/stderr
+ * 交错写同一文件后的文件行序无关。
+ */
+async function waitForBootDone(from, bootId) {
+    const deadline = Date.now() + BOOT_TIMEOUT_MS;
+    while (bootDoneIndex(from, bootId) < 0 && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 50));
+    }
+    const end = bootDoneIndex(from, bootId);
+    if (end < 0) {
+        console.error(`[smoke] FAIL: ${bootId} 未在 ${BOOT_TIMEOUT_MS / 1000}s 内发出收尾标记「${BOOT_DONE_PREFIX}${bootId}」（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）`);
+        process.exit(1);
+    }
+    return end;
 }
+
+const boot1End = await waitForBootDone(0, 'boot1');
+const boot1Lines = outputLines.slice(0, boot1End);
 
 // ---------------------------------------------------------------------------
 // 机判断言
 // ---------------------------------------------------------------------------
 const failures = [];
 
-const roundtripLines = outputLines.filter(l => l.startsWith('[roundtrip:'));
+// 模块机判出红的机器口径（boot1/boot2 两段共用一份定义）：各模块 check()
+// 逐条打 `[xxx-smoke] FAIL <断言名>`，收尾的 `[xxx-smoke] N 项 FAIL：` 只是
+// 同一批失败的复述行。取逐条行（FAIL 后带空格＝断言名）既不含复述行的重复
+// 计数，也保住首条明细。
+const MODULE_FAIL_LINE = tag => l => l.startsWith(`[${tag}-smoke] FAIL `);
+
+const roundtripLines = boot1Lines.filter(l => l.startsWith('[roundtrip:'));
 if (roundtripLines.length === 0) {
     failures.push('未见 storage roundtrip 输出');
 }
@@ -393,7 +431,7 @@ for (const line of roundtripLines) {
     if (!line.includes('PASS')) failures.push(`roundtrip 失败：${line}`);
 }
 
-if (!outputLines.some(l => l.includes('host API 探测清单'))) {
+if (!boot1Lines.some(l => l.includes('host API 探测清单'))) {
     failures.push('未见 host 探测清单输出');
 }
 
@@ -453,18 +491,18 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 缺席默认档 1＋normalize 钳制/剔除 3）
 // ＝ v1.14.1 删权重死代码：E-S 加权分布/safeWeight/无停用条目 −3，等权均摊断言 +1
 const CHOICE_PASS_EXPECTED = 137;
-const choicePassLines = outputLines.filter(l => l.startsWith('[choice-smoke] PASS'));
-const choiceFailLines = outputLines.filter(l => l.startsWith('[choice-smoke] FAIL'));
+const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
+const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
     failures.push(`choice 机判异常：期望恰好 ${CHOICE_PASS_EXPECTED} 条 PASS，实际 ${choicePassLines.length} 条 / FAIL ${choiceFailLines.length} 条${choiceFailLines.length ? `（首条：${choiceFailLines[0]}）` : ''}`);
 }
 
 // dump 断言：组装 dump 全文出现在输出中，且关键注入段逐项可见
-const dumpStart = outputLines.findIndex(l => l.startsWith('=== 组装 dump 全文 ==='));
+const dumpStart = boot1Lines.findIndex(l => l.startsWith('=== 组装 dump 全文 ==='));
 if (dumpStart < 0) {
     failures.push('未见「组装 dump 全文」输出');
 } else {
-    const dumpBody = outputLines.slice(dumpStart).join('\n');
+    const dumpBody = boot1Lines.slice(dumpStart).join('\n');
     // 池注入 dump 打印在组装 dump 之后（「池注入 dump」段），标记
     // 断言对「dumpStart 之后」的全量输出收口——两份 dump 都算数；
     // <pool_rules> 标记已删（池规则并入模板 <rules> 段）
@@ -483,14 +521,14 @@ if (!promptsPort || typeof promptsPort.dump !== 'function' || typeof promptsPort
 
 // 回退确定性触发：畸形样本解析走回退路径且产出 4 条（choice-smoke 内部
 // 已断言，这里锁输出行存在——机判判据独立可观测）
-if (!outputLines.some(l => l.includes('畸形样本走回退路径') && l.includes('PASS'))) {
+if (!boot1Lines.some(l => l.includes('畸形样本走回退路径') && l.includes('PASS'))) {
     failures.push('畸形样本回退路径断言未见 PASS 输出');
 }
 
 // debugForceRaw 生成管线接线：置开关跑完整 generateOptions、
 // 断言跳过 API 直喂畸形样本且走回退解析——该分支构造上不 fetch，node
 // 冒烟无网络依赖；开关与生成管线脱钩在此翻红
-if (!outputLines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('debugForceRaw'))) {
+if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('debugForceRaw'))) {
     failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
@@ -547,8 +585,8 @@ if (promptTaskKeys.length !== 5 || promptChoiceModules !== 18 || !personaKeyOk |
 // personas/描述符双写落地、两分支各刷一次列表、覆盖选中人设刷描述框＋
 // 镜像同步、覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框/镜像）。
 const PERSONA_PASS_EXPECTED = 106;
-const personaPassLines = outputLines.filter(l => l.startsWith('[persona-smoke] PASS'));
-const personaFailLines = outputLines.filter(l => l.startsWith('[persona-smoke] FAIL'));
+const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
+const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
     failures.push(`persona 机判异常：期望恰好 ${PERSONA_PASS_EXPECTED} 条 PASS，实际 ${personaPassLines.length} 条 / FAIL ${personaFailLines.length} 条${personaFailLines.length ? `（首条：${personaFailLines[0]}）` : ''}`);
 }
@@ -571,8 +609,8 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 错误正文楼层到达时触发被拦下/批次内错误正文楼不进摘要源文本/达标
 // 场景启动后台生成/完成后互斥归位＋折叠落账＋running 镜像清位）＝ 50。
 const SUMMARY_PASS_EXPECTED = 50;
-const summaryPassLines = outputLines.filter(l => l.startsWith('[summary-smoke] PASS'));
-const summaryFailLines = outputLines.filter(l => l.startsWith('[summary-smoke] FAIL'));
+const summaryPassLines = boot1Lines.filter(l => l.startsWith('[summary-smoke] PASS'));
+const summaryFailLines = boot1Lines.filter(MODULE_FAIL_LINE('summary'));
 if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {
     failures.push(`summary 机判异常：期望恰好 ${SUMMARY_PASS_EXPECTED} 条 PASS，实际 ${summaryPassLines.length} 条 / FAIL ${summaryFailLines.length} 条${summaryFailLines.length ? `（首条：${summaryFailLines[0]}）` : ''}`);
 }
@@ -587,13 +625,13 @@ if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length
 // 激活态存活——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删 5
 // 键＋置标＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
 const WIPE_PASS_EXPECTED_RUN1 = 10;
-const wipePassLines = outputLines.filter(l => l.startsWith('[wipe-smoke] PASS'));
-const wipeFailLines = outputLines.filter(l => l.startsWith('[wipe-smoke] FAIL'));
+const wipePassLines = boot1Lines.filter(l => l.startsWith('[wipe-smoke] PASS'));
+const wipeFailLines = boot1Lines.filter(MODULE_FAIL_LINE('wipe'));
 if (wipePassLines.length !== WIPE_PASS_EXPECTED_RUN1 || wipeFailLines.length > 0) {
     failures.push(`wipe 机判异常：期望恰好 ${WIPE_PASS_EXPECTED_RUN1} 条 PASS，实际 ${wipePassLines.length} 条 / FAIL ${wipeFailLines.length} 条${wipeFailLines.length ? `（首条：${wipeFailLines[0]}）` : ''}`);
 }
 // boot 位清理确实执行（非跳过）：首个 [legacy-wipe] 行＝删除 5/5 键
-const firstWipeLog = outputLines.find(l => l.startsWith('[legacy-wipe]'));
+const firstWipeLog = boot1Lines.find(l => l.startsWith('[legacy-wipe]'));
 if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
     failures.push(`boot 位一次性清理未执行或删键数异常（首行：${firstWipeLog ?? '无'}）`);
 }
@@ -607,8 +645,8 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 // ＋ v1.18.0 端点 prefill 能力记忆新增 4（noPrefill 归一兼容/路由带出
 // providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）。
 const APIS_PASS_EXPECTED = 9;
-const apisPassLines = outputLines.filter(l => l.startsWith('[apis-smoke] PASS'));
-const apisFailLines = outputLines.filter(l => l.startsWith('[apis-smoke] FAIL'));
+const apisPassLines = boot1Lines.filter(l => l.startsWith('[apis-smoke] PASS'));
+const apisFailLines = boot1Lines.filter(MODULE_FAIL_LINE('apis'));
 if (apisPassLines.length !== APIS_PASS_EXPECTED || apisFailLines.length > 0) {
     failures.push(`apis 机判异常：期望恰好 ${APIS_PASS_EXPECTED} 条 PASS，实际 ${apisPassLines.length} 条 / FAIL ${apisFailLines.length} 条${apisFailLines.length ? `（首条：${apisFailLines[0]}）` : ''}`);
 }
@@ -629,6 +667,10 @@ if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateR
 // chunk 无代码分割）——同浏览器二次启动语义：extension_settings 存根与
 // localStorage 跨 import 持久。标记已置位＋遗留键重种 → boot 清理须短路
 // （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 6 条 PASS。
+// 行段两端都是 boot 收尾标记：起点在 boot1 断言全部跑完之后——boot2 与
+// 未收尾的 boot1 并发跑会共用同一份宿主存根（宿主 context 是可换装单例，
+// boot1 在途的 persona 段会覆写 boot2 的 chat 楼层），终点取 boot2 自己的
+// 标记，免得 boot1 的尾巴混进本段计数。
 // ---------------------------------------------------------------------------
 const segmentStart = outputLines.length;
 eventHandlers.clear(); // run1 监听器不跨图串扰（emit 派发表进程级共享）
@@ -639,16 +681,12 @@ try {
     console.error('[smoke] boot2 dist/index.js 加载失败', e);
     process.exit(1);
 }
-const deadline2 = Date.now() + 15000;
-while (!outputLines.slice(segmentStart).some(SMOKE_DONE_RE) && Date.now() < deadline2) {
-    await new Promise(r => setTimeout(r, 50));
-}
-const seg2 = outputLines.slice(segmentStart);
-if (!seg2.some(SMOKE_DONE_RE)) {
-    failures.push('boot2：node 冒烟分支未在 15s 内收尾（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）');
-}
-if (seg2.some(l => l.includes('项 FAIL：'))) {
-    failures.push(`boot2：出现 FAIL 收尾行（首条：${seg2.find(l => l.includes('项 FAIL：'))}）`);
+const boot2End = await waitForBootDone(segmentStart, 'boot2');
+const seg2 = outputLines.slice(segmentStart, boot2End);
+const seg2FailTags = ['choice', 'persona', 'summary', 'wipe', 'apis']
+    .filter(tag => seg2.filter(MODULE_FAIL_LINE(tag)).length > 0);
+if (seg2FailTags.length > 0) {
+    failures.push(`boot2：模块机判出现 FAIL（${seg2FailTags.map(tag => `${tag} ${seg2.filter(MODULE_FAIL_LINE(tag)).length} 条`).join('、')}）`);
 }
 const wipe2PassCount = seg2.filter(l => l.startsWith('[wipe-smoke] PASS')).length;
 if (wipe2PassCount !== 6) {
