@@ -87,8 +87,9 @@
 
 .tt-choice-option {
     display: flex;
-    align-items: baseline;
-    gap: 6px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
     width: 100%;
     text-align: left;
     background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
@@ -106,6 +107,13 @@
     filter: brightness(1.1);
 }
 
+/* 标题与正文同一行（aim 独占下一行，故正文行自成一个行盒） */
+.tt-choice-option-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
 .tt-choice-option-title {
     font-weight: bold;
     white-space: nowrap;
@@ -120,6 +128,15 @@
        anywhere 连续无断点字符串（长英文词/破折号串）也强制断行 */
     flex: 1;
     min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* aim：写给玩家看的元信息，压到弱化小字——抢正文视线即失去辅助位的作用 */
+.tt-choice-option-aim {
+    font-size: 0.82em;
+    opacity: 0.6;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;

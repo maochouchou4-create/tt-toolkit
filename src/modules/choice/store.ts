@@ -8,7 +8,7 @@
  */
 import { defineStore } from 'pinia';
 import { getChatMessages, type ChatMessage } from '@/host';
-import type { ParseReport } from './parse';
+import type { ParseReport, ParsedOption } from './parse';
 import { clearFloorOptions, readFloorOptions, writeFloorOptions, type StoredFloorOptions } from './persist';
 
 export type GeneratePhase = 'idle' | 'running' | 'error';
@@ -23,8 +23,8 @@ let anchoredFloorMessage: ChatMessage | null = null;
 export const useChoiceStore = defineStore('tt-choice', {
     state: () => ({
         phase: 'idle' as GeneratePhase,
-        /** 当前展示的选项（空＝无结果） */
-        options: [] as Array<{ title: string; content: string }>,
+        /** 当前展示的选项（空＝无结果；形态＝解析结果原样，展示层不裁字段） */
+        options: [] as ParsedOption[],
         /** 生成失败信息（phase=error 时展示） */
         error: '',
         /** 最近一次解析路径（json / bracket_fallback / empty——排障展示） */

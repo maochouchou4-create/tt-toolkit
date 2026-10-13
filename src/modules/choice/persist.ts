@@ -8,7 +8,7 @@
  * generator 的生成周期起点）。
  *
  * 写入约束：extra 会经宿主 structuredClone 进 swipe 槽——写进去的必须
- * 是纯数据（{title,content} 数组＋字符串），不得含函数/响应式代理。
+ * 是纯数据（{title,content,aim?} 数组＋字符串），不得含函数/响应式代理。
  */
 import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
 import type { ParsedOption, ParseReport } from './parse';
@@ -47,12 +47,26 @@ function choiceNamespaceOf(message: Record<string, unknown>): Record<string, unk
     return isRecord(ns) ? ns : null;
 }
 
-/** 存档形状守门：options 为 {title,content} 字符串数组、parsePath 属合法枚举、dropped 缺席合法／在场须为数字。 */
+/**
+ * 存档条目重建（读写两路共用）：逐字段挑出来再装回，与消息单例解耦——
+ * 调用方改返回值不污染 extra，且不留引用型字段。
+ * aim 缺席即不写键：undefined 值进存档会被形状守门当成坏数据。
+ */
+function toStoredOption(option: ParsedOption): ParsedOption {
+    const stored: ParsedOption = { title: option.title, content: option.content };
+    if (option.aim) stored.aim = option.aim;
+    return stored;
+}
+
+/** 存档形状守门：options 为 {title,content} 字符串数组（aim 缺席合法、在场须为字符串）、parsePath 属合法枚举、dropped 缺席合法／在场须为数字。 */
 function isStoredFloorOptions(value: unknown): value is StoredFloorOptions {
     if (!isRecord(value) || !Array.isArray(value.options) || typeof value.parsePath !== 'string') return false;
     if (!PARSE_PATHS.includes(value.parsePath as ParseReport['path'])) return false;
     if (value.dropped !== undefined && typeof value.dropped !== 'number') return false;
-    return value.options.every(o => isRecord(o) && typeof o.title === 'string' && typeof o.content === 'string');
+    return value.options.every(o => isRecord(o)
+        && typeof o.title === 'string'
+        && typeof o.content === 'string'
+        && (o.aim === undefined || typeof o.aim === 'string'));
 }
 
 /**
@@ -66,7 +80,7 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
     if (!isStoredFloorOptions(stored)) return null;
     // 逐条重建：与消息单例解耦，调用方改返回值不污染 extra
     return {
-        options: stored.options.map(o => ({ title: o.title, content: o.content })),
+        options: stored.options.map(toStoredOption),
         parsePath: stored.parsePath,
         dropped: stored.dropped,
     };
@@ -94,7 +108,7 @@ export function writeFloorOptions(args: { index: number; payload: StoredFloorOpt
     extra[EXTRA_NAMESPACE_KEY] = namespace;
     // 纯数据重建（见文件头 structuredClone 约束）；dropped 仅在有值时
     // 写入——undefined 属性在守门 typeof 判定下会误判坏档
-    const stored: StoredFloorOptions = { options: payload.options.map(o => ({ title: o.title, content: o.content })), parsePath: payload.parsePath };
+    const stored: StoredFloorOptions = { options: payload.options.map(toStoredOption), parsePath: payload.parsePath };
     if (payload.dropped !== undefined) stored.dropped = payload.dropped;
     namespace[EXTRA_CHOICE_KEY] = stored;
     saveCurrentChat();

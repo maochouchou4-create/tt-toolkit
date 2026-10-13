@@ -14,7 +14,7 @@ import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
-import { generateOptions, zeroOptionsMessage } from './generator';
+import { applyOption, generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { drawAmount, resolvePool } from './pool/resolver';
@@ -260,11 +260,25 @@ function runInjectionChecks(): void {
     console.info(renderDump(result));
 }
 
+/** 发送面捕获桩（scripts/smoke.mjs 注入；装卸与 DOM 形态理由见该文件）。 */
+interface SendSurfaceStub {
+    /** 每次输入框写入的完整文本（三个点击行为都经这里落地） */
+    writes: string[];
+    /** 每次宿主发送调用瞬间的输入框文本快照 */
+    sends: string[];
+    /** 预置输入框旧值（追加行为的拼接前缀） */
+    seed(text: string): void;
+    /** 断言窗口内装上最小 DOM（node 冒烟全程无 DOM） */
+    install(): void;
+    uninstall(): void;
+}
+
 /** 冒烟 stub 访问（scripts/smoke.mjs 注入；类型只声明本文件用到的面）。 */
 interface SmokeStubs {
     eventSource: { emit(type: string, ...args: unknown[]): unknown };
     getContext(): { chat: unknown[] };
     saveChatCalls: number;
+    sendSurface: SendSurfaceStub;
 }
 
 function smokeStubs(): SmokeStubs | null {
@@ -534,12 +548,82 @@ async function runFloorPersistChecks(): Promise<void> {
         legacyBack !== null && legacyBack.parsePath === 'json' && legacyBack.options[0]?.title === '旧',
         `read=${JSON.stringify(legacyBack)}`,
     );
+    check(
+        '楼层落盘：旧档无 aim 读回后该键仍缺席（读侧容忍，不补默认值）',
+        legacyBack !== null && legacyBack.options.length === 1 && !('aim' in legacyBack.options[0]),
+        `keys=${Object.keys(legacyBack?.options[0] ?? {}).join('|')}`,
+    );
+
+    // aim 往返：存档是考古线索——回看楼层要能看到当时这条想撬动什么
+    context.chat = [msg('（开场白）'), msg('aim 楼')];
+    const aimOption = { title: '甲', content: '做甲事', aim: '撬一格关系' };
+    const aimWritten = writeFloorOptions({ index: 1, payload: { options: [aimOption], parsePath: 'json' }, expectMessage: null });
+    const aimBack = readFloorOptions(1);
+    check(
+        '楼层落盘：aim 随选项往返写入读回（写侧不静默丢字段）',
+        aimWritten === true && aimBack?.options[0]?.aim === '撬一格关系',
+        `written=${String(aimWritten)} read=${JSON.stringify(aimBack?.options[0] ?? null)}`,
+    );
+    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: '甲', content: '做甲事', aim: { 想: 1 } }], parsePath: 'json' } } })];
+    check('楼层落盘：坏档（aim 在场非字符串）回退 null', readFloorOptions(0) === null);
+}
+
+/**
+ * 点击应用面机判（契约红线：aim 不随发言外发）——三个点击行为
+ * fill/append/send 各自落到宿主发送通道的文本都必须只有正文。aim 属显示
+ * 与存档面；它一旦混进发送内容，主模型会拿到一句写给玩家看的元信息。
+ * 断言窗口内由 scripts/smoke.mjs 的发送面桩提供 #send_textarea（node
+ * 冒烟全程无 DOM，装卸理由见该桩）。
+ */
+async function runApplyOptionChecks(): Promise<void> {
+    const stubs = smokeStubs();
+    if (!stubs) {
+        check('applyOption 发送内容不含 aim', false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
+        return;
+    }
+    const option = { title: '摊牌', content: '林霜把录音笔推到桌子中央：「那就别再绕了。」', aim: '逼对方当场表态' };
+    const draft = '林霜已经笑了一下：';
+    const last = (texts: string[]): string => texts[texts.length - 1] ?? '';
+    const surface = stubs.sendSurface;
+    const savedBehavior = choiceStorage.readDomain().gen.clickBehavior;
+    let filled = '';
+    let appended = '';
+    let sent = '';
+    surface.install();
+    try {
+        choiceStorage.updateGenParams({ clickBehavior: 'fill' });
+        applyOption(option.content);
+        filled = last(surface.writes);
+
+        choiceStorage.updateGenParams({ clickBehavior: 'append' });
+        surface.seed(draft);
+        applyOption(option.content);
+        appended = last(surface.writes);
+
+        choiceStorage.updateGenParams({ clickBehavior: 'send' });
+        applyOption(option.content);
+        // 发送分支填完输入框才 fire-and-forget 发出去，等一个回合收口
+        await new Promise(resolve => setTimeout(resolve, 0));
+        sent = last(surface.sends);
+
+        check(
+            'applyOption 发送内容不含 aim',
+            filled === option.content
+                && appended === draft + option.content
+                && sent === option.content
+                && ![filled, appended, sent].some(text => text.includes(option.aim)),
+            `fill=${filled} append=${appended} send=${sent}`,
+        );
+    } finally {
+        choiceStorage.updateGenParams({ clickBehavior: savedBehavior });
+        surface.uninstall();
+    }
 }
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
 function runAssemblyChecks(): string {
     const config = createDefaultPromptConfig();
-    check('默认模板版本＝18（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 18, `v=${String(config.defaultsVersion)}`);
+    check('默认模板版本＝19（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 19, `v=${String(config.defaultsVersion)}`);
     const sources = syntheticSources();
     const result = assembleMessages(config.modules, sources);
 
@@ -615,6 +699,18 @@ function runAssemblyChecks(): string {
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
     check('few-shot 输出示例为 4 条（与恰好 N 条同基数；写法对照段另计）', fewShotCount === 4, `条数=${fewShotCount}`);
+    // aim 的模板两面：示例四条各带（示例即格式范本，漏一条即教会模型漏
+    // 一条），契约声明键名而规则段不提它（元信息不占每轮规则预算）
+    const fewShotAimCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"aim":/g) ?? []).length : 0;
+    check('few-shot 输出示例四条各带 aim（示例即格式范本）', fewShotAimCount === fewShotCount && fewShotCount > 0, `aim=${fewShotAimCount} 条=${fewShotCount}`);
+    const outputFormat = config.modules.find(m => m.id === 'output_format');
+    const coreRules = config.modules.find(m => m.id === 'core_rules');
+    check(
+        '输出契约声明 aim 键且写作规则段不提 aim（元信息只进显示与存档，不占规则段预算）',
+        outputFormat?.kind === 'text' && outputFormat.content.includes('"aim":')
+            && coreRules?.kind === 'text' && !coreRules.content.includes('aim'),
+        `format=${outputFormat?.kind === 'text' ? String(outputFormat.content.includes('"aim":')) : '（模块缺席）'} rules=${coreRules?.kind === 'text' ? String(!coreRules.content.includes('aim')) : '（模块缺席）'}`,
+    );
     check('生成指令口径＝下一步的行动选项/此刻并排的走法（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('并排的走法') && !allText.includes('为当前剧情提供'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
@@ -682,6 +778,30 @@ function runParseChecks(): void {
     const wrapped = '{"options":[{"title":"A","content":"甲"}]}';
     const wrappedReport = parseOptions(wrapped, 4);
     check('对象契约 {"options":[...]} 走主路径', wrappedReport.path === 'json' && wrappedReport.options.length === 1, `path=${wrappedReport.path}`);
+
+    // aim（只进显示与存档的元信息）：主契约带 aim 时提取；缺 aim 的两条
+    // 来源——旧契约输出与括号回退路径——一律不带该键
+    const aimJson = '{"options":[{"title":"A","content":"甲","aim":"撬出对方底牌"},{"title":"B","content":"乙"}]}';
+    const aimReport = parseOptions(aimJson, 4);
+    check(
+        '解析：主契约提取 aim（显示侧「这条想撬动什么」的来源）',
+        aimReport.path === 'json' && aimReport.options[0]?.aim === '撬出对方底牌',
+        `aim=${String(aimReport.options[0]?.aim)}`,
+    );
+    const aimAbsent = aimReport.options[1];
+    check(
+        '解析：元素缺 aim 不带该键（旧契约输出与括号回退路径同此形态，读侧一律容忍）',
+        aimAbsent !== undefined && !('aim' in aimAbsent) && !('aim' in (report.options[0] ?? {})),
+        `json=${Object.keys(aimAbsent ?? {}).join('|')} 回退=${Object.keys(report.options[0] ?? {}).join('|')}`,
+    );
+    // 归一：非字符串（模型爱写 null）与纯空白都按缺席处理，与缺键同义
+    const oddAimJson = '{"options":[{"title":"A","content":"甲","aim":null},{"title":"B","content":"乙","aim":"   "}]}';
+    const oddAimReport = parseOptions(oddAimJson, 4);
+    check(
+        '解析：aim 非字符串（null）与纯空白归一为缺席（显示侧「在场才渲染」的判据）',
+        oddAimReport.options.length === 2 && oddAimReport.options.every(o => !('aim' in o)),
+        `keys=${oddAimReport.options.map(o => Object.keys(o).join('|')).join(' / ')}`,
+    );
 
     // 空输入
     const empty = parseOptions('', 4);
@@ -1166,6 +1286,7 @@ export async function runChoiceSmoke(): Promise<void> {
     runInjectionChecks();
     await runAutoGenerateChecks();
     await runFloorPersistChecks();
+    await runApplyOptionChecks();
     runGenParamMigrationChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);

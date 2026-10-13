@@ -21,6 +21,12 @@
 export interface ParsedOption {
     title: string;
     content: string;
+    /**
+     * 一句话「这条想撬动什么」：只进显示与楼层存档，不随发言外发给主
+     * 模型。刻意可选——模型漏给、中转站把 aim 截断、括号回退路径产出、
+     * 存量旧档读取都无此键，缺席是常态而非错误（读侧与显示侧一律容忍）。
+     */
+    aim?: string;
 }
 
 /** 解析路径溯源（dump/排障：走了 JSON 主路径、元素级恢复还是括号回退）。 */
@@ -88,14 +94,18 @@ function fixTrailingCommas(text: string): string {
     return text.replace(/,(?=\s*[}\]])/g, '');
 }
 
-/** 单个元素 → 选项（{title,content}／{title,text}／纯字符串容错；空项为 null）。 */
+/** 单个元素 → 选项（{title,content,aim}／{title,text}／纯字符串容错；空项为 null）。 */
 function toOption(item: unknown): ParsedOption | null {
     if (typeof item === 'string') return { title: '', content: item.trim() };
     if (typeof item !== 'object' || item === null) return null;
     const o = item as Record<string, unknown>;
     const title = typeof o.title === 'string' ? o.title.trim() : '';
     const content = typeof o.content === 'string' ? o.content.trim() : typeof o.text === 'string' ? o.text.trim() : '';
-    return title || content ? { title, content } : null;
+    if (!title && !content) return null;
+    // aim 的「非字符串」（含 JSON null）与空串归一为缺席：显示侧按
+    // 「在场才渲染」判，同义形态不各留一条路径
+    const aim = typeof o.aim === 'string' ? o.aim.trim() : '';
+    return aim ? { title, content, aim } : { title, content };
 }
 
 /**

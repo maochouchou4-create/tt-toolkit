@@ -27,8 +27,11 @@
     <ul v-else class="tt-choice-list">
       <li v-for="(opt, i) in store.options" :key="`${i}-${opt.title}-${opt.content.slice(0, 12)}`">
         <button type="button" class="tt-choice-option" :title="behaviorHint" @click="onOptionClick(opt)">
-          <span v-if="opt.title" class="tt-choice-option-title">{{ opt.title }}</span>
-          <span class="tt-choice-option-content">{{ opt.content }}</span>
+          <span class="tt-choice-option-head">
+            <span v-if="opt.title" class="tt-choice-option-title">{{ opt.title }}</span>
+            <span class="tt-choice-option-content">{{ opt.content }}</span>
+          </span>
+          <span v-if="opt.aim" class="tt-choice-option-aim">{{ opt.aim }}</span>
         </button>
       </li>
     </ul>
@@ -38,6 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { applyOption, cancelGeneration, generateOptions, isGenerating } from './generator';
+import type { ParsedOption } from './parse';
 import { useChoiceSettingsStore } from './settings';
 import { useChoiceStore } from './store';
 
@@ -82,7 +86,9 @@ function onGenerateClick(): void {
     void generateOptions();
 }
 
-function onOptionClick(opt: { title: string; content: string }): void {
+function onOptionClick(opt: ParsedOption): void {
+    // aim 属显示与存档面，不参与点击应用：主聊天里出现「想撬动什么」是
+    // 对外契约破坏——主模型无从解释这句写给玩家看的元信息
     applyOption(opt.content);
 }
 </script>

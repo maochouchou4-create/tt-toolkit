@@ -190,6 +190,22 @@ globalThis.fetch = async (_url, init) => {
 
 const noop = () => {};
 
+// ---------------------------------------------------------------------------
+// 发送面捕获桩：applyOption 的三个点击行为都落到宿主发送通道（填输入框 /
+// 读旧值再填 / 填后发），「发给主模型的是什么」只有这条面可观测。node
+// 冒烟本无 DOM，而 dist 入口按 document 缺席分流（src/main.ts）——桩由
+// 断言窗口显式装卸：装窗期外全局仍无 document，入口分流与其余 boot 断言
+// 均不受影响。写入记录挂在 input 事件上（宿主适配层填值后派发该事件），
+// 读到的是真实写入序列而非旁路埋点。
+// ---------------------------------------------------------------------------
+const sendSurfaceWrites = [];
+const sendSurfaceSends = [];
+const sendTextarea = new EventTarget();
+sendTextarea.value = '';
+sendTextarea.addEventListener('input', () => {
+    sendSurfaceWrites.push(sendTextarea.value);
+});
+
 globalThis.__TT_SMOKE_STUBS__ = {
     // settings 可变单例（roundtrip 载体；choice 导入断言往 .choice 里放 fixture）。
     // 预置存量 nav 域含退役字段 autoTop——P1 回归断言 boot prune 的判据材料
@@ -201,8 +217,27 @@ globalThis.__TT_SMOKE_STUBS__ = {
     this_chid: '0',
     // 全局 settings 防抖落盘（node 下 noop；roundtrip 只测内存写读链路）
     saveSettingsDebounced: noop,
-    // 发送通道（node 冒烟不真发）
-    sendTextareaMessage: async () => {},
+    // 发送通道（node 冒烟不真发；记下每次发送瞬间的输入框文本供断言）
+    sendTextareaMessage: async () => {
+        globalThis.__TT_SMOKE_STUBS__.sendSurface.sends.push(sendTextarea.value);
+    },
+    sendSurface: {
+        /** 每次输入框写入的完整文本（三个点击行为都经这里落地） */
+        writes: sendSurfaceWrites,
+        /** 每次宿主发送调用瞬间的输入框文本快照 */
+        sends: sendSurfaceSends,
+        /** 预置输入框旧值（append 行为的拼接前缀） */
+        seed: text => {
+            sendTextarea.value = text;
+        },
+        /** 装窗：只认 #send_textarea，别处返回 null（与真实选择器缺席同形态） */
+        install: () => {
+            globalThis.document = { querySelector: selector => (selector === '#send_textarea' ? sendTextarea : null) };
+        },
+        uninstall: () => {
+            delete globalThis.document;
+        },
+    },
     // 宏替换（恒等——冒烟下 {{user}} 等走引擎兜底值）
     substituteParams: text => text,
     // i18n 翻译（模拟 zh-cn 环境：让宿主错误标签的同源计算路径可测）
@@ -484,7 +519,11 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ v1.14.1 删权重死代码：E-S 加权分布/safeWeight/无停用条目 −3，等权均摊断言 +1
 // ＝ 模板重制＋退役桥清理：默认模板版本断言 1／见分晓拍与写法对照段 2／慢热闸 1／
 // 分段标签白名单 1／生成参数按值迁移 2 ＝ +7，退役记忆桥的合成源与缺席 trace −2。
-const CHOICE_PASS_EXPECTED = 142;
+// ＝ aim 字段：模板两面 2（示例四条各带 aim、输出契约声明键而规则段不提）
+// ＋解析 3（主契约提取／缺键不带且回退路径同形／null 与空白归一为缺席）
+// ＋存档 3（无 aim 旧档读回仍缺席／aim 往返／aim 在场非字符串判坏档）
+// ＋发送面 1（applyOption 三分支的发送内容不含 aim）＝ +9。
+const CHOICE_PASS_EXPECTED = 151;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
