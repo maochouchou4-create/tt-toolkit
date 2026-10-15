@@ -55,7 +55,7 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 新键义务：域键常量在**归属模块**定义（字面量仅此一份），并登记进 `src/storage/service.ts` 的 `GlobalDomain`/`ChatDomain` 显式键 union——漏登记 vue-tsc 即报错（编译期登记门）；排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
 
-旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 5 键 + nav 2 键），勿再引用。
+旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 3 键 + nav 2 键），勿再引用。
 
 ## 提交与发布
 

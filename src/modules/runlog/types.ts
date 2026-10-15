@@ -1,5 +1,5 @@
 /**
- * 运行日志记录契约（choice/persona/summary 共用的生成可观测性面）。
+ * 运行日志记录契约（choice/persona 共用的生成可观测性面）。
  *
  * 会话内存口径：不落盘、不进 extension_settings（跨重启留痕由 commit
  * 内的 ttlog 摘要转发承担，正文只活在内存 ring 里）。

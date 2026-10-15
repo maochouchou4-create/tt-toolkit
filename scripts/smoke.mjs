@@ -132,21 +132,12 @@ const stubContext = {
         'stub_blank': { value: '   ', position: 0, depth: 2, scan: true, role: 0 },
         'stub_anchor': { value: '【锚点提示·stub】当前场景在旧货铺后院。', position: 0, depth: 0, scan: true, role: 0 },
     },
-    // 注入槽写入通道（script.js:10647 写入形态同构：{value, position,
-    // depth, scan, role}；保留接收者的方法形态供 summary 槽挂载调用）
-    setExtensionPrompt(key, value, position, depth, scan, role) {
-        stubContext.extensionPrompts[key] = { value, position, depth, scan: scan === true, role: role ?? 0 };
-    },
 };
 
-// 生成端点 fetch 桩（按请求体分发）：choice 形状（temperature 1.0＋
-// response_format json_object）回固定 4 条选项 JSON；summary 形状
-// （temperature 0.7、无契约键）回定稿测试摘要文本——两任务不能共用
-// 固定回包（summary 请求吃到选项 JSON 会被空白守门之外的形状误判吞掉）。
-// 流式 SSE 帧形态（stream 恒开——TASK_PARAMS），content 走 delta 帧，
+// 生成端点 fetch 桩（恒回固定 4 条选项 JSON）：choice/persona 冒烟各自装
+// 私有桩跑真实请求面，本桩只作「无桩路径」的兜底与各段 save/restore 的
+// 基线。流式 SSE 帧形态（stream 恒开——TASK_PARAMS），content 走 delta 帧，
 // 与 src/modules/apis/client.ts 的 callGenerateEndpoint 流式消费契约对齐。
-// 每次调用的 {url, body} 记入 __TT_SMOKE_STUBS__.generateCalls 供
-// summary 冒烟断言请求形状（choice/persona 冒烟各自装私有桩，不读它）。
 const FIXED_OPTIONS_JSON = JSON.stringify({
     options: [
         { title: '检查酒馆', content: '仔细检查酒馆的每个角落。' },
@@ -155,7 +146,6 @@ const FIXED_OPTIONS_JSON = JSON.stringify({
         { title: '起身离开', content: '找个借口离开酒馆。' },
     ],
 });
-const SUMMARY_REPLY_TEXT = '王玉与林霜在旧货铺重逢，谈起初见；两人约定三日后同去钟楼，关系就此缓和。';
 const encoder = new TextEncoder();
 function sseResponse(content) {
     return {
@@ -179,14 +169,7 @@ function sseResponse(content) {
         },
     };
 }
-globalThis.fetch = async (_url, init) => {
-    const body = JSON.parse(String(init?.body ?? '{}'));
-    globalThis.__TT_SMOKE_STUBS__.generateCalls.push({ url: String(_url), body });
-    // 0.7 与 TASK_PARAMS.summary_small.defaultTemperature 同值锚定＋e2e 请求形状断言互锁：
-    // 参数日后改值时 e2e 断言（temperature===0.7）与本分发同步翻红，不是静默漂移。
-    const isSummary = body.temperature === 0.7 && !('response_format' in body);
-    return sseResponse(isSummary ? SUMMARY_REPLY_TEXT : FIXED_OPTIONS_JSON);
-};
+globalThis.fetch = async () => sseResponse(FIXED_OPTIONS_JSON);
 
 const noop = () => {};
 
@@ -312,8 +295,6 @@ globalThis.__TT_SMOKE_STUBS__ = {
     getContext: () => stubContext,
     saveMetadataCalls: 0,
     saveChatCalls: 0,
-    // fetch 桩调用记录（summary 冒烟断言请求形状用；其他段自装私有桩不读它）
-    generateCalls: [],
     // ------------------------------------------------------------------
     // persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
     // ------------------------------------------------------------------
@@ -430,7 +411,7 @@ async function waitForBootDone(from, bootId) {
     }
     const end = bootDoneIndex(from, bootId);
     if (end < 0) {
-        console.error(`[smoke] FAIL: ${bootId} 未在 ${BOOT_TIMEOUT_MS / 1000}s 内发出收尾标记「${BOOT_DONE_PREFIX}${bootId}」（runChoiceSmoke/runPersonaSmoke/runSummarySmoke/runApisSmoke 挂起？）`);
+        console.error(`[smoke] FAIL: ${bootId} 未在 ${BOOT_TIMEOUT_MS / 1000}s 内发出收尾标记「${BOOT_DONE_PREFIX}${bootId}」（runChoiceSmoke/runPersonaSmoke/runApisSmoke 挂起？）`);
         process.exit(1);
     }
     return end;
@@ -569,19 +550,17 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 
 // 提示词配置初始化：默认模板落进全局域 storage（choice
 // 17 模块——反 OOC 要点并入 core_rules，退役的记忆桥注入模块已删）。
-// 存储形态 Record<taskKey, PromptConfig> 五任务键：choice 17 模块红线；
+// 存储形态 Record<taskKey, PromptConfig> 三任务键：choice 17 模块红线；
 // persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
 // 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
-// 读侧出局，写回自然清除），summary 两任务键在场（任务指令＋源文本注入；
-// 已退休的 summary_judge 任务键不在期望清单——存量配置读侧出局，
-// DEFAULTS_VERSION 重建后写回自然清除）。
+// 读侧出局，写回自然清除）。退休的 summary 两任务键同理：TASK_KEYS 收窄
+// 后读侧出局、ensurePromptConfigs 写回时自然清除。
 const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
 const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
 const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
 const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
-const summaryKeyOk = ['summary_small', 'summary_big'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0 && promptDomain[k].modules.some(m => m?.source === 'summary_source'));
-if (promptTaskKeys.length !== 5 || promptChoiceModules !== 17 || !personaKeyOk || !summaryKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 五任务键、choice 17 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
+if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) {
+    failures.push(`默认提示词配置未正确初始化（期望 Record 三任务键、choice 17 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -687,39 +666,18 @@ if (overusedSymbols.length > 0) {
 }
 
 // ---------------------------------------------------------------------------
-// summary 机判：触发算术/状态机/槽组合/守卫链/端到端（[summary-smoke] 行收口）
-// ---------------------------------------------------------------------------
-// PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成＝触发算术 4（autoTriggerDue 判据回归、手动门槛、级联条件、
-// roundsToTrigger 同源）＋槽组合 4（空/只大/只小/双节逐字）＋状态机 8
-// （raw 含 floor 0/hide 双写＋批量落盘/退出 raw/翻回 is_system 不当
-// raw/selfHeal 重隐藏＋落盘/幂等复跑/restoreAllFloors/一键还原三面）
-// ＋normalize 4（下界钳/上界钳/缺省回默认＋退役字段丢弃/聊天态坏档剔除）
-// ＋守卫与端到端 22（busy/取消零改动/autoEnabled/算术不达标/端点缺席/
-// 无可总结/无可合并/空白输出 fail、e2e 完整链 7（落地/槽重挂/saveChat
-// 通道/请求形状/组装 speaker/runlog task/落账后取消不回滚）、
-// 级联 5（不满不触发/满触发替换清空/大总结源文本节/槽单节形态/手动同判）、
-// think 剥离 1、源文本纯函数 1）＋事件接线 8（未开自动不触发/分组
-// chat_id 不当楼层/算术不达标不触发/CHAT_CHANGED 自愈重隐藏＋重挂槽/
-// 错误正文楼层到达时触发被拦下/批次内错误正文楼不进摘要源文本/达标
-// 场景启动后台生成/完成后互斥归位＋折叠落账＋running 镜像清位）＝ 50。
-const SUMMARY_PASS_EXPECTED = 50;
-const summaryPassLines = boot1Lines.filter(l => l.startsWith('[summary-smoke] PASS'));
-const summaryFailLines = boot1Lines.filter(MODULE_FAIL_LINE('summary'));
-if (summaryPassLines.length !== SUMMARY_PASS_EXPECTED || summaryFailLines.length > 0) {
-    failures.push(`summary 机判异常：期望恰好 ${SUMMARY_PASS_EXPECTED} 条 PASS，实际 ${summaryPassLines.length} 条 / FAIL ${summaryFailLines.length} 条${summaryFailLines.length ? `（首条：${summaryFailLines[0]}）` : ''}`);
-}
-
-// ---------------------------------------------------------------------------
-// legacy-wipe 机判：一次性清理（[wipe-smoke] 行收口，先于 persona
-// smoke 跑——见 src/main.ts runNodeSmoke 接线）
+// legacy-wipe 一次性清理机判 + 总结域退役清理（[wipe-smoke] 行收口；
+// wipe 在 persona smoke 前跑——见 src/main.ts runNodeSmoke 接线）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同上纪律）。run1＝一次启动签名共 10 条：boot 5（键
 // 全删/标记置位/persona userContext 种子存活/localConfig 种子存活（异于
 // 缺省 stream/timeout——世界书钉选断言随域退役改判别式）/nav qrActivated
 // 激活态存活——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删 5
 // 键＋置标＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
-const WIPE_PASS_EXPECTED_RUN1 = 10;
+// ＋退役清理 4（两域 summary 键种入后删除到缺席×2／二跑幂等不删不炸／
+// 域对象冻住致 delete 抛错时只 warn 不中断启动）。boot2 同口径＝二次启动
+// 签名 1＋场景A 4＋场景B 1＋退役 4。
+const WIPE_PASS_EXPECTED_RUN1 = 14;
 const wipePassLines = boot1Lines.filter(l => l.startsWith('[wipe-smoke] PASS'));
 const wipeFailLines = boot1Lines.filter(MODULE_FAIL_LINE('wipe'));
 if (wipePassLines.length !== WIPE_PASS_EXPECTED_RUN1 || wipeFailLines.length > 0) {
@@ -735,8 +693,8 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 // apis 机判：批量设置行写通道（[apis-smoke] 行收口，runNodeSmoke 末位——
 // 见 src/main.ts runNodeSmoke 接线）
 // ---------------------------------------------------------------------------
-// PASS 行数精确断言（同上纪律）＝ v1.12.0 批量设置行新增 5（批量写五行
-// 齐换/调参档保留/出站路由跟随/store 写穿 revision/删服务商联动收尾）。
+// PASS 行数精确断言（同上纪律）＝ v1.12.0 批量设置行新增 5（批量写齐换/
+// 调参档保留/出站路由跟随/store 写穿 revision/删服务商联动收尾）。
 // ＋ v1.18.0 端点 prefill 能力记忆新增 4（noPrefill 归一兼容/路由带出
 // providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）。
 const APIS_PASS_EXPECTED = 9;
@@ -761,7 +719,7 @@ if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateR
 // 二次启动（boot2）：cache-buster URL 对 dist 整图重求值（vite 单
 // chunk 无代码分割）——同浏览器二次启动语义：extension_settings 存根与
 // localStorage 跨 import 持久。标记已置位＋遗留键重种 → boot 清理须短路
-// （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 6 条 PASS。
+// （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 1＋场景组。
 // 行段两端都是 boot 收尾标记：起点在 boot1 断言全部跑完之后——boot2 与
 // 未收尾的 boot1 并发跑会共用同一份宿主存根（宿主 context 是可换装单例，
 // boot1 在途的 persona 段会覆写 boot2 的 chat 楼层），终点取 boot2 自己的
@@ -778,14 +736,14 @@ try {
 }
 const boot2End = await waitForBootDone(segmentStart, 'boot2');
 const seg2 = outputLines.slice(segmentStart, boot2End);
-const seg2FailTags = ['choice', 'persona', 'summary', 'wipe', 'apis']
+const seg2FailTags = ['choice', 'persona', 'wipe', 'apis']
     .filter(tag => seg2.filter(MODULE_FAIL_LINE(tag)).length > 0);
 if (seg2FailTags.length > 0) {
     failures.push(`boot2：模块机判出现 FAIL（${seg2FailTags.map(tag => `${tag} ${seg2.filter(MODULE_FAIL_LINE(tag)).length} 条`).join('、')}）`);
 }
 const wipe2PassCount = seg2.filter(l => l.startsWith('[wipe-smoke] PASS')).length;
-if (wipe2PassCount !== 6) {
-    failures.push(`boot2 wipe 机判异常：期望 6 条 PASS（二次启动签名 1＋场景A 4＋场景B 1），实际 ${wipe2PassCount} 条`);
+if (wipe2PassCount !== 10) {
+    failures.push(`boot2 wipe 机判异常：期望 10 条 PASS（二次启动签名 1＋场景A 4＋场景B 1＋退役清理 4），实际 ${wipe2PassCount} 条`);
 }
 const firstWipe2Log = seg2.find(l => l.startsWith('[legacy-wipe]'));
 if (!firstWipe2Log || !firstWipe2Log.includes('跳过')) {
@@ -793,10 +751,9 @@ if (!firstWipe2Log || !firstWipe2Log.includes('跳过')) {
 }
 const seg2ChoicePass = seg2.filter(l => l.startsWith('[choice-smoke] PASS')).length;
 const seg2PersonaPass = seg2.filter(l => l.startsWith('[persona-smoke] PASS')).length;
-const seg2SummaryPass = seg2.filter(l => l.startsWith('[summary-smoke] PASS')).length;
 const seg2ApisPass = seg2.filter(l => l.startsWith('[apis-smoke] PASS')).length;
-if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2SummaryPass !== SUMMARY_PASS_EXPECTED || seg2ApisPass !== APIS_PASS_EXPECTED) {
-    failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、summary ${seg2SummaryPass}/${SUMMARY_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
+if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2ApisPass !== APIS_PASS_EXPECTED) {
+    failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
 }
 // 末态：一次性标记置位＋遗留键全清（直查存根 Map，不依赖日志）
 const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
@@ -813,4 +770,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板五任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；summary 机判 ${summaryPassLines.length} 条全 PASS（触发算术 autoTriggerDue 判据回归/normalize 钳制含退役字段丢弃/槽组合四形态逐字/状态机 hide-restore-selfHeal/守卫链与取消边界/大总结级联/端到端请求形状/思维链剥离与错误楼拦截/事件接线守卫分支）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写四行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/summary ${seg2SummaryPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

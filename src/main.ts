@@ -1,21 +1,21 @@
 /**
  * 扩展引导：唯一环境分支点（模块不自行探测环境自启动）。
  *
- * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×5
- * （含 API 页与总结页）→ initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
+ * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
+ * → initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
  * 全局口＋选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
- * choice/persona 旧 API 字段）→ initPersona() → initSummary()（事件接线
- * ＋自愈＋启动挂槽）→ wipeLegacyKeysOnce()（遗留
+ * choice/persona 旧 API 字段）→ initPersona() → retireSummaryKeys()（退役
+ * 域键删除）→ wipeLegacyKeysOnce()（遗留
  * localStorage 键一次性清理——顺序硬约束，必须位于全部幂等迁移之后）。
  * node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：initStorage() → host
  * 探测清单 + storage roundtrip → nav 最小初始化 → nav dump。
  * initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()
  * → initApis() → initPersonaMinimal() → wipeLegacyKeysOnce() ＋
  * runLegacyWipeSmoke()（机判须先于 runPersonaSmoke——后者会中途回收旧键
- * 并重置 persona 域）→ runPersonaSmoke() → initSummaryMinimal()（总结
- * 设置缺席键回填落盘）→ runSummarySmoke()（算术/状态机/槽/守卫/端到端）
- * → runApisSmoke()（apis 域机判收尾：批量设置行五断言，夹具自持清场）
+ * 并重置 persona 域）→ runPersonaSmoke() → retireSummaryKeys() ＋
+ * runRetireSummarySmoke()（退役域键删除机判：两域键缺席/二跑幂等/失败仅 warn）
+ * → runApisSmoke()（apis 域机判收尾：九断言，批量设置行两行齐换，夹具自持清场）
  * → boot 收尾标记（消费侧等待面）。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
@@ -28,15 +28,15 @@ import '@/pinia';
 import { formatProbeResults, probeHost } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { mountShell, registerTab } from '@/shell';
-import { createApiTab, createChoiceSettingsTab, createLogTab, createPersonaTab, createSummaryTab } from '@/shell/tabs';
+import { createApiTab, createChoiceSettingsTab, createLogTab, createPersonaTab } from '@/shell/tabs';
 import { dumpStorage, runStorageRoundtrip } from '@/storage/debug';
 import { initStorage } from '@/storage';
 import { runLegacyWipeSmoke, wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
+import { retireSummaryKeys, runRetireSummarySmoke } from '@/storage/retire-summary';
 import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
 import { initNav, initNavMinimal } from '@/modules/nav';
 import { initApis, runApisSmoke } from '@/modules/apis';
 import { initPersona, initPersonaMinimal, runPersonaSmoke } from '@/modules/persona';
-import { initSummary, initSummaryMinimal, runSummarySmoke } from '@/modules/summary';
 import { version } from '@/version';
 
 /** 存储域 dump 挂入统一排障口（devtools 直取 __TT_TOOLKIT__.storage.dump()）。 */
@@ -86,10 +86,10 @@ async function runNodeSmoke(): Promise<void> {
     wipeLegacyKeysOnce();
     runLegacyWipeSmoke();
     await runPersonaSmoke();
-    // summary 最小初始化（设置缺席键回填落盘）＋冒烟（算术/状态机/槽/守卫/端到端）
-    initSummaryMinimal();
-    await runSummarySmoke();
-    // apis 域机判收尾（批量设置行五断言；夹具自持清场，置于末位不扰动前序域）
+    // 总结域退役清理（两域键删除＋幂等不炸；断言在 smoke.mjs 清理段收口）
+    retireSummaryKeys();
+    runRetireSummarySmoke();
+    // apis 域机判收尾（九断言，批量写两行齐换；夹具自持清场，置于末位不扰动前序域）
     runApisSmoke();
     // boot 收尾标记（唯一出口信号）：「这一轮跑完了没有」只能由生产侧回答。
     // 消费侧若拿 OK：/N 项 FAIL： 之类正文行去猜，任一模块提前出红就会把
@@ -110,7 +110,6 @@ async function main(): Promise<void> {
     registerTab(createChoiceSettingsTab());
     registerTab(createApiTab());
     registerTab(createPersonaTab());
-    registerTab(createSummaryTab());
     registerTab(createLogTab());
     initChoice();
     initNav();
@@ -118,8 +117,8 @@ async function main(): Promise<void> {
     // 再收编 choice/persona 旧 API 字段——顺序敏感，勿调换
     initApis();
     initPersona();
-    // 大小总结：事件接线＋自愈＋启动挂槽（端点表已就位，守卫链读得到活动端点）
-    initSummary();
+    // 总结域退役清理：删全局域与当前聊天的 summary 键（幂等每次启动跑）
+    retireSummaryKeys();
     // 遗留 localStorage 键一次性清理——位于全部幂等迁移之后
     // （迁移消费在先、删除在后，绝不碰已迁移数据），见 storage/legacy-wipe
     wipeLegacyKeysOnce();

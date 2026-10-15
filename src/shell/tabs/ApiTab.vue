@@ -117,7 +117,7 @@
         </div>
       </div>
 
-      <div class="tt-api-hint">推荐参数（调乱后照此恢复）：选项生成/人设生成＝温度 1.0·思考高；小总结/大总结＝温度 0.7·思考高。</div>
+      <div class="tt-api-hint">推荐参数（调乱后照此恢复）：选项生成/人设生成＝温度 1.0·思考高。</div>
     </TTCard>
 
     <TTCard title="生成注入" :sub="JB_SUB">

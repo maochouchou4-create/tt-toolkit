@@ -6,7 +6,7 @@
 import { useApisStore } from './store';
 import { APIS_DOMAIN_KEY, createEndpoint, deleteEndpoint, readApiDomain, setProviderNoPrefill, upsertEndpoint } from './storage';
 import { TASK_PARAMS } from './task-defaults';
-import { emptyTaskProfile, readTaskProfiles, resolveTaskRoute, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
+import { readTaskProfiles, resolveTaskRoute, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
 import { TASK_IDS } from '@/tasks';
 import { setGlobal } from '@/storage/service';
 
@@ -25,37 +25,36 @@ export function runApisSmoke(): void {
     upsertEndpoint({ ...P, url: 'https://smoke.apis-smoke/v1', key: 'sk-apis-smoke', models: ['m-cheap', 'm-strong2'] });
     writeTaskProfiles({
         choice: { providerId: P.id, model: 'm-strong', temperature: 1.3 },
-        persona: { providerId: P.id, model: 'm-strong' },
-        summary_small: emptyTaskProfile(),
-        summary_big: { providerId: P.id, model: 'm-strong', reasoningEffort: 'low' },
+        persona: { providerId: P.id, model: 'm-strong', reasoningEffort: 'low' },
     });
 
     setRouteForAllTasks(P.id, 'm-cheap');
     const afterBatch = readTaskProfiles();
     check(
-        '批量写通道四行齐换',
+        '批量写通道两行齐换',
         TASK_IDS.every(id => afterBatch[id].providerId === P.id && afterBatch[id].model === 'm-cheap'),
         TASK_IDS.map(id => `${id}=${afterBatch[id].providerId}/${afterBatch[id].model}`).join('，'),
     );
 
     check(
         '调参档保留',
-        afterBatch.choice.temperature === 1.3 && afterBatch.summary_big.reasoningEffort === 'low',
-        `choice.temperature=${afterBatch.choice.temperature}，summary_big.reasoningEffort=${afterBatch.summary_big.reasoningEffort}`,
+        afterBatch.choice.temperature === 1.3 && afterBatch.persona.reasoningEffort === 'low',
+        `choice.temperature=${afterBatch.choice.temperature}，persona.reasoningEffort=${afterBatch.persona.reasoningEffort}`,
     );
 
-    const route = resolveTaskRoute('summary_small');
-    const bigRoute = resolveTaskRoute('summary_big');
+    const route = resolveTaskRoute('choice');
+    const personaRoute = resolveTaskRoute('persona');
     check(
         '出站路由跟随批量行',
         route !== null
             && route.url === 'https://smoke.apis-smoke/v1'
             && route.key === 'sk-apis-smoke'
             && route.model === 'm-cheap'
-            && route.temperature === TASK_PARAMS.summary_small.defaultTemperature
-            && bigRoute !== null
-            && bigRoute.reasoningEffort === 'low',
-        `summary_small=${route ? `${route.model}@${route.url}，t=${route.temperature}` : 'null'}；summary_big.effort=${bigRoute?.reasoningEffort ?? 'null'}`,
+            && route.temperature === 1.3
+            && personaRoute !== null
+            && personaRoute.temperature === TASK_PARAMS.persona.defaultTemperature
+            && personaRoute.reasoningEffort === 'low',
+        `choice=${route ? `${route.model}@${route.url}，t=${route.temperature}` : 'null'}；persona=${personaRoute ? `${personaRoute.model}@${personaRoute.url}，t=${personaRoute.temperature}，effort=${personaRoute.reasoningEffort}` : 'null'}`,
     );
 
     const store = useApisStore();
@@ -135,5 +134,5 @@ export function runApisSmoke(): void {
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行与能力记忆九断言（四行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）');
+    console.info('[apis-smoke] OK：批量设置行与能力记忆九断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）');
 }

@@ -24,14 +24,6 @@ const BAR_MOUNT_ID = 'tt-choice-bar-mount';
 const POLL_INTERVAL_MS = 500;
 const POLL_MAX_TRIES = 20;
 
-/**
- * dump 支持清单（显式枚举）：dump 口只有 choice（真实数据组装）与
- * persona 两任务（模板/注入全文）两路实现——任务键全集按 TASK_KEYS
- * 校验合法后还须落在本清单内，summary 两键给「暂无 dump 口」明确报错，
- * 不落 persona 分支抛误导错。
- */
-const DUMP_SUPPORTED_TASKS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen'];
-
 let barMounted = false;
 
 /**
@@ -85,7 +77,8 @@ async function mountBarWithRetry(): Promise<void> {
 /**
  * 全局口 __TT_TOOLKIT__.prompts：dump / assemble / parseOptions。
  * 用户浏览器验收与排障共用（与生成管线同一条组装路径）。
- * dump 支持按任务（默认 choice；参数串或 {task} 对象均可）。
+ * dump 按任务（默认 choice）：任务键全集即 dump 支持全集——每个任务键
+ * 都有一路实现，键外取值给「未知任务键」报错。
  */
 function installGlobalPort(): void {
     const port = {
@@ -100,9 +93,6 @@ function installGlobalPort(): void {
             const key = TASK_KEYS.includes(raw as TaskKey) ? (raw as TaskKey) : raw === undefined ? 'choice' : undefined;
             if (!key) {
                 throw new Error(`未知任务键 ${String(raw)}——可选值：${TASK_KEYS.join(' / ')}`);
-            }
-            if (!DUMP_SUPPORTED_TASKS.includes(key)) {
-                throw new Error(`任务 ${key} 暂无 dump 口——可 dump：${DUMP_SUPPORTED_TASKS.join(' / ')}`);
             }
             const dumpText = key === 'choice'
                 ? (await assembleCurrent()).dumpText

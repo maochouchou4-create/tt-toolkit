@@ -407,7 +407,7 @@ export function isBlankResponseContent(text: string): boolean {
 
 /**
  * 剥掉模型正文前导的 <think>…</think> 思维链包裹。
- * 为什么在传输层单点剥：破限前缀对所有散文任务（总结等 prompt_only）
+ * 为什么在传输层单点剥：破限前缀对所有散文任务（persona 等 prompt_only）
  * 下达 think 指令，模型依令先吐思维链再写正文——若各任务层自剥，口径
  * 会漂移（同一份 wire 正文在不同任务里时有时无）。仅剥前导完整块；
  * 前导 <think> 未闭合＝整段思维链被 token 上限掐断的形态，返回空串
@@ -518,7 +518,7 @@ export async function callGenerateEndpoint(
     }
     // 截断：内容收到但被服务端 token 上限掐断——不捕它会伪装成下游解析失败。
     // 记录保留半截正文（排障可见掐在哪里），报错指名真因
-    const message = '输出被截断（finish_reason=length，达到服务端 token 上限）——推理模型的思维链与正文共享上限；请更换输出上限更高的端点，或先总结折叠更早楼层压缩输入';
+    const message = '输出被截断（finish_reason=length，达到服务端 token 上限）——推理模型的思维链与正文共享上限；请更换输出上限更高的端点，或先用记忆插件折叠更早楼层压缩输入';
     commitRun(false, truncated.content, message);
     throw new Error(message);
 }

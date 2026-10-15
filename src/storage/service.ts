@@ -13,6 +13,8 @@
  *     源码核实，严禁 saveCharacterDebounced）。
  *
  * 组件与模块一律通过本服务读写，不直接碰 extension_settings/chat_metadata。
+ * 唯一例外：无服务原语的历史遗留操作（如退役域键的 delete——写口是整键
+ * 替换做不了删除）走 host 层直访，见 retire-summary.ts 的通道说明。
  */
 
 import { currentChatMetadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
@@ -59,8 +61,6 @@ export interface GlobalDomain {
     promptActiveId?: unknown;
     /** 剧情走向预设列表（modules/choice/direction.ts GLOBAL_DIRECTION_PRESETS_KEY） */
     directionPresets?: unknown;
-    /** 大小总结设置（modules/summary/settings.ts GLOBAL_SUMMARY_KEY） */
-    summary?: unknown;
     /**
      * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
      * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
@@ -72,8 +72,6 @@ export interface GlobalDomain {
 export interface ChatDomain {
     /** 剧情走向（modules/choice/direction.ts CHAT_STORY_DIRECTION_KEY） */
     storyDirection?: unknown;
-    /** 大小总结聊天态（modules/summary/settings.ts CHAT_SUMMARY_KEY） */
-    summary?: unknown;
 }
 
 /** 读全局域原始单例（不快照——storage 内部面与调试 dump 用）。 */

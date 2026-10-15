@@ -1,8 +1,8 @@
 /**
  * prompts 域存储（读侧纯函数＋启动期迁移写）：其他域同构的
  * storage 分文件。真相源＝全局域 extension_settings.ttToolkit.promptConfigs
- * （Record<TaskKey, PromptConfig>，五任务各一套——choice 选项生成＋
- * persona 策展/填充＋summary 小总结/大总结；旧数组档由启动 init 一次性迁移为 {choice: 旧生效套}，
+ * （Record<TaskKey, PromptConfig>，三任务各一套——choice 选项生成＋
+ * persona 策展/填充；旧数组档由启动 init 一次性迁移为 {choice: 旧生效套}，
  * 二次启动零改写）。
  *
  * 读路径零副作用：getter 只做内存 normalize（补缺/形状守门），不写回；

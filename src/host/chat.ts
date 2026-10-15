@@ -21,8 +21,8 @@
  *   返回 worldInfoBefore/After/Examples/Depth/anBefore/anAfter 桶。本层
  *   只消费前四类；an 桶走注入槽位通道搬运——见 WorldInfoBuckets 注释）。
  * - **注入槽位表**：script.js:1021 `export let extension_prompts = {}`
- *   （:10647 setExtensionPrompt 写入 {value, position, depth, scan,
- *   role, filter}）；st-context.js:158 经 context 转发
+ *   （条目经 script.js:10647 setExtensionPrompt 写入 {value, position,
+ *   depth, scan, role, filter}）；st-context.js:158 经 context 转发
  *   extensionPrompts。扫槽位走 context 转发（读侧单向、不占导入面），
  *   缺席按空表处理。
  */
@@ -35,7 +35,7 @@ import type { ChatMessage } from './context';
 
 /**
  * message.extra 下本扩展命名空间键（楼层级派生数据的挂载点，全仓唯一
- * 字面量——choice 选项/summary 隐藏标记等单楼派生数据共用；写入必须纯
+ * 字面量——choice 选项等单楼派生数据共用；写入必须纯
  * 数据，宿主 swipe 会 structuredClone 进新槽）。
  */
 export const EXTRA_NAMESPACE_KEY = 'ttToolkit';
@@ -181,8 +181,9 @@ export async function sendInputMessage(): Promise<void> {
 /**
  * 取可见楼层全量（role 三态消息）：过滤隐藏楼层（is_system——宿主隐藏
  * 真实字段，fork 实证 is_hidden 是死字段）。窗口策略对齐宿主主生成：
- * 可见即全文——老楼层的收纳归总结折叠（隐藏楼层不在此列），旁路请求
- * 不再另设轮数截窗（双窗口策略已退役，choice 上下文与主聊天同构）。
+ * 可见即全文——老楼层的收纳归外部记忆插件的 is_system 折叠（隐藏楼层
+ * 不在此列），旁路请求不再另设轮数截窗（双窗口策略已退役，choice
+ * 上下文与主聊天同构）。
  */
 export function getChatHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
     const chat: ChatMessage[] = getChatMessages();

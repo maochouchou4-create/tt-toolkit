@@ -13,7 +13,7 @@
 import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
 import type { ParsedOption, ParseReport } from './parse';
 
-/** 命名空间内的选项键（为同位置存别的楼层派生数据留位——summary 已用 summaryHidden）。 */
+/** 命名空间内的选项键（命名空间层与单楼派生数据一一对应，不混键）。 */
 const EXTRA_CHOICE_KEY = 'choice';
 
 /** 存档白名单与 ParseReport['path'] 同源（漏登记＝该路径存档被当坏档丢弃）。 */

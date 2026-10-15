@@ -6,8 +6,6 @@
 export const TASKS = [
     { id: 'choice', label: '选项生成' },
     { id: 'persona', label: '人设生成' },
-    { id: 'summary_small', label: '小总结' },
-    { id: 'summary_big', label: '大总结' },
 ] as const;
 
 export type TaskId = (typeof TASKS)[number]['id'];
