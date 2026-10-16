@@ -509,7 +509,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＋发送面 1（applyOption 三分支的发送内容不含 aim）＝ +9。
 // ＝ 终审修复：迁移换代标记用例 2（迁移随读通道落盘／标记在场守旧值）
 // ＋模板段标签引用不悬空 1 ＝ +3。
-const CHOICE_PASS_EXPECTED = 154;
+// ＝ 超时原语与文案单点：超时上限延时机判 1／到点按失败可见报出且不误报
+// 「已取消」1／外部取消仍归「已取消」1／取消与到点竞态仍按超时报 1／
+// 未配置任务模型文案带任务中文名 1 ＝ +5。
+const CHOICE_PASS_EXPECTED = 159;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -712,7 +715,9 @@ if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
 // 调参档保留/出站路由跟随/store 写穿 revision/删服务商联动收尾）。
 // ＋ v1.18.0 端点 prefill 能力记忆新增 4（noPrefill 归一兼容/路由带出
 // providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）。
-const APIS_PASS_EXPECTED = 9;
+// ＋ 请求配置构造器归一新增 1（两任务同形、流式/契约/超时按 TASK_PARAMS、
+// 不发 max_tokens）。
+const APIS_PASS_EXPECTED = 10;
 const apisPassLines = boot1Lines.filter(l => l.startsWith('[apis-smoke] PASS'));
 const apisFailLines = boot1Lines.filter(MODULE_FAIL_LINE('apis'));
 if (apisPassLines.length !== APIS_PASS_EXPECTED || apisFailLines.length > 0) {
@@ -785,4 +790,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 197 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/夹具联动收尾/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

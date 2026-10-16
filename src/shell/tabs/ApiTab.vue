@@ -20,7 +20,7 @@
           <span class="tt-api-model">{{ p.models.length > 0 ? `${p.models.length} 个模型` : '未拉取清单' }}</span>
           <span class="tt-api-key" :title="p.key ? '密钥已保存（打码显示）' : '未填密钥'">{{ maskKey(p.key) }}</span>
         </div>
-        <div class="tt-api-row-actions">
+        <div class="tt-btn-row tt-btn-row--fixed tt-api-row-actions">
           <button v-if="p.noPrefill" type="button" class="tt-btn" @click="resetPrefill(p)">复位</button>
           <button type="button" class="tt-btn" @click="apis.startDraft(p)">编辑</button>
           <button type="button" class="tt-btn tt-btn--danger" @click="confirmRemove(p)">删除</button>
@@ -145,12 +145,12 @@
       </TTField>
 
       <div class="tt-api-model-edit">
-        <span class="tt-api-model-edit-label">模型清单</span>
+        <span class="tt-field-label">模型清单</span>
         <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `已缓存 ${apis.draft.models.length} 个模型` : '未拉取' }}</span>
         <button type="button" class="tt-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
       </div>
 
-      <div class="tt-api-actions">
+      <div class="tt-btn-row tt-api-actions">
         <button type="button" class="tt-btn" @click="onSave">保存</button>
         <button type="button" class="tt-btn" @click="apis.cancelDraft()">取消</button>
       </div>
@@ -386,10 +386,8 @@ function onSave(): void {
     font-size: var(--tt-fs-hint);
 }
 
+/* 服务商行右侧按钮：不许折行（折行会把这一行撑成两行高）＋不许被左侧信息块压扁 */
 .tt-api-row-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--tt-sp-2);
     flex-shrink: 0;
 }
 
@@ -471,16 +469,8 @@ function onSave(): void {
     padding: var(--tt-sp-1) 0;
 }
 
-.tt-api-model-edit-label {
-    min-width: 4em;
-    opacity: 0.8;
-    flex-shrink: 0;
-    font-size: var(--tt-fs-aux);
-}
-
+/* 保存/取消行：按钮行排布走 .tt-btn-row，此处只留这行特有的贴顶间距 */
 .tt-api-actions {
-    display: flex;
-    gap: var(--tt-sp-2);
     padding-top: var(--tt-sp-2);
 }
 

@@ -28,6 +28,7 @@ import { useRunlogStore } from '@/modules/runlog/store';
 import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration';
 import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
 import {
@@ -1610,7 +1611,7 @@ async function runApiChecks(): Promise<void> {
     // 纯函数：请求体形状（缺省任务参数不进请求体——显式发送制）
     const body = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off' },
+        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: false, outputContract: 'prompt_only', reasoningEffort: 'off', timeoutSec: TASK_PARAMS.persona.timeoutSec },
     );
     check('api：buildGenerateBody 基础形状（quiet/custom/reverse_proxy/proxy_password/tool_choice；缺省温度与 max_tokens 不发）',
         body.type === 'quiet' && body.chat_completion_source === 'custom'
@@ -1621,7 +1622,7 @@ async function runApiChecks(): Promise<void> {
         && !('response_format' in body) && !('json_schema' in body));
     const bodyExplicit = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5 },
+        { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'm1', stream: true, outputContract: 'prompt_only', temperature: 0.5, timeoutSec: TASK_PARAMS.persona.timeoutSec },
     );
     check('api：buildGenerateBody 显式参数（temperature 进请求体、stream 恒发）',
         bodyExplicit.temperature === 0.5 && bodyExplicit.stream === true && !('max_tokens' in bodyExplicit));
@@ -1630,7 +1631,7 @@ async function runApiChecks(): Promise<void> {
     // 宿主透传 response_format；prompt_only 不发契约键）
     const bodyJsonObject = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_object' },
+        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'json_object', timeoutSec: TASK_PARAMS.persona.timeoutSec },
     );
     check('api：输出契约两档（json_object→response_format；prompt_only 无契约键）',
         (bodyJsonObject.response_format as Record<string, unknown> | undefined)?.type === 'json_object'
@@ -1673,7 +1674,7 @@ async function runApiChecks(): Promise<void> {
     // reasoning_effort 纪律（off 不发已在基础形状断言——这里断言 high 发）
     const bodyEffort = buildGenerateBody(
         [{ role: 'user', content: 'hi' }],
-        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'prompt_only', reasoningEffort: 'high' },
+        { task: 'persona', baseUrl: 'https://a.example.com', apiKey: 'k', model: 'm', stream: false, outputContract: 'prompt_only', reasoningEffort: 'high', timeoutSec: TASK_PARAMS.persona.timeoutSec },
     );
     check('api：reasoning_effort＝high 注入（low/medium/high 档）', bodyEffort.reasoning_effort === 'high');
 
@@ -1687,7 +1688,7 @@ async function runApiChecks(): Promise<void> {
     try {
         const r1 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
         );
         check('api：流式 SSE 帧状态机（\\n\\n 分帧、[DONE] 跳过、delta 拼接、走宿主路由）',
             r1.streamed && r1.content === '你' && sseCalls[0]?.url === '/api/backends/chat-completions/generate',
@@ -1695,7 +1696,7 @@ async function runApiChecks(): Promise<void> {
         globalThis.fetch = (async () => fakeSSEStream(['data: {"choices":[{"delta":{"content":"甲"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"乙"}}]}'])) as typeof fetch;
         const r2 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
         );
         check('api：流式 \\r\\n 归一＋尾帧无终止符补消费', r2.content === '甲乙', `text=${r2.content}`);
 
@@ -1711,7 +1712,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
         } catch (e) {
             truncationThrown = (e as Error).message;
@@ -1731,7 +1732,7 @@ async function runApiChecks(): Promise<void> {
     try {
         const r3 = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
         );
         check('api：非流式 content 读取（choices[0].message.content）', !r3.streamed && r3.content === '好的');
         globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ error: { message: 'quota exceeded' } }) })) as unknown as typeof fetch;
@@ -1739,7 +1740,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
         } catch (e) {
             errorThrown = (e as Error).message.includes('quota');
@@ -1761,7 +1762,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
         } catch (e) {
             streamEnvelopeThrown = (e as Error).message;
@@ -1781,7 +1782,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
         } catch (e) {
             plainEnvelopeThrown = (e as Error).message;
@@ -1799,7 +1800,7 @@ async function runApiChecks(): Promise<void> {
         try {
             const r = await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
             labelLookalike = r.content;
         } catch {
@@ -1818,7 +1819,7 @@ async function runApiChecks(): Promise<void> {
         try {
             await callGenerateEndpoint(
                 [{ role: 'user', content: 'hi' }],
-                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+                { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
             );
         } catch (e) {
             upstreamFrameThrown = (e as Error).message;
@@ -1837,7 +1838,7 @@ async function runApiChecks(): Promise<void> {
         ])) as unknown as typeof fetch;
         const rErrorNull = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only' },
+            { task: 'persona', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-t', model: 'm1', stream: true, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.persona.timeoutSec },
         );
         check('api：正常帧带 error:null 不误杀（null 键照常收下 delta）', rErrorNull.content === '好', `text=${rErrorNull.content}`);
     } finally {

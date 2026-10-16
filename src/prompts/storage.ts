@@ -10,7 +10,7 @@
  */
 
 import { getGlobal, setGlobal } from '@/storage';
-import { DEFAULTS_VERSION, createTaskDefaultConfig } from './defaults';
+import { DEFAULTS_VERSION, POOL_ENTRIES_MODULE, createTaskDefaultConfig } from './defaults';
 import { TASK_KEYS } from './types';
 import type { PromptConfig, TaskKey } from './types';
 
@@ -25,20 +25,14 @@ function isConfigShape(value: unknown): value is PromptConfig {
 /**
  * 池注入模块补建（choice 任务专属——persona 管线无池注入面；就地修改，
  * 返回是否有改动）。双复核 P3 修复语义保留：按 source 在场判断——缺席才
- * 补，幂等。
+ * 补，幂等。模块本体取出厂模板那一份常量（defaults 的 POOL_ENTRIES_MODULE
+ * ），补出来的身份必须与新装模板完全一致，否则引擎见到的会是一个 source
+ * 对得上、id/order 对不上的四不像模块。
  */
 function backfillPoolModules(choice: PromptConfig | undefined): boolean {
     if (!choice || !Array.isArray(choice.modules)) return false;
     if (choice.modules.some(m => m.kind === 'inject' && m.source === 'pool_entries')) return false;
-    choice.modules.push({
-        kind: 'inject',
-        id: 'inject_pool_entries',
-        name: '池条目',
-        role: 'system',
-        order: 98,
-        enabled: true,
-        source: 'pool_entries',
-    });
+    choice.modules.push({ ...POOL_ENTRIES_MODULE });
     return true;
 }
 

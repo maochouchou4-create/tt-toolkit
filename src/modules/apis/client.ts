@@ -78,6 +78,12 @@ export interface GenerateRequestConfig {
     outputContract: OutputContract;
     /** 思考强度（off＝不发送，见 ReasoningEffort 注释） */
     reasoningEffort?: ReasoningEffort;
+    /**
+     * 请求级超时上限（秒，按任务固化于 TASK_PARAMS.timeoutSec）：到点自触发
+     * 中止。必填不给默认——漏装就是一次可能永挂的请求，而死端点的表现是
+     * 界面既不能停也不报错（原 client 注释自陈之痛）。
+     */
+    timeoutSec: number;
 }
 
 export interface GenerateResult {
@@ -133,19 +139,79 @@ function extractModelList(data: unknown): string[] {
 }
 
 /** 轻量探测（测连/拉模型）的响应上界——无上界时死端点会挂到浏览器默认超时（分钟级），按钮即不能停也不报错。 */
-const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_TIMEOUT_SEC = 30;
+
+/**
+ * 请求级超时守卫（传输层唯一原语，探测与生成两路共用）。
+ *
+ * 自建 AbortController 供 fetch 使用，把「到点自触发中止」与「外部取消」
+ * 汇进同一条中止通道——fetch 的失败面只有 aborted，两者在网络层不可分。
+ * 但**上层必须能分开**：外部中止是用户按了取消（选项条「取消」／人设页
+ * 「停止」），到点中止是死端点（要报失败、记 runlog、弹错误）。所以本原语
+ * 另给一个 timedOut() 事实：它为真时，本次中止才是超时。只看
+ * signal.aborted 的调用点会把超时误报成「已取消」——用户看到的是一句
+ * 「已取消」，而他什么都没按，且这次失败连日志都不留痕。
+ *
+ * 收口走 dispose（清定时器＋解绑外部监听），调用点必须放在 finally——
+ * 否则长请求在宿主里反复重试会攒下一次性的定时器与监听。
+ */
+export interface RequestTimeoutGuard {
+    /** 传给 fetch 的中止信号（外部取消已汇入同一通道） */
+    readonly signal: AbortSignal;
+    /** 本次中止是否由到点触发（＝超时；外部取消时恒假） */
+    timedOut(): boolean;
+    dispose(): void;
+}
+
+export function startRequestTimeout(timeoutSec: number, external?: AbortSignal): RequestTimeoutGuard {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abort = (): void => {
+        try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
+    };
+    // 外部信号可能在装守卫前就已中止：addEventListener 不会为已中止的信号
+    // 补发事件，漏这一手就是「带着一个已死的外部信号照发请求」。
+    if (external?.aborted) abort();
+    else external?.addEventListener('abort', abort);
+    const timer = setTimeout(() => {
+        timedOut = true;
+        abort();
+    }, timeoutSec * 1000);
+    return {
+        signal: controller.signal,
+        timedOut: () => timedOut,
+        dispose: () => {
+            clearTimeout(timer);
+            external?.removeEventListener('abort', abort);
+        },
+    };
+}
+
+/**
+ * 超时的人话错误（传输层单点）：文案与判据同处一处，各调用点只按
+ * instanceof 认它，不复写「到点 vs 取消」的判断。hint 由调用面给——
+ * 探测与生成的补救动作不同（换端点 vs 稍后重试）。
+ */
+export class RequestTimeoutError extends Error {
+    constructor(readonly timeoutSec: number, hint: string) {
+        super(`请求超时（${timeoutSec} 秒）${hint}`);
+        this.name = 'RequestTimeoutError';
+    }
+}
+
+/** 生成请求超时的补救提示（各生成任务同一句——文案单点，见 RequestTimeoutError）。 */
+const GENERATE_TIMEOUT_HINT = '——端点长时间无响应或中转站响应过慢，可稍后重试或更换端点';
 
 /** 探测请求带超时上界：超时转译为人话错误（调用方 toast 即可读）。 */
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    const guard = startRequestTimeout(PROBE_TIMEOUT_SEC, init.signal ?? undefined);
     try {
-        return await fetch(url, { ...init, signal: controller.signal });
+        return await fetch(url, { ...init, signal: guard.signal });
     } catch (err) {
-        if (controller.signal.aborted) throw new Error(`请求超时（${PROBE_TIMEOUT_MS / 1000} 秒）——端点无响应`);
+        if (guard.timedOut()) throw new RequestTimeoutError(PROBE_TIMEOUT_SEC, '——端点无响应');
         throw err;
     } finally {
-        clearTimeout(timer);
+        guard.dispose();
     }
 }
 
@@ -422,8 +488,13 @@ function stripReasoningWrapper(content: string): string {
  * runlog 的 requestText 与 fetch body 序列化同一个 outbound 数组——
  * 日志看到的即模型收到的。
  *
+ * 超时是传输层的职责：每次请求自带上限（config.timeoutSec），到点由守卫
+ * 中止并转成 RequestTimeoutError（外部取消另走外部信号，途中到达也会中止
+ * 同一条通道，但不算超时）。上层据此把「用户按了取消」与「端点没响应」
+ * 分成两种可见结果——两者在 fetch 的失败面上同形，只有本层分得开。
+ *
  * 运行日志观测点（choice/persona 通吃的单一传输层）：成功失败（含
- * abort/流读失败）全量 commit 一条记录后原样抛/返——任务层只凭返回的
+ * abort/流读失败/超时）全量 commit 一条记录后原样抛/返——任务层只凭返回的
  * runId enrich，传输失败无 runId 也「失败有痕」。apiKey 不进记录。
  */
 export async function callGenerateEndpoint(
@@ -452,6 +523,7 @@ export async function callGenerateEndpoint(
             responseText,
             error,
         });
+    const guard = startRequestTimeout(config.timeoutSec, signal);
     // 截断判定结果（try 外抛出防 catch 双记：截断记录须带半截正文供诊断）
     let truncated: { content: string } | null = null;
     try {
@@ -460,7 +532,7 @@ export async function callGenerateEndpoint(
             headers: getTavernRequestHeaders(),
             body: JSON.stringify(buildGenerateBody(outbound, config)),
             cache: 'no-cache',
-            signal,
+            signal: guard.signal,
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
@@ -501,8 +573,13 @@ export async function callGenerateEndpoint(
             }
         }
     } catch (e) {
-        commitRun(false, '', e instanceof Error ? e.message : String(e));
-        throw e;
+        // 到点中止在此转成超时错误再落记录：失败面必须带「超时」两个字，
+        // 直接把 fetch 的 AbortError 记进去等于这次失败在日志里查无实据。
+        const failure = guard.timedOut() ? new RequestTimeoutError(config.timeoutSec, GENERATE_TIMEOUT_HINT) : e;
+        commitRun(false, '', failure instanceof Error ? failure.message : String(failure));
+        throw failure;
+    } finally {
+        guard.dispose();
     }
     // 截断：内容收到但被服务端 token 上限掐断——不捕它会伪装成下游解析失败。
     // 记录保留半截正文（排障可见掐在哪里），报错指名真因

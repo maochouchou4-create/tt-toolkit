@@ -225,3 +225,28 @@
     margin: 0;
     flex-shrink: 0;
 }
+
+/* 字段标签单点：TTField 的标签与 tab 内的独立标签位（如模型清单行）此前
+   各写一份四条属性，字号一改只改一处就会在同页出现两种标签观感 */
+.tt-field-label {
+    min-width: 4em;
+    opacity: 0.8;
+    flex-shrink: 0;
+    font-size: var(--tt-fs-aux);
+}
+
+/* 按钮行单点：一排 .tt-btn 的排布与间距。逐处只在自己的私有类里补这行
+   特有的东西（贴顶/贴底/不许换行）——换行默认开，窄壳下按钮挤出去时
+   折行比横向溢出可读 */
+.tt-btn-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--tt-sp-2);
+}
+
+/* 不许换行的按钮行：行内另有会伸缩的主体（服务商行的信息块），按钮折行
+   会把那一行撑成两行高 */
+.tt-btn-row--fixed {
+    flex-wrap: nowrap;
+}

@@ -2,10 +2,11 @@
   <!--
     字段行布局原语：默认标签左、控件右一行；block 变体＝标签上、控件下
     整行（大编辑区形态）。只负责布局归位（控件宽度撑满、去默认外边距）；
-    控件皮肤一律来自控件自带的 .tt-ctrl 类（皮肤单点）。
+    控件皮肤一律来自控件自带的 .tt-ctrl 类（皮肤单点），标签皮肤走
+    .tt-field-label（原语层公共类，tab 内无字段行包裹的标签位同用它）。
   -->
   <label class="tt-ui-field" :class="{ 'tt-ui-field--block': block }">
-    <span class="tt-ui-field-label">{{ label }}</span>
+    <span class="tt-field-label">{{ label }}</span>
     <slot />
   </label>
 </template>
@@ -30,13 +31,6 @@ defineProps<{
     align-items: stretch;
     gap: var(--tt-sp-1);
     margin-bottom: var(--tt-sp-2);
-}
-
-.tt-ui-field-label {
-    min-width: 4em;
-    opacity: 0.8;
-    flex-shrink: 0;
-    font-size: var(--tt-fs-aux);
 }
 
 .tt-ui-field :deep(select),

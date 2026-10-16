@@ -3,6 +3,8 @@
  *
  * MODIFICATIONS（相对上游 fork）：
  * - 砍 PANEL_TITLE/BN_TITLE（callPopup 弹窗入口整体退役，入口改工具箱 tab）。
+ * - 「任务模型未配置」文案移出本注册表（归 apis 层任务档案的构造器：任务
+ *   中文名从 tasks.ts 注入，三条消费路径共用一份，裸 taskId 不进用户文本）。
  * - 已退休特性的文案键随批删除，不留死键；toast 第一实参仍禁止
  *   字符串字面量（文案唯一真源在此）。
  */
@@ -13,7 +15,6 @@ export const TEXT = {
     TOAST_SAVE_FAIL: (msg: string) => `保存人设失败: ${msg}`,
     TOAST_PREFILL_RETRY: 'API 返回 400 错误 (可能是 Gemini 等模型不支持 Prefill)，正在尝试兼容模式重试...',
     TOAST_PREFILL_UNSUPPORTED: '已记住该端点不支持续写（prefill），下次起直接不带起手词；可在 API 页复位。',
-    TOAST_NO_ENDPOINT: '未配置人设生成模型——到「API」页「任务模型」卡配置后再试',
     TOAST_NO_LAST_REQUEST: '未找到上一次的生成需求',
     TOAST_REROLLED: '已重新生成',
     TOAST_CANCELLED: '已取消生成',

@@ -9,12 +9,12 @@
 import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
-import { mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
-import { applyOption, generateOptions, zeroOptionsMessage } from './generator';
+import { applyOption, cancelGeneration, generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { drawAmount, resolvePool } from './pool/resolver';
@@ -351,7 +351,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     };
     emitReceived(2, 'normal');
     console.warn = origWarn;
-    check('自动生成：任务模型未配置 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('任务模型未配置')), `warns=${warns.length}`);
+    check('自动生成：任务模型未配置 console.warn 跳过（不弹 UI）', store.phase === 'idle' && warns.some(w => w.includes('自动生成跳过') && w.includes('未配置选项生成模型')), `warns=${warns.length}`);
     setChoiceProfile(smokeEndpoint.id, smokeEndpoint.models[0] ?? 'smoke-model');
 
     // happy path：同步返回（emit 返回时生成已启动但远未完成——fire-and-forget 实证）
@@ -965,6 +965,7 @@ function runConstantRequestChecks(): void {
         stream: TASK_PARAMS.choice.stream,
         outputContract: TASK_PARAMS.choice.outputContract,
         reasoningEffort: TASK_PARAMS.choice.defaultReasoningEffort,
+        timeoutSec: TASK_PARAMS.choice.timeoutSec,
     });
     const responseFormat = body.response_format as { type?: string } | undefined;
     check(
@@ -1137,7 +1138,7 @@ async function runRunlogChecks(): Promise<void> {
     try {
         const result = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'choice', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-leak-canary', model: 'm1', stream: false, outputContract: 'prompt_only' },
+            { task: 'choice', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-leak-canary', model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.choice.timeoutSec },
         );
         const allRecords = JSON.stringify(runlog.records);
         check('runlog：密钥金丝雀——stub fetch 走一次 callGenerateEndpoint（apiKey=\'sk-leak-canary\'，stub 形态仿 persona smoke），全记录序列化不含该值',
@@ -1191,6 +1192,123 @@ async function runRunlogChecks(): Promise<void> {
             if (savedEndpoints.length === 0) writeApiDomain([]);
             useChoiceStore().$reset();
         }
+    }
+}
+
+/**
+ * 生成超时机判（统一超时原语在 choice 路径上的四个事实）：①装的是 300 秒
+ * 那一档（不是别的数，也不是不装）；②到点按失败可见报出（错误态＋runlog），
+ * 不误报「已取消」；③外部取消仍归「已取消」；④取消与到点的竞态（取消先到）
+ * 仍按超时报。③④必须成对：只钉③，「aborted 就报已取消」的写法照样全绿，
+ * 而真实端点上用户会在毫秒内看到一句他没按过的「已取消」。
+ *
+ * 不真等 300 秒：把 setTimeout 换成记录延时的桩，命中该延时就改为手动触发
+ * （①②立即触发、④在取消之后触发），「到点中止」因此同步可测。fetch 桩照
+ * 真实 fetch 的中止语义——收到 abort（或进场时已中止）即以 AbortError 拒绝；
+ * 不这样桩就测不出到点中止的后果，死端点恰恰就是这个样子（请求发出去再无
+ * 动静）。
+ */
+async function runTimeoutChecks(): Promise<void> {
+    const savedEndpoints = readApiDomain();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    const endpoint = savedEndpoints[0] ?? createEndpoint('超时冒烟端点');
+    if (savedEndpoints.length === 0) writeApiDomain([endpoint]);
+    setChoiceProfile(endpoint.id, endpoint.models[0] ?? 'timeout-model');
+    const runlog = useRunlogStore();
+    const store = useChoiceStore();
+    const originalFetch = globalThis.fetch;
+    const originalSetTimeout = globalThis.setTimeout;
+    let fetchEntered = false;
+    const hangingFetch = (): typeof fetch => (async (_url: string, init?: RequestInit) => {
+        fetchEntered = true;
+        return new Promise((_resolve, reject) => {
+            const fail = (): void => {
+                const aborted = new Error('The operation was aborted.');
+                aborted.name = 'AbortError';
+                reject(aborted);
+            };
+            if (init?.signal?.aborted) fail();
+            else init?.signal?.addEventListener('abort', fail);
+        });
+    }) as unknown as typeof fetch;
+    try {
+        // ①＋②：到点中止（300 秒那一档被即时触发）
+        const delays: number[] = [];
+        globalThis.fetch = hangingFetch();
+        globalThis.setTimeout = ((handler: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+            delays.push(Number(delay));
+            if (Number(delay) === TASK_PARAMS.choice.timeoutSec * 1000) {
+                handler(...args);
+                return 0;
+            }
+            return originalSetTimeout(handler, delay, ...args);
+        }) as unknown as typeof setTimeout;
+        runlog.clear();
+        store.$reset();
+        await generateOptions();
+        const timeoutRecord = runlog.records[runlog.records.length - 1];
+        check('生成超时：choice 请求装的是 300 秒上限（定时器延时机判——不是别的数，也不是不装）',
+            TASK_PARAMS.choice.timeoutSec === 300 && delays.includes(300_000),
+            `timeoutSec=${TASK_PARAMS.choice.timeoutSec} delays=${JSON.stringify(delays)}`);
+        check('生成超时：到点按失败可见报出（错误态带「请求超时（300 秒）」、runlog 记 ok=false），不误报「已取消」',
+            store.phase === 'error' && store.error.includes('请求超时（300 秒）') && !store.error.includes('已取消')
+            && !!timeoutRecord && !timeoutRecord.ok && (timeoutRecord.error ?? '').includes('请求超时（300 秒）'),
+            `phase=${store.phase} error=${store.error} runlog=${timeoutRecord?.error ?? '无'}`);
+
+        // ③：外部取消（真实定时器，只等请求发出）
+        globalThis.setTimeout = originalSetTimeout;
+        fetchEntered = false;
+        globalThis.fetch = hangingFetch();
+        runlog.clear();
+        store.$reset();
+        const pending = generateOptions();
+        for (let i = 0; i < 100 && !fetchEntered; i++) {
+            await new Promise(resolve => originalSetTimeout(resolve, 5));
+        }
+        cancelGeneration();
+        await pending;
+        check('生成取消：外部取消仍报「已取消」（超时与取消两个语义分流未混走）',
+            store.phase === 'error' && store.error === '已取消',
+            `phase=${store.phase} error=${store.error}`);
+
+        // ④竞态：取消先到、到点随后（同一次请求窗口内）——到点已成立时不得被
+        // 改写成「已取消」。这条专门钉传输层的超时判定：只把 ③ 钉住的话，
+        // 「aborted 就报已取消」的写法照样全绿，而真实端点上用户会在毫秒内
+        // 先看到一句「已取消」——他没按过任何东西。
+        let fireTimeout = (): void => undefined;
+        globalThis.setTimeout = ((handler: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+            if (Number(delay) === TASK_PARAMS.choice.timeoutSec * 1000) {
+                fireTimeout = () => handler(...args);
+                return 0;
+            }
+            return originalSetTimeout(handler, delay, ...args);
+        }) as unknown as typeof setTimeout;
+        fetchEntered = false;
+        globalThis.fetch = hangingFetch();
+        runlog.clear();
+        store.$reset();
+        const racing = generateOptions();
+        for (let i = 0; i < 100 && !fetchEntered; i++) {
+            await new Promise(resolve => originalSetTimeout(resolve, 5));
+        }
+        cancelGeneration();
+        fireTimeout();
+        await racing;
+        check('生成超时：取消与到点竞态（取消先到、到点随后）仍按超时报，不被改写成「已取消」',
+            store.phase === 'error' && store.error.includes('请求超时（300 秒）') && !store.error.includes('已取消'),
+            `phase=${store.phase} error=${store.error}`);
+
+        // 任务模型未配置文案：任务中文名注入、裸 taskId 不进用户可见文本
+        const missingMessage = missingTaskModelError('choice').message;
+        check('文案：未配置任务模型带任务中文名「选项生成」且无裸 taskId（apis 层单点构造器）',
+            missingMessage.includes('未配置选项生成模型') && missingMessage.includes('「选项生成」') && !missingMessage.includes('choice'),
+            `msg=${missingMessage}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.setTimeout = originalSetTimeout;
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
+        if (savedEndpoints.length === 0) writeApiDomain([]);
+        store.$reset();
     }
 }
 
@@ -1304,6 +1422,7 @@ export async function runChoiceSmoke(): Promise<void> {
     runTaskRouteChecks();
     await runDebugForceRawChecks();
     await runRunlogChecks();
+    await runTimeoutChecks();
     console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');
     runPoolChecks();
     runAssetPoolChecks();
@@ -1317,5 +1436,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（335 条/42 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（335 条/42 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }

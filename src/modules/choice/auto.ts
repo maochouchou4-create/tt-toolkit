@@ -11,12 +11,11 @@
  * 核实记录见 host/events.ts 头注释）。generateOptions 在首个 await 前同步
  * 置位 activeAbort（并发互斥），守卫与脱钩之间无竞态窗口。
  *
- * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差（配置面＝API 页任务模型卡）。
+ * API 未配时 console.warn 而不弹任何 UI：AI 刚回复完抢焦点体验极差（配置面＝API 页任务模型卡，文案与生成入口同一构造器）。
  */
 
 import { eventBus, event_types, getChatMessages, isHostErrorText } from '@/host';
-import { resolveTaskRoute } from '@/modules/apis/task-profiles';
-import { taskLabel } from '@/tasks';
+import { missingTaskModelMessage, resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
 
@@ -65,7 +64,7 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
 
     if (!resolveTaskRoute('choice')) {
         // 不弹 UI（理由见文件头）；留 console 线索供排障
-        console.warn(`[tt-toolkit][choice] 自动生成跳过：任务模型未配置——到「API」页「任务模型」卡给「${taskLabel('choice')}」配置服务商与模型`);
+        console.warn(`[tt-toolkit][choice] 自动生成跳过：${missingTaskModelMessage('choice')}`);
         return false;
     }
 

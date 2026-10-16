@@ -6,8 +6,8 @@
  * 各注入模块逐项可见。
  */
 import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
-import { callGenerateEndpoint, isBlankResponseContent, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
-import { resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { callGenerateEndpoint, isBlankResponseContent, RequestTimeoutError, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
+import { missingTaskModelError, resolveTaskRoute, routeToRequestConfig } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
@@ -108,6 +108,8 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
 
 /**
  * 生成一次行动选项（全流程）。生成中重复调用拒绝（防并发重入）。
+ * 生成请求带任务固化超时（TASK_PARAMS.choice.timeoutSec）——到点按失败
+ * 可见报出（错误态＋toast＋runlog），与「用户按了取消」分开归类。
  * 调试开关 debugForceRaw 开启时跳过 API，用固定畸形样本走解析路径
  * （回退路径可确定性触发——debugForceRaw 判据载体）。
  */
@@ -155,20 +157,8 @@ export async function generateOptions(): Promise<void> {
         } else {
             // 任务路由单点解析：未配置/悬空 fail fast，文案指路任务模型卡
             const route = resolveTaskRoute('choice');
-            if (!route) {
-                throw new Error('未配置选项生成模型——到「API」页「任务模型」卡给「选项生成」选择服务商与模型');
-            }
-            const requestConfig: GenerateRequestConfig = {
-                task: 'choice',
-                baseUrl: route.url,
-                apiKey: route.key,
-                model: route.model,
-                // 温度/思考强度随任务档案带出（档案缺席＝TASK_PARAMS 默认档）
-                temperature: route.temperature,
-                stream: TASK_PARAMS.choice.stream,
-                outputContract: TASK_PARAMS.choice.outputContract,
-                reasoningEffort: route.reasoningEffort,
-            };
+            if (!route) throw missingTaskModelError('choice');
+            const requestConfig = routeToRequestConfig('choice', route);
             handedToClient = true;
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);
             rawText = result.content;
@@ -213,7 +203,11 @@ export async function generateOptions(): Promise<void> {
                 error: message,
             });
         }
-        if (controller.signal.aborted) {
+        // 超时不是取消：传输层到点中止后抛的是 RequestTimeoutError（错误文案
+        // 与 runlog 记录都由它带），而 signal.aborted 对「用户按了取消」与
+        // 「端点没响应」同真——只认它会把超时静默报成「已取消」，用户看着像
+        // 自己手滑按了取消，而这次失败没给他任何可追的线索。
+        if (controller.signal.aborted && !(e instanceof RequestTimeoutError)) {
             store.fail('已取消');
         } else {
             const message = e instanceof Error ? e.message : String(e);

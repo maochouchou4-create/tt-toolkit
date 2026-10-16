@@ -37,13 +37,38 @@ import {
     renderOwnershipTable,
     type CatalogBlock,
 } from '@/modules/persona/catalog';
-import type { PromptConfig, TaskKey } from './types';
+import type { InjectModule, PromptConfig, TaskKey } from './types';
 
 /**
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
 export const DEFAULTS_VERSION = 19;
+
+/**
+ * 池条目注入模块（choice 任务专属）：默认模板与存量档补建共用的唯一
+ * 定义。
+ *
+ * 为什么是模块级常量而不是各写一份字面量：旧档里缺这个模块时要按 source
+ * 补建，补建用的那份与出厂模板那份一旦漂移（改了 id／order／name 而只改一
+ * 侧），补出来的模块就会带着另一套身份进管线——排序错位或引擎认不出它的
+ * 源，而现象只是「池条目不见了」，不报错。默认模板在本文件内（它才是这个
+ * 模块的出厂地），storage 侧反向引用它，避免两个文件互成环。
+ *
+ * 每次使用都展开副本（两份配置不共享对象身份：调用方就地改 modules 数组
+ * 时会连累出厂常量）。
+ */
+export const POOL_ENTRIES_MODULE: InjectModule = {
+    kind: 'inject',
+    id: 'inject_pool_entries',
+    name: '池条目',
+    role: 'system',
+    // 槽位内容收集全自动（非空即带，见 sources.ts）：默认开＝有池数据就
+    // 在场；空池/无绑定自然跳过（trace 留痕说明原因）
+    order: 98,
+    enabled: true,
+    source: 'pool_entries',
+};
 
 /** 模块 order 分段：注入类 20-100，规则/格式类 110-140（生成指令收尾）。 */
 export function createDefaultPromptConfig(): PromptConfig {
@@ -164,16 +189,9 @@ export function createDefaultPromptConfig(): PromptConfig {
                 source: 'story_direction',
             },
             {
-                // 池条目注入。默认参与管线——空池/无绑定自然跳过（trace
-                // 留痕说明原因），不是「默认关」：有池数据就该在场。
-                // 池规则模块已删：反 OOC 要点并入 core_rules
-                kind: 'inject',
-                id: 'inject_pool_entries',
-                name: '池条目',
-                role: 'system',
-                order: 98,
-                enabled: true,
-                source: 'pool_entries',
+                // 池条目注入：模块本体默认参与管线；池规则模块已删（反 OOC
+                // 要点并入 core_rules）——定义与存量档补建共用一份常量
+                ...POOL_ENTRIES_MODULE,
             },
             {
                 kind: 'text',

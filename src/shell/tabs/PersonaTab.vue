@@ -22,7 +22,7 @@
         />
       </details>
 
-      <div class="tt-persona-actions">
+      <div class="tt-btn-row tt-persona-actions">
         <button type="button" class="tt-btn" @click="onGenerateClick">
           {{ store.isProcessing ? `${store.processingLabel || '处理中…'} · 停止` : '生成人设' }}
         </button>
@@ -104,11 +104,9 @@ function onGreetingChange(event: Event): void {
 
 <style>
 /* 人设 tab 私有布局与信息行（tt-persona- 前缀）；卡片/按钮/控件皮肤
-   走原语层，大编辑区 textarea 保留纯样式类 */
+   走原语层（按钮行的排布与间距走 .tt-btn-row），大编辑区 textarea 保留
+   纯样式类 */
 .tt-persona-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--tt-sp-2);
     margin-bottom: var(--tt-sp-2);
 }
 

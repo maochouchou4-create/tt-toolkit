@@ -25,10 +25,10 @@
  */
 
 import { getCharacterInfoText, getCharacterName, getUserDisplayName, getContextWorldBooks, getWorldBookEntries } from '@/host';
-import { callGenerateEndpoint, isBlankResponseContent, type GenerateMessage } from '@/modules/apis/client';
+import { callGenerateEndpoint, isBlankResponseContent, startRequestTimeout, type GenerateMessage } from '@/modules/apis/client';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
-import { PERSONA_TIMEOUT_SEC, TASK_PARAMS } from '@/modules/apis/task-defaults';
-import type { TaskRoute } from '@/modules/apis/task-profiles';
+import { TASK_PARAMS } from '@/modules/apis/task-defaults';
+import { routeToRequestConfig, type TaskRoute } from '@/modules/apis/task-profiles';
 import {
     assembleMessages,
     assemblePersonaReviewMessages,
@@ -248,30 +248,27 @@ function assemblePersonaMessages(task: PersonaTaskKey, sources: PersonaAssemblyS
  * 请求并处理超时/中断/错误分类。生成链每段各调一次（每段超时独立）。
  *
  * 单一传输通道＝统一客户端的宿主生成路由（callGenerateEndpoint）。
- * persona 任务参数面：温度/思考强度随任务档案带出（缺席＝默认档）、
- * 不发 max_tokens（长 YAML 友好，依赖宿主 insert_if_present 语义）、输出契约
- * prompt_only（纯文本）、stream 恒开、超时 600s。
+ * persona 任务参数面由 routeToRequestConfig 组装：温度/思考强度随任务档案
+ * 带出（缺席＝默认档）、不发 max_tokens（长 YAML 友好，依赖宿主
+ * insert_if_present 语义）、输出契约 prompt_only（纯文本）、stream 恒开、
+ * 超时 600s（任务固化档）。
+ *
+ * 超时与取消在本层是两个事实：超时由传输层的守卫到点触发并转成
+ * RequestTimeoutError 上抛，外部取消汇入同一中止通道但由本层降级成
+ * 「已取消」轻提示——两者的用户在屏幕上的反应必须分开。
  */
 async function requestOnce(params: RequestOnceParams): Promise<string> {
     const { config, messages, trace, prefill, label } = params;
-    const timeoutSec = PERSONA_TIMEOUT_SEC;
+    const timeoutSec = TASK_PARAMS.persona.timeoutSec;
     log.info(`发送请求 (${label})，超时 ${timeoutSec}s，流式 ${String(TASK_PARAMS.persona.stream)}`);
     log.info(`模块管线 (${label}): ${renderTraceCompact({ messages, trace })}`);
 
     let responseContent = '';
-    const controller = new AbortController();
-    let timedOutBySelf = false;
-    // 外部取消汇入段内 controller：一处 abort 同时命中 fetch 与超时定时器
-    const onExternalAbort = () => {
-        try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
-    };
+    // 已中止的外部信号直接判死：不进请求（本轮的收集/组装段已耗掉的等待
+    // 正是用户在此期间点的停止）
     if (params.signal?.aborted) throw new PersonaRunCancelled();
-    params.signal?.addEventListener('abort', onExternalAbort);
-    const timeoutId = setTimeout(() => {
-        timedOutBySelf = true;
-        try { controller.abort(); } catch { /* abort 对已结束的请求抛错无害 */ }
-    }, timeoutSec * 1000);
-
+    // 段内中止通道＝传输层超时守卫（外部取消汇入同一条，见 startRequestTimeout）
+    const guard = startRequestTimeout(timeoutSec, params.signal);
     try {
         // 破限前缀由传输层自动前置（client composeOutbound）；prefill 由
         // 调用方追加尾部，重试需要无 prefill 的独立数组
@@ -281,33 +278,24 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
         const promptArrayNoPrefill: GenerateMessage[] = messages;
 
         const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
-            const result = await callGenerateEndpoint(messages, {
-                task: 'persona',
-                baseUrl: config.route.url,
-                apiKey: config.route.key,
-                model: config.route.model,
-                // 温度/思考强度随任务档案带出（档案缺席＝任务默认档）
-                temperature: config.route.temperature,
-                // max_tokens 不发：人设长文本依赖服务端模型默认上限
-                stream: TASK_PARAMS.persona.stream,
-                outputContract: TASK_PARAMS.persona.outputContract,
-                reasoningEffort: config.route.reasoningEffort,
-            }, controller.signal);
+            const result = await callGenerateEndpoint(
+                messages,
+                routeToRequestConfig('persona', config.route),
+                guard.signal,
+            );
             return result.content;
         };
 
-        /** 错误归类（首发与 prefill 重试共用）：取消→哨兵；超时/网络→人话；其余原样抛。 */
+        /** 错误归类（首发与 prefill 重试共用）：取消→哨兵；网络→人话；其余原样抛
+         * （到点超时已由传输层转成人话错误，见 RequestTimeoutError）。 */
         const classifyFailure = (err: unknown): never => {
             const errStr = (err && (err instanceof Error ? err.message : err.toString()) || '').toString();
             const errLower = errStr.toLowerCase();
-            const isAbort = err && ((err as Error).name === 'AbortError' || errLower.includes('abort'));
             const isNetwork = err && ((err as Error).name === 'TypeError' || errLower.includes('failed to fetch') || errLower.includes('networkerror'));
 
-            // 外部取消优先归类（外部 abort 也会触发 isAbort，先判它防误报超时）
+            // 外部取消优先归类：外部 abort 与超时走同一条中止通道，先判它
+            // 防把用户的取消报成端点超时
             if (params.signal?.aborted) throw new PersonaRunCancelled();
-            if (timedOutBySelf || (isAbort && controller.signal.aborted)) {
-                throw new Error(`请求超时（${PERSONA_TIMEOUT_SEC} 秒）——中转站响应过慢或网络不稳，可稍后重试或更换端点`);
-            }
             if (isNetwork) {
                 throw new Error(`网络请求失败：${errStr}。请检查中转站地址、API Key、网络连通性（梯子 / 公司网络代理等可能拦截）。`);
             }
@@ -317,7 +305,8 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
         try {
             responseContent = await doRequest(promptArray);
         } catch (err) {
-            // 分类：1) 自触发超时 2) 网络层错误 3) 400/Bad Request + 带起手词 → 去起手词重试 4) 其它原样抛。
+            // 分类：1) 网络层错误 2) 400/Bad Request + 带起手词 → 去起手词重试 3) 其它原样抛
+            // （到点超时在上游传输层已转成人话错误，不在本处再分类）。
             // 宿主错误信封也走本判据：信封正文保留着上游原文（含 statusCode
             // 一类字段），故 400 家族经信封路径同样命中重试（两条带起手词的
             // YAML 轮——策展段与档案段——均以 assistant 起手词结尾，被网关以
@@ -344,8 +333,7 @@ async function requestOnce(params: RequestOnceParams): Promise<string> {
             }
         }
     } finally {
-        clearTimeout(timeoutId);
-        params.signal?.removeEventListener('abort', onExternalAbort);
+        guard.dispose();
     }
 
     return responseContent;

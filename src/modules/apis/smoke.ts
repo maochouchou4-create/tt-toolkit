@@ -6,7 +6,8 @@
 import { useApisStore } from './store';
 import { APIS_DOMAIN_KEY, createEndpoint, deleteEndpoint, readApiDomain, setProviderNoPrefill, upsertEndpoint } from './storage';
 import { TASK_PARAMS } from './task-defaults';
-import { readTaskProfiles, resolveTaskRoute, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
+import { readTaskProfiles, resolveTaskRoute, routeToRequestConfig, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
+import { buildGenerateBody } from './client';
 import { TASK_IDS } from '@/tasks';
 import { setGlobal } from '@/storage/service';
 
@@ -129,10 +130,35 @@ export function runApisSmoke(): void {
     setProviderNoPrefill(P.id, false);
     deleteEndpoint(P.id);
 
+    // 请求配置构造器（两任务唯一出口）：身份与采样参数逐字段取自路由，
+    // 流式/输出契约/超时按任务固化档。超时这项钉住的是「任务档进了请求」
+    // ——它必填且不给默认，少写就是一次可能永挂的请求。
+    const cfgChoice = routeToRequestConfig('choice', {
+        providerId: 'tp-c', url: 'https://cfg.example.com/v1', key: 'sk-cfg',
+        model: 'm-cfg', temperature: 1.3, reasoningEffort: 'low', noPrefill: false,
+    });
+    const cfgPersona = routeToRequestConfig('persona', {
+        providerId: 'tp-p', url: 'https://cfg.example.com/v1', key: 'sk-cfg',
+        model: 'm-cfg', temperature: 0.7, reasoningEffort: 'high', noPrefill: false,
+    });
+    check(
+        '请求配置构造器：两任务同形（身份与采样参数随路由、流式/契约/超时按 TASK_PARAMS、不发 max_tokens）',
+        cfgChoice.task === 'choice' && cfgChoice.baseUrl === 'https://cfg.example.com/v1' && cfgChoice.apiKey === 'sk-cfg'
+        && cfgChoice.model === 'm-cfg' && cfgChoice.temperature === 1.3 && cfgChoice.reasoningEffort === 'low'
+        && cfgChoice.stream === TASK_PARAMS.choice.stream && cfgChoice.outputContract === TASK_PARAMS.choice.outputContract
+        && cfgChoice.timeoutSec === TASK_PARAMS.choice.timeoutSec && cfgChoice.timeoutSec === 300
+        && cfgPersona.task === 'persona' && cfgPersona.temperature === 0.7 && cfgPersona.reasoningEffort === 'high'
+        && cfgPersona.stream === TASK_PARAMS.persona.stream && cfgPersona.outputContract === TASK_PARAMS.persona.outputContract
+        && cfgPersona.timeoutSec === TASK_PARAMS.persona.timeoutSec && cfgPersona.timeoutSec === 600
+        && !('max_tokens' in buildGenerateBody([{ role: 'user', content: 'hi' }], cfgChoice))
+        && !('max_tokens' in buildGenerateBody([{ role: 'user', content: 'hi' }], cfgPersona)),
+        `choice=${JSON.stringify(cfgChoice)}；persona=${JSON.stringify(cfgPersona)}`,
+    );
+
     if (failures.length > 0) {
         console.error(`[apis-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行与能力记忆九断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默）');
+    console.info('[apis-smoke] OK：批量设置行与能力记忆十断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）');
 }
