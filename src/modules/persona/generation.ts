@@ -499,8 +499,6 @@ async function settleReviewRound(params: ReviewRoundParams): Promise<GenerationR
  *
  * 入口是判据层那条**不抛错的窄通道**（analyzeCatalogDrift）：形状不可判定时它
  * 照样返回一个报告而不是抛——所以这里不需要 try，也不可能把诊断变成失败源。
- * （那条会抛的入口 analyzeRedundancy 是给「这份档案能不能机判」用的，诊断路径
- * 踩它就等于把一次告警变成一次崩溃。）
  */
 function warnCatalogDrift(profile: string): void {
     const report = analyzeCatalogDrift(profile);

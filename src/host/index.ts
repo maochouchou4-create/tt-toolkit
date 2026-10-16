@@ -59,7 +59,6 @@ export {
 export {
     getCurrentAvatarId,
     getUserDisplayName,
-    listUserPersonas,
     upsertPersona,
     type PersonaDescriptor,
 } from './personas';

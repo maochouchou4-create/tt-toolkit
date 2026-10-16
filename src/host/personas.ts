@@ -81,11 +81,6 @@ export function getUserDisplayName(): string {
     return typeof name === 'string' && name.trim() ? name : 'User';
 }
 
-/** 全量用户 persona 清单（ghost 键防御后的内存视图）。 */
-export function listUserPersonas(): Array<{ avatarId: string; name: string }> {
-    return Object.entries(personasRecord()).map(([avatarId, name]) => ({ avatarId, name }));
-}
-
 /**
  * 清理 personas 里指向不存在头像文件的幽灵键（旧版插件写入的脏数据）。
  * 纯内存删除＋saveSettingsDebounced，禁止对这些 id 调 /persona-delete——

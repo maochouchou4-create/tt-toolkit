@@ -574,9 +574,9 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含旧
 // endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重映射/
 // choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动清空
-// 1＋prompts 5（全任务键齐备含 choice 17 模块红线/旧数组一次写迁移/旧默认快照
-// 版本化重建按 module id 在场且不多余/curator 与 persona_gen 两任务默认占位符）
-// ＋persona 组装
+// 1＋prompts 5（全任务键齐备含 choice 17 模块红线/旧数组整键重建默认＋warn/
+// 旧默认快照版本化重建按 module id 在场且不多余/curator 与 persona_gen
+// 两任务默认占位符）＋persona 组装
 // 7（curator 管线/persona_gen 管线占位符全填＋档案段正文零跨段引用「原则 N·要求
 // N·策展段」三类标记全扫/档案段正文「块名·叶名」全落目录真实键/叶边界段随本次
 // schema 收敛且行集＝字面量四行/叶边界段整段逐字节＝收敛成文/模块开关闭环）＋persona dump 观测口 2＋纯函数 12＋api 16（含 finish_reason=length 截断
@@ -620,11 +620,11 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // 拒判＋反向用例：单顶层键整块去缩进分支会丢顶层键；机制挂载块的原生叫法不再整行
 // 丢弃且未识别块与未识别叶分开计；裸列表项与无主续行进无主行、不再静默丢弃；宿主
 // 错误正文报 NO_LEAVES：它有 2 个顶层「块」，只靠块数放行等于没校验；错误正文凑够
-// 两个顶层块时形状闸放行、判据层按目录外叶过半降级为 MOSTLY_OUT_OF_CATALOG；填好的
-// 档案形状放行）＋确定性重复判据 8（契约点名的偷懒占位不算同值；LITERAL_SAMPLE 必
-// 命中含靠标点表才成立的一对、反转版零命中、REDUNDANCY_SAMPLE 的 structural 报出归属
-// 对第 2 对、该样本 literal 零命中是预期而非漏报、未识别块叶 0 在内联目录与默认目录
-// 下各跑一次、归一两段分工机判、标点表里每个字符各一条只有它能成立的断言）
+// 两个顶层块时形状闸放行（那个洞由不抛错的目录对照体检接手）；填好的档案形状放行）
+// ＋确定性重复判据 7（契约点名的偷懒占位不算同值；LITERAL_SAMPLE 必
+// 命中含靠标点表才成立的一对、反转版零命中、该样本 literal 零命中是预期而非漏报、
+// 未识别块叶 0 在内联目录与默认目录下各跑一次、归一两段分工机判、标点表里每个
+// 字符各一条只有它能成立的断言）
 // ＋复核回合 10（判据层零命中仍无条件发出第三段·末段按指令首行认得出是复核段；
 // 指令并进 messages 并携带整份档案＋末条是 user 的查重指令且整份请求里没有任何
 // assistant 模型轮——复核轮不带起手词（读实发 body，不读传入的那份 messages）；
@@ -647,7 +647,12 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // 写回即立基线故宿主同值时不打扰/宿主正文偏离快照时问一次且拒答即零写通道
 // 调用·镜像与编辑现场原样）＋切聊天落在世界书收集窗口 1（收集是真挂起点且
 // 不收取消信号·该窗口内切聊天则旧会话描述符不写回 lastRun·请求不发出）。
-const PERSONA_PASS_EXPECTED = 159;
+// ＝ 死代码清理批：analyzeRedundancy 入口删除后，structural 判据（归属对
+// 第 2 对）随判定面一并退役 −1；其余依赖该入口的断言改钉在仍活的判据面
+// （完全同值走 literalDuplicateSignatures、目录对照走 analyzeCatalogDrift、
+// 形状走 checkProfileShape），断言条数不变、强度不减；prompts 段「旧数组
+// 一次写迁移」换成「旧数组整键重建默认＋warn」仍为 1 条。
+const PERSONA_PASS_EXPECTED = 158;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

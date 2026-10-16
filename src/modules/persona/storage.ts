@@ -59,16 +59,6 @@ export interface PersonaDomain {
     userContext: UserContext;
 }
 
-export function defaultUserContext(): UserContext {
-    return { request: '', result: '' };
-}
-
-export function defaultPersonaDomain(): PersonaDomain {
-    return {
-        userContext: defaultUserContext(),
-    };
-}
-
 // ============================================================================
 // normalize（域形状保真：未知字段丢弃，缺字段补默认）
 // ============================================================================

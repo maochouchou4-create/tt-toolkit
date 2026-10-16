@@ -283,14 +283,13 @@ export interface ProfileScan {
  * `includes('单块档案·不可判定')` 判形态的消费方就静默失效，而失效方向是
  * 「把不可判定当没重复」——那正是本层最危险的谎。
  */
-export type ProfileUndecidableCode = 'EMPTY' | 'SINGLE_BLOCK' | 'NO_LEAVES' | 'MOSTLY_OUT_OF_CATALOG';
+export type ProfileUndecidableCode = 'EMPTY' | 'SINGLE_BLOCK' | 'NO_LEAVES';
 
 /** 分类码 → 人读文案（进异常 message 与简报；文案改动不牵动分类）。 */
 const UNDECIDABLE_TEXT: Readonly<Record<ProfileUndecidableCode, string>> = {
     EMPTY: '空档案·不可判定',
     SINGLE_BLOCK: '单块档案·不可判定',
     NO_LEAVES: '零叶档案·不可判定',
-    MOSTLY_OUT_OF_CATALOG: '目录外叶过半·不可判定',
 };
 
 /** 不可判定异常：code 给机器分形态，message 给用户看形态。 */
@@ -310,7 +309,7 @@ export class ProfileUndecidableError extends Error {
 
 export interface ProfileShape {
     ok: boolean;
-    /** 不可判定的分类码（ok 时为 null）；形状闸只出前三个，MOSTLY_OUT_OF_CATALOG 由判据层出。 */
+    /** 不可判定的分类码（ok 时为 null）。 */
     code: ProfileUndecidableCode | null;
     topLevelBlocks: number;
     leafCount: number;
@@ -507,9 +506,9 @@ export function shapeOfScan(result: ProfileScan | null): ProfileShape {
 /**
  * 档案段入口侧的形状校验：这份文本能不能进叶级判定。
  *
- * **档案段此前从不跑任何形状校验**（isSchemaSkeleton 只服务策展段），而判据层
- * 的两条规则都建立在「这是一份填好的档案」之上——前提不成立时报出来的零命中
- * 与「确实没有重复」不可区分。入口侧先过这一道，判据层才有资格开口。
+ * **档案段此前从不跑任何形状校验**（isSchemaSkeleton 只服务策展段），而叶层
+ * 判定的规则都建立在「这是一份填好的档案」之上——前提不成立时报出来的零命中
+ * 与「确实没有重复」不可区分。入口侧先过这一道，叶层判定才有资格开口。
  *
  * 三条不成立的形态各带一个分类码：
  *   - EMPTY（空串/非字符串/剥完围栏没内容）；
@@ -519,8 +518,8 @@ export function shapeOfScan(result: ProfileScan | null): ProfileShape {
  *   - NO_LEAVES（零叶）——宿主错误正文（「请求地址: https://…」这类整行键）与
  *     块界塌陷后的档案都落在这里。
  *
- * 「是不是档案」的第四道（目录外叶过半 MOSTLY_OUT_OF_CATALOG）不在这里：解析层
- * 不认目录，那道判定连同它要的目录键集都在判据层（redundancy.ts）。
+ * 形状闸只看得见块数与叶数，所以它必然放过「两个顶层块各挂一叶」的宿主错误
+ * 正文；那一类由不抛错的目录对照体检去报（catalogDriftLeaves），不在本层加码。
  */
 export function checkProfileShape(text: unknown): ProfileShape {
     return shapeOfScan(scan(text));
@@ -529,11 +528,10 @@ export function checkProfileShape(text: unknown): ProfileShape {
 /**
  * 叶级解析：**只如实报告扫到了什么，不判断这份文本可不可用**。
  *
- * 抛错的判据闸在 `analyzeRedundancy` 那道边界上，不在这里——`checkProfileShape`
- * 已经是不抛错的形状视图，扫描器再抛一次就是同一道闸写两遍；而扫描器的正当用法
- * 恰恰包含「明知它形状不对、就是要看它扫出了什么」（回归用例里全是单块、半截、
- * 畸形文本）。判据闸抛 `ProfileUndecidableError` 而不是返回空报告：空报告在下游
- * 与「档案里没有重复」同形，调用方拿到的是绿灯而实际什么都没判。
+ * 扫描器不抛错：`checkProfileShape` 已经是不抛错的形状视图，扫描器再抛一次
+ * 就是同一道闸写两遍；而扫描器的正当用法恰恰包含「明知它形状不对、就是要看
+ * 它扫出了什么」（回归用例里全是单块、半截、畸形文本）。判断「这份文本能不能
+ * 用」是形状闸与诊断层的职责，不是扫描器的。
  */
 export function scanProfileLeaves(text: unknown): ProfileScan {
     return scan(text) ?? { blocks: [], leaves: [], blockKeys: [], leafKeys: [], orphanLines: [] };

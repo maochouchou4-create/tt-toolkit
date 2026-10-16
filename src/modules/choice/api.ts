@@ -30,7 +30,14 @@ export interface ChoiceGenParams extends PoolGenParams {
     maxChars: number;
     /** 点击行为：fill 填入 / append 追加 / send 直接发送 */
     clickBehavior: 'fill' | 'append' | 'send';
-    /** 调试：跳过 API、用固定畸形样本走解析路径（验收「回退可确定性触发」） */
+    /**
+     * 跳过 API、用固定畸形样本走完整生成管线（验收「回退可确定性触发」）。
+     *
+     * 它不是调试残留而是冒烟的**唯一无网全管线通道**：node 冒烟无宿主网络，
+     * 生成链的组装→发送→解析→落盘四段只有这一条能在不发请求的前提下被
+     * 逐段观测。恒 false，冒烟驱动它时必须在 finally 侧还原（否则后续断言
+     * 全部在假管线上跑）。
+     */
     debugForceRaw: boolean;
 }
 

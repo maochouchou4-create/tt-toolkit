@@ -19,6 +19,15 @@ import { TASK_PARAMS } from './task-defaults';
 export const TASK_PROFILES_KEY = 'taskProfiles';
 
 /**
+ * 思考强度档位清单（枚举单一真相源，守门者持有）。
+ *
+ * 放在这一层而不是传输层 client：档案读侧的 normalizeProfile 才是真正的守卫
+ * （存档里的历史值不可信，枚举外剔除），枚举住在守卫旁边，档位增删时守卫不会
+ * 与 UI 各拿一份清单漂移。客户端只消费 ReasoningEffort 类型，不重复持表。
+ */
+export const REASONING_EFFORTS = ['off', 'low', 'medium', 'high'] as const;
+
+/**
  * 任务档案值：该任务出站走哪个服务商＋哪个模型＋温度/思考强度
  * （providerId/model 空＝未配置，入口 fail fast；temperature/reasoningEffort
  * 缺席＝任务默认档——改默认值时未动过的行自动跟随）。
@@ -29,7 +38,7 @@ export interface TaskProfile {
     /** 采样温度（任务级配置）：缺席＝TASK_PARAMS 默认值；normalize 钳制 0-2、非数剔除。 */
     temperature?: number;
     /** 思考强度（任务级配置）：缺席＝TASK_PARAMS 默认档；normalize 枚举外剔除。 */
-    reasoningEffort?: 'off' | 'low' | 'medium' | 'high';
+    reasoningEffort?: ReasoningEffort;
 }
 
 /** 域形状：全任务行齐全（normalize 补缺行）。 */
@@ -56,7 +65,7 @@ function normalizeProfile(value: unknown): TaskProfile {
         profile.temperature = Math.min(2, Math.max(0, raw.temperature));
     }
     if (typeof raw.reasoningEffort === 'string'
-        && (['off', 'low', 'medium', 'high'] as const).includes(raw.reasoningEffort as ReasoningEffort)) {
+        && REASONING_EFFORTS.includes(raw.reasoningEffort as ReasoningEffort)) {
         profile.reasoningEffort = raw.reasoningEffort as ReasoningEffort;
     }
     return profile;

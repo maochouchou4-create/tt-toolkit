@@ -170,6 +170,7 @@ import { useApisStore } from '@/modules/apis/store';
 import { TASKS, type TaskId } from '@/tasks';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import type { ReasoningEffort } from '@/modules/apis/client';
+import { REASONING_EFFORTS } from '@/modules/apis/task-profiles';
 import type { ApiProvider } from '@/modules/apis/types';
 import { showToast } from '@/host';
 import { TTCard, TTCombobox, TTField, TTStatus } from '@/shell/ui';
@@ -191,12 +192,9 @@ const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留�
 const JB_SUB = '选中宿主预设的「启用文本条目」会插到创作类任务每次请求的最前，人设链每一轮都带（含复核那一轮）；预设不存在或无启用条目时生成不带注入（运行日志有记录）。';
 const JB_DETAILS = '按原角色插入（assistant 开场就还是 assistant）。预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）。';
 
-const EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
-    { value: 'off', label: '关' },
-    { value: 'low', label: '低' },
-    { value: 'medium', label: '中' },
-    { value: 'high', label: '高' },
-];
+// 档位清单取任务档案侧的枚举（守卫同源）——UI 只出中文标签，不另抄一份档位表
+const EFFORT_LABELS: Readonly<Record<ReasoningEffort, string>> = { off: '关', low: '低', medium: '中', high: '高' };
+const EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = REASONING_EFFORTS.map(value => ({ value, label: EFFORT_LABELS[value] }));
 
 function effortLabel(effort: ReasoningEffort): string {
     return EFFORT_OPTIONS.find(e => e.value === effort)?.label ?? effort;

@@ -2,22 +2,20 @@
  * prompts 域存储（读侧纯函数＋启动期迁移写）：其他域同构的
  * storage 分文件。真相源＝全局域 extension_settings.ttToolkit.promptConfigs
  * （Record<TaskKey, PromptConfig>，三任务各一套——choice 选项生成＋
- * persona 策展/填充；旧数组档由启动 init 一次性迁移为 {choice: 旧生效套}，
- * 二次启动零改写）。
+ * persona 策展/填充）；非 Record 形态的旧档不迁移，整键重建默认并留 warn。
  *
  * 读路径零副作用：getter 只做内存 normalize（补缺/形状守门），不写回；
- * 落盘迁移统一由 ensurePromptConfigs 在启动期完成（choice 模块 init
+ * 落盘统一由 ensurePromptConfigs 在启动期完成（choice 模块 init
  * 调用——浏览器与 node 冒烟两路，不依赖任何 UI 读方先打开设置页）。
  */
 
 import { getGlobal, setGlobal } from '@/storage';
-import { DEFAULTS_VERSION, createDefaultPromptConfig, createTaskDefaultConfig } from './defaults';
+import { DEFAULTS_VERSION, createTaskDefaultConfig } from './defaults';
 import { TASK_KEYS } from './types';
 import type { PromptConfig, TaskKey } from './types';
 
 /** 全局域提示词配置集键（冒烟机判直接按此键构造/恢复域，禁第二份字面量）。 */
 export const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
-const GLOBAL_PROMPT_ACTIVE_KEY = 'promptActiveId';
 
 /** 配置形状守门（Record 形态下逐键校验——外部写坏的键回退默认，不抛错）。 */
 function isConfigShape(value: unknown): value is PromptConfig {
@@ -55,26 +53,26 @@ function stripRetiredPoolRules(choice: PromptConfig | undefined): boolean {
 
 /**
  * 存储原值 → 各任务键 Record（纯函数，不触碰 storage）。
- * 旧数组档（单模板时代，恒单元素）→ {choice: 当时生效套}（activeId 命中
- * ?? 首套）；新 Record 形逐任务键读取，未知键丢弃（normalize 丢弃面）；
- * 缺席任务键补默认（首次启动全默认；旧档补 persona 两键；存量已退休任务
- * 键的配置读侧出局——TASK_KEYS 收窄后未知键在写回时自然消失）。
+ *
+ * 域形状只认 Record：逐任务键按形状校验读取，未知键丢弃（normalize 丢弃面）、
+ * 缺席任务键补默认（首次启动全默认；存量已退休任务键的配置读侧出局——
+ * TASK_KEYS 收窄后未知键在写回时自然消失）。
+ *
+ * **非 Record 形态（旧数组档与一切非对象原值）整键重建默认并留一条 warn**：
+ * 重建会丢掉用户编辑过的提示词，是可感知的数据重置——静默做等于让用户对着
+ * 空模板以为自己只是「没生效」。空域（键缺席，首次启动）不是这一类，不留痕。
  */
 function normalizePromptConfigs(raw: unknown): { configs: Record<TaskKey, PromptConfig>; changed: boolean } {
     const configs: Partial<Record<TaskKey, PromptConfig>> = {};
     let changed = false;
-    if (Array.isArray(raw)) {
-        let list = raw as PromptConfig[];
-        const activeId = getGlobal<string>(GLOBAL_PROMPT_ACTIVE_KEY);
-        if (list.length === 0) list = [createDefaultPromptConfig()];
-        else if (list.length > 1) list = [list.find(c => c.id === activeId) ?? list[0]];
-        configs.choice = list[0];
-        changed = true;
-    } else if (raw !== null && typeof raw === 'object') {
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
         const record = raw as Record<string, unknown>;
         for (const task of TASK_KEYS) {
             if (isConfigShape(record[task])) configs[task] = record[task];
         }
+    } else if (raw !== null && raw !== undefined) {
+        console.warn(`tt-toolkit：${GLOBAL_PROMPT_CONFIGS_KEY} 域形状不可判定（非 Record），已整键重建为默认提示词——用户编辑过的内容不再保留`);
+        changed = true;
     }
     for (const task of TASK_KEYS) {
         if (configs[task]) continue;

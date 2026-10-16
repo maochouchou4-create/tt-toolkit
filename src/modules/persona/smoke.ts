@@ -20,8 +20,8 @@ import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
 import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
-import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves, ProfileUndecidableError } from './yaml';
-import { analyzeRedundancy, analyzeCatalogDrift, isJudgeableLeaf, isSameLeafValue, normalizeLeafValue } from './redundancy';
+import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves } from './yaml';
+import { analyzeCatalogDrift, isJudgeableLeaf, isSameLeafValue, literalDuplicateSignatures, normalizeLeafValue } from './redundancy';
 import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
@@ -29,7 +29,7 @@ import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration'
 import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_IDS } from '@/tasks';
-import { DEFAULTS_VERSION, TASK_KEYS, createTaskDefaultConfig, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
+import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
 import {
     CATALOG_DEFINITIONS_CLOSE_TAG,
     CATALOG_DEFINITIONS_OPEN_TAG,
@@ -435,25 +435,31 @@ function runPromptsChecks(): void {
         && prompts.configFor('persona_gen') !== null,
         `keys=${Object.keys(record).join('/')}`);
 
-    // 旧档（单元素数组）→ Record 一次性迁移：choice id 保留＋补缺席键。
-    // 迁移写在启动 init（ensurePromptConfigs——读路径零副作用后的唯一
-    // 落盘口），模拟「旧档在场」的启动即调 init
+    // 旧档（单元素数组）不再迁移：域形状只认 Record，数组档整键重建为默认
+    // 并留一条 warn——重建会丢掉用户编辑过的提示词，是可感知的数据重置，
+    // 静默做等于让用户以为自己的提示词还在。落盘仍走启动 init
+    // （ensurePromptConfigs——读路径零副作用后的唯一落盘口），模拟
+    // 「旧档在场」的启动即调 init
     const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
     setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [legacySet]);
-    ensurePromptConfigs();
+    const shapeWarnings: string[] = [];
+    const originWarn = console.warn;
+    console.warn = (...args: unknown[]): void => { shapeWarnings.push(args.map(arg => String(arg)).join(' ')); };
+    try {
+        ensurePromptConfigs();
+    } finally {
+        console.warn = originWarn;
+    }
     // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
     // revision，否则返回首次调用的缓存快照看不到外部写
     prompts.$patch({ revision: prompts.revision + 1 });
-    const migratedChoice = prompts.configFor('choice');
+    const rebuiltChoice = prompts.configFor('choice');
     const rawAfter = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
-    check('prompts：旧数组形态一次写迁移（choice id 保留、补缺 persona 两键）',
-        migratedChoice?.id === 'legacy-set' && !Array.isArray(rawAfter) && rawAfter !== null
-        && (rawAfter as Record<string, unknown>).persona_gen !== undefined);
-    // 还原 choice 17 模块红线（恢复默认＝smoke 直调写通道，store 无编辑面 action）
-    const restored = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
-    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, { ...restored, choice: createTaskDefaultConfig('choice') });
-    // 直写域后打失效信号（与上方旧档写同款纪律——后续 configFor 断言读新值）
-    prompts.$patch({ revision: prompts.revision + 1 });
+    check('prompts：旧数组形态整键重建为默认并留 warn（不迁移旧套·重建是数据重置必须留痕）',
+        rebuiltChoice?.id === 'default' && !Array.isArray(rawAfter) && rawAfter !== null
+        && TASK_KEYS.every(k => (rawAfter as Record<string, unknown>)[k] !== undefined)
+        && shapeWarnings.length === 1 && shapeWarnings[0].includes(GLOBAL_PROMPT_CONFIGS_KEY),
+        `choice=${rebuiltChoice?.id ?? '（无）'} warn=${shapeWarnings.length}/${shapeWarnings[0] ?? '（无）'}`);
 
     // 默认配置版本化重建：版本落后的默认快照（defaultsVersion 落后于当前
     // ——真实升级存量的形态）启动后被整键重建为新版并盖新版本号
@@ -1387,22 +1393,6 @@ const REDUNDANCY_SAMPLE = [
     '  共同经历: 十五岁那年冬天，两人一起守着火炉等她妈回来',
 ].join('\n');
 
-/**
- * 取判据入口抛出的不可判定异常；没抛返回 null。
- *
- * 探针一律断 `err.code` 与两个计数（裁决⑤），不碰 `err.message`：文案是给人看的，
- * 一改就断，而按文案匹配的失效方向正是「把不可判定当没重复」。
- */
-function undecidableError(text: string, catalog?: ReadonlyArray<CatalogBlock>): ProfileUndecidableError | null {
-    try {
-        analyzeRedundancy(text, catalog);
-        return null;
-    } catch (e) {
-        if (e instanceof ProfileUndecidableError) return e;
-        throw e;
-    }
-}
-
 function runRedundancyChecks(): void {
     // 目录键集是解析层与判据层唯一的「什么算档案叶」权威（裁决②）：条件叶在清单
     // 里以【…】成文、在档案里以裸键出现，键名归一收在一处；模板叶块的叶名由模型
@@ -1432,23 +1422,23 @@ function runRedundancyChecks(): void {
     // 证明这些空叶确实在场上、确实被判成了空值而不是没解析出来。
     const emptyScan = scanProfileLeaves(EMPTY_AND_LIST_LEAF_YAML);
     const emptyLeafForms = emptyScan.leaves.map(row => `${row.block}·${row.leaf}:${row.form}`);
-    const emptyReport = analyzeRedundancy(EMPTY_AND_LIST_LEAF_YAML, FIXTURE_CATALOG);
+    const emptyGroups = literalDuplicateSignatures(EMPTY_AND_LIST_LEAF_YAML);
     check('yaml 叶级＋判据：列表承载叶与空值叶先排除（加固①·不排除即 6 对假命中）',
         jsonEq(emptyLeafForms,
             ['基本信息·年龄:scalar', '基本信息·性别:scalar', '基本信息·身份:scalar', '喜恶·喜欢:list', '兴趣嗜好·爱好:scalar'])
-        && emptyReport.literal.length === 0,
-        `叶=${JSON.stringify(emptyLeafForms)} literal=${JSON.stringify(emptyReport.literal)}`);
+        && emptyGroups.length === 0,
+        `叶=${JSON.stringify(emptyLeafForms)} 同值组=${JSON.stringify(emptyGroups)}`);
 
     // 裁决③的占位那一类：两叶都写「待定」必须零对。占位词表取自
     // PROFILE_PLACEHOLDER_VALUES（由生成契约同一份词插值成文），判据层不另抄。
     const placeholderScan = scanProfileLeaves(PLACEHOLDER_VALUES_YAML);
     const placeholderRows = placeholderScan.leaves.filter(row => normalizeLeafValue(row.value) === '待定');
-    const placeholderReport = analyzeRedundancy(PLACEHOLDER_VALUES_YAML, FIXTURE_CATALOG);
+    const placeholderGroups = literalDuplicateSignatures(PLACEHOLDER_VALUES_YAML);
     check('判据：契约点名的偷懒占位不算「完全同值」（裁决③·两叶都写待定仍零对）',
         placeholderRows.length === 2 && placeholderRows.every(row => !isJudgeableLeaf(row))
         && PROFILE_PLACEHOLDER_VALUES.includes('待定') && PROFILE_PLACEHOLDER_VALUES.includes('N/A')
-        && placeholderReport.literal.length === 0,
-        `待定叶=${placeholderRows.length} literal=${JSON.stringify(placeholderReport.literal)}`);
+        && placeholderGroups.length === 0,
+        `待定叶=${placeholderRows.length} 同值组=${JSON.stringify(placeholderGroups)}`);
 
     // 加固②：块首行内联的首叶。只认缩进的读法在这份夹具上只能解析出 2 叶，
     // 期望值写的是 3 叶——差的那一叶就是首叶。
@@ -1472,68 +1462,62 @@ function runRedundancyChecks(): void {
         oneSpaceBlocks.get('基本信息') === '' && oneSpaceBlocks.get('外貌') === '',
         `keys=${[...oneSpaceBlocks.keys()].join('/')}`);
 
-    // 加固④：顶层块 <2 报 SINGLE_BLOCK，判据层拒判而不是给一份空报告。
-    // 反向用例同在：这份文本会踩单顶层键的整块去缩进分支，顶层键被丢掉。
+    // 加固④：顶层块 <2 报 SINGLE_BLOCK，形状闸拒判这份文本。反向用例同在：
+    // 这份文本会踩单顶层键的整块去缩进分支，顶层键被丢掉。
     const singleShape = checkProfileShape(SINGLE_BLOCK_YAML);
-    const singleError = undecidableError(SINGLE_BLOCK_YAML, FIXTURE_CATALOG);
-    check('yaml 形状＋判据：单块档案报 SINGLE_BLOCK 且判据拒判（加固④）',
+    check('yaml 形状：单块档案报 SINGLE_BLOCK 且拒判（加固④）',
         !singleShape.ok && singleShape.code === 'SINGLE_BLOCK'
         && singleShape.topLevelBlocks === 1 && singleShape.leafCount === 2
-        && singleError?.code === 'SINGLE_BLOCK' && singleError.topLevelBlocks === 1 && singleError.leafCount === 2
         && ![...parseYamlToBlocks(SINGLE_BLOCK_YAML).keys()].includes('基本信息'),
-        `shape=${JSON.stringify(singleShape)} code=${singleError?.code ?? '（未抛）'}`);
+        `shape=${JSON.stringify(singleShape)}`);
 
     // 加固⑤：机制挂载块的原生叫法不再整行被当块内容丢掉。两个未识别计数分开取：
     // 「整块在目录外」（机制挂载块，永远不必补叶）与「目录里这块有、模型多写了
     // 一叶」（要查）是两类处置，合进一个计数就分不出来了。
     const mechScan = scanProfileLeaves(MECHANISM_NAMED_YAML);
-    const mechReport = analyzeRedundancy(MECHANISM_NAMED_YAML, FIXTURE_CATALOG);
-    check('yaml 叶级＋判据：机制挂载块的原生叫法不再整行丢弃（加固⑤·未识别块/叶分开计）',
+    const mechDrift = analyzeCatalogDrift(MECHANISM_NAMED_YAML, FIXTURE_CATALOG);
+    check('yaml 叶级＋目录对照：机制挂载块的原生叫法不再整行丢弃（加固⑤·未识别块/叶分开计）',
         jsonEq(mechScan.blocks, ['基本信息', '底牌机制'])
         && jsonEq(mechScan.leaves.map(row => [row.block, row.leaf]),
             [['基本信息', '年龄'], ['底牌机制', 'HP 成长'], ['底牌机制', '冷却-判定']])
-        && jsonEq(mechReport.unrecognizedBlocks, ['底牌机制'])
-        && jsonEq(mechReport.unrecognizedLeaves, ['底牌机制·HP 成长', '底牌机制·冷却-判定']),
-        `块=${JSON.stringify(mechScan.blocks)} 未识别块=${JSON.stringify(mechReport.unrecognizedBlocks)} 未识别叶=${JSON.stringify(mechReport.unrecognizedLeaves)}`);
+        && mechDrift.mechanismBlocksOutsideCatalog === 1
+        && mechDrift.unrecognizedLeavesTotal === 2,
+        `块=${JSON.stringify(mechScan.blocks)} 未识别块=${mechDrift.mechanismBlocksOutsideCatalog} 未识别叶=${mechDrift.unrecognizedLeavesTotal}`);
 
     // 裁决④：块下还没有叶可并时，裸列表项与缩进散文都不再静默丢弃——它们连同
     // 目录外的那一叶（备注）一起进未识别叶，两个未识别计数各归其位（两个块名本身
     // 都在目录里，所以未识别块为空——这一条同时钉住「未识别块」只装整块在目录外的）。
     const orphanScan = scanProfileLeaves(ORPHAN_LINE_YAML);
-    const orphanReport = analyzeRedundancy(ORPHAN_LINE_YAML, FIXTURE_CATALOG);
-    check('yaml 叶级＋判据：裸列表项与无主续行进无主行、不再静默丢弃（裁决④）',
+    const orphanDrift = analyzeCatalogDrift(ORPHAN_LINE_YAML, FIXTURE_CATALOG);
+    check('yaml 叶级＋目录对照：裸列表项与无主续行进无主行、不再静默丢弃（裁决④）',
         jsonEq(orphanScan.leafKeys, ['基本信息·备注', '基本信息·年龄', '基本信息·身份'])
         && jsonEq(orphanScan.orphanLines, ['- 妹妹', '十五岁那年冬天'])
-        && jsonEq(orphanReport.unrecognizedBlocks, [])
-        && jsonEq(orphanReport.unrecognizedLeaves, ['基本信息·备注', '- 妹妹', '十五岁那年冬天']),
-        `叶键=${JSON.stringify(orphanScan.leafKeys)} 无主行=${JSON.stringify(orphanScan.orphanLines)} 未识别块=${JSON.stringify(orphanReport.unrecognizedBlocks)} 未识别叶=${JSON.stringify(orphanReport.unrecognizedLeaves)}`);
+        && orphanDrift.mechanismBlocksOutsideCatalog === 0
+        && orphanDrift.unrecognizedLeavesTotal === 3,
+        `叶键=${JSON.stringify(orphanScan.leafKeys)} 无主行=${JSON.stringify(orphanScan.orphanLines)} 未识别块=${orphanDrift.mechanismBlocksOutsideCatalog} 未识别叶=${orphanDrift.unrecognizedLeavesTotal}`);
 
     // catalogDriftLeaves＝「目录里这块有、模型多写了一叶」，是复核轮收尾那条
     // 目录漂移 warn 的触发口径。差集两头各钉一条：机制挂载块的叶**不进**（口径
     // 若含它，每份挂机制块的正常档案都喊漂移，告警随即失效）；目录内块多写的
     // 叶**进**，而无主行不算（它不是某个叶的漂移，是模型手滑）。
     check('yaml 判据：catalogDriftLeaves 只装「目录内块里写出的目录外叶」（机制挂载块的叶与无主行都不算）',
-        jsonEq(mechReport.catalogDriftLeaves, [])
-        && jsonEq(orphanReport.catalogDriftLeaves, ['基本信息·备注']),
-        `机制挂载块那份=${JSON.stringify(mechReport.catalogDriftLeaves)} 无主行那份=${JSON.stringify(orphanReport.catalogDriftLeaves)}`);
+        jsonEq(mechDrift.catalogDriftLeaves, [])
+        && jsonEq(orphanDrift.catalogDriftLeaves, ['基本信息·备注']),
+        `机制挂载块那份=${JSON.stringify(mechDrift.catalogDriftLeaves)} 无主行那份=${JSON.stringify(orphanDrift.catalogDriftLeaves)}`);
 
     // 加固⑥：档案段此前从不跑形状校验。宿主错误正文在这里落成零叶——它有 2 个
     // 顶层「块」，只靠「块数 ≥2」放行等于没校验。
     const envelopeShape = checkProfileShape(HOST_ERROR_ENVELOPE_YAML);
-    const envelopeError = undecidableError(HOST_ERROR_ENVELOPE_YAML, FIXTURE_CATALOG);
-    check('yaml 形状＋判据：宿主错误正文报 NO_LEAVES（加固⑥）',
-        !envelopeShape.ok && envelopeShape.code === 'NO_LEAVES'
-        && envelopeError?.code === 'NO_LEAVES' && envelopeError.leafCount === 0,
-        `shape=${JSON.stringify(envelopeShape)} code=${envelopeError?.code ?? '（未抛）'}`);
+    check('yaml 形状：宿主错误正文报 NO_LEAVES（加固⑥）',
+        !envelopeShape.ok && envelopeShape.code === 'NO_LEAVES' && envelopeShape.leafCount === 0,
+        `shape=${JSON.stringify(envelopeShape)}`);
 
-    // 裁决⑬：形状闸只看得见块数与叶数，宿主错误正文凑够两个顶层块就能混过去。
-    // 降级判定看目录：两个块整块都不在目录里即 MOSTLY_OUT_OF_CATALOG。
+    // 裁决⑬：形状闸只看得见块数与叶数，宿主错误正文凑够两个顶层块就能混过去
+    // （这一条钉住那个洞本身——降级判定已不在这层，由不抛错的目录对照体检接手）。
     const multiShape = checkProfileShape(HOST_ERROR_MULTI_BLOCK_YAML);
-    const multiError = undecidableError(HOST_ERROR_MULTI_BLOCK_YAML, FIXTURE_CATALOG);
-    check('yaml 形状＋判据：错误正文凑够两块时形状闸放行、判据层降级拒判（裁决⑬）',
-        multiShape.ok && multiShape.topLevelBlocks === 2 && multiShape.leafCount === 1
-        && multiError?.code === 'MOSTLY_OUT_OF_CATALOG' && multiError.topLevelBlocks === 2,
-        `shape=${JSON.stringify(multiShape)} code=${multiError?.code ?? '（未抛）'}`);
+    check('yaml 形状：错误正文凑够两块时形状闸放行（裁决⑬·洞由目录对照体检接手）',
+        multiShape.ok && multiShape.topLevelBlocks === 2 && multiShape.leafCount === 1,
+        `shape=${JSON.stringify(multiShape)}`);
 
     const sampleShape = checkProfileShape(REDUNDANCY_SAMPLE);
     check('yaml 形状：填好的档案形状校验放行（加固⑥的放行侧）',
@@ -1543,37 +1527,30 @@ function runRedundancyChecks(): void {
 
     // LITERAL_SAMPLE：归一后完全同值必命中（身份那叶句尾是全角逗号、职业那叶是
     // 半角逗号——这一对正是「靠标点表才成立」的用例：两边都折成半角才同值）。
-    const literalReport = analyzeRedundancy(LITERAL_SAMPLE, FIXTURE_CATALOG);
+    const literalGroups = literalDuplicateSignatures(LITERAL_SAMPLE);
     check('判据：LITERAL_SAMPLE 必命中（归一后完全同值·含靠标点表才成立的一对）',
-        jsonEq(literalReport.literal, [{
-            block: '基本信息',
-            leaf: '身份',
-            group: [{ block: '基本信息', leaf: '身份' }, { block: '职业经济', leaf: '职业' }],
-        }]),
-        `literal=${JSON.stringify(literalReport.literal)}`);
+        jsonEq(literalGroups, ['基本信息·身份|职业经济·职业']),
+        `同值组=${JSON.stringify(literalGroups)}`);
     // 反转版必零命中：近义改写不由本层判定（判据的语义检出率为零，这是既定边界）。
-    const reversedReport = analyzeRedundancy(LITERAL_REVERSED_SAMPLE, FIXTURE_CATALOG);
+    const reversedGroups = literalDuplicateSignatures(LITERAL_REVERSED_SAMPLE);
     check('判据：LITERAL_SAMPLE 反转版必零命中（近义改写不由本层判定）',
-        reversedReport.literal.length === 0,
-        `literal=${JSON.stringify(reversedReport.literal)}`);
+        reversedGroups.length === 0,
+        `同值组=${JSON.stringify(reversedGroups)}`);
 
-    // REDUNDANCY_SAMPLE：只报出归属对第 2 对（别名与名号 × 专属称谓两端同在场）。
-    const sampleReport = analyzeRedundancy(REDUNDANCY_SAMPLE, FIXTURE_CATALOG);
-    check('判据：REDUNDANCY_SAMPLE 的 structural 报出归属对第 2 对（既有关系·专属称谓 × 基本信息·别名与名号）',
-        jsonEq(sampleReport.structural, [['既有关系·专属称谓', '基本信息·别名与名号']]),
-        `structural=${JSON.stringify(sampleReport.structural)}`);
-    // 该样本上 literal 零命中是**预期**：三组反例里那些「同一份素材被写重」的叶
-    // 用的都是同义改写，本层按定义抓不到。断言写成「必须零命中」——写成「应当
-    // 命中」等于把砍判据这件事做回来。
+    // REDUNDANCY_SAMPLE：该样本上 literal 零命中是**预期**——三组反例里那些「同一份
+    // 素材被写重」的叶用的都是同义改写，本层按定义抓不到。断言写成「必须零命中」
+    // ——写成「应当命中」等于把砍判据这件事做回来。
+    const sampleGroups = literalDuplicateSignatures(REDUNDANCY_SAMPLE);
     check('判据：REDUNDANCY_SAMPLE 的 literal 零命中是预期（语义重复不由本层判定·不是漏报）',
-        sampleReport.literal.length === 0,
-        `literal=${JSON.stringify(sampleReport.literal)}`);
-    const defaultCatalogReport = analyzeRedundancy(REDUNDANCY_SAMPLE);
+        sampleGroups.length === 0,
+        `同值组=${JSON.stringify(sampleGroups)}`);
+    const sampleDrift = analyzeCatalogDrift(REDUNDANCY_SAMPLE, FIXTURE_CATALOG);
+    const defaultCatalogDrift = analyzeCatalogDrift(REDUNDANCY_SAMPLE);
     check('判据：REDUNDANCY_SAMPLE 未识别块/叶 0（内联目录与默认目录下各跑一次·叶名未漂移）',
-        sampleReport.unrecognizedBlocks.length === 0 && sampleReport.unrecognizedLeaves.length === 0
-        && defaultCatalogReport.unrecognizedBlocks.length === 0 && defaultCatalogReport.unrecognizedLeaves.length === 0,
-        `内联目录=块${JSON.stringify(sampleReport.unrecognizedBlocks)}／叶${JSON.stringify(sampleReport.unrecognizedLeaves)}`
-        + ` 默认目录=块${JSON.stringify(defaultCatalogReport.unrecognizedBlocks)}／叶${JSON.stringify(defaultCatalogReport.unrecognizedLeaves)}`);
+        sampleDrift.mechanismBlocksOutsideCatalog === 0 && sampleDrift.unrecognizedLeavesTotal === 0
+        && defaultCatalogDrift.mechanismBlocksOutsideCatalog === 0 && defaultCatalogDrift.unrecognizedLeavesTotal === 0,
+        `内联目录=块${sampleDrift.mechanismBlocksOutsideCatalog}／叶${sampleDrift.unrecognizedLeavesTotal}`
+        + ` 默认目录=块${defaultCatalogDrift.mechanismBlocksOutsideCatalog}／叶${defaultCatalogDrift.unrecognizedLeavesTotal}`);
 
     // 归一规则机判（上半段）：NFKC 折全角拉丁与**全角标点**、连续空白（含全角
     // 空格）折成一个半角空格——所以 `，`／`：／`；／`？／`!／`（）` 这些在
@@ -2386,7 +2363,7 @@ async function runPersonaReviewChecks(): Promise<void> {
         const plain = await runReview('无条件复核试验');
         const stages = plainCalls.map(call => stageOfRequest(call.body));
         check('复核：判据层零命中仍无条件发出复核轮（三段实发、末段认得出查重指令、回执「无重复」落未发现态、档案逐字未动）',
-            analyzeRedundancy(REVIEW_STUB_PROFILE_TEXT).literal.length === 0
+            literalDuplicateSignatures(REVIEW_STUB_PROFILE_TEXT).length === 0
             && stages.join(',') === 'curator,personaGen,personaReview'
             && plain.review.kind === 'none'
             && plain.profile === REVIEW_STUB_PROFILE_TEXT,
@@ -2910,5 +2887,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/「块.叶 → 值」逐叶直改·断言改后叶值·未点名叶逐字不动/「保留」行逐字不动·计数不含保留叶/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写叶值在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/回复不可用一律回滚·点名不存在的叶与写出新完全同值两例/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/「块.叶 → 值」逐叶直改·断言改后叶值·未点名叶逐字不动/「保留」行逐字不动·计数不含保留叶/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写叶值在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/回复不可用一律回滚·点名不存在的叶与写出新完全同值两例/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
 }

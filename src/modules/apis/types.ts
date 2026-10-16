@@ -23,6 +23,3 @@ export interface ApiProvider {
      */
     noPrefill: boolean;
 }
-
-/** 服务商表存储域（extension_settings.ttToolkit.apis＝服务商数组本体）。 */
-export type ApiDomain = ApiProvider[];

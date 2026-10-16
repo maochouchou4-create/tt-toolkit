@@ -17,7 +17,7 @@
  * 替换做不了删除）走 host 层直访，见 retire-summary.ts 的通道说明。
  */
 
-import { currentChatMetadata, eventBus, event_types, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
+import { currentChatMetadata, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
 
 /** 全局域存储键（extension_settings 下本扩展命名空间）。 */
 export const GLOBAL_KEY = 'ttToolkit';
@@ -57,8 +57,6 @@ export interface GlobalDomain {
     persona?: unknown;
     /** 提示词配置集（prompts/storage.ts GLOBAL_PROMPT_CONFIGS_KEY） */
     promptConfigs?: unknown;
-    /** legacy：旧 promptConfigs 数组形态的活跃键（只读迁移残留，读侧出局后自然消失） */
-    promptActiveId?: unknown;
     /** 剧情走向预设列表（modules/choice/direction.ts GLOBAL_DIRECTION_PRESETS_KEY） */
     directionPresets?: unknown;
     /**
@@ -168,9 +166,4 @@ export function setChat(key: keyof ChatDomain, value: unknown): void {
         domain[key] = value;
         metadata[CHAT_KEY] = domain;
     });
-}
-
-/** 订阅聊天切换（storage 消费方需要丢弃聊天相关缓存时用）。 */
-export function onChatChanged(handler: () => void): void {
-    eventBus.on(event_types.CHAT_CHANGED, handler);
 }

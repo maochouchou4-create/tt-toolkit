@@ -9,7 +9,6 @@ export {
     getChat,
     getGlobal,
     initStorage,
-    onChatChanged,
     setChat,
     setGlobal,
 } from './service';

@@ -8,12 +8,7 @@
 
 import { choiceStorage } from '../api';
 import { resolvePool } from './resolver';
-import type { PoolEntry, PoolInjection } from './types';
-
-/** 读池数据（规范化后的副本）。 */
-export function readPoolData(): { masterPool: PoolEntry[] } {
-    return choiceStorage.readDomain().pool;
-}
+import type { PoolInjection } from './types';
 
 /**
  * 生成管线现场抽取：全池为候选（条目自身 pinned 为真值）。
