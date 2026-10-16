@@ -512,7 +512,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ 超时原语与文案单点：超时上限延时机判 1／到点按失败可见报出且不误报
 // 「已取消」1／外部取消仍归「已取消」1／取消与到点竞态仍按超时报 1／
 // 未配置任务模型文案带任务中文名 1 ＝ +5。
-const CHOICE_PASS_EXPECTED = 159;
+// ＝ 池旋钮接 UI：贯通机判 5（写面落档读回同值／trim 截到条数且 send_all
+// 全保留／末段打乱关闭保持输入序而打开被打乱 8 组种子两面／开关只改出场
+// 序不改两区内容／非法枚举与非布尔钳回 normalize 默认）＝ +5。
+const CHOICE_PASS_EXPECTED = 164;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {

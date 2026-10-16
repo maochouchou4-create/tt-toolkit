@@ -14,11 +14,13 @@ import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceDomain, type ChoiceGenParams } from './api';
+import { DEFAULT_POOL_GEN_PARAMS } from './pool/normalize';
 import { applyOption, cancelGeneration, generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
+import { useChoiceSettingsStore } from './settings';
 import { drawAmount, resolvePool } from './pool/resolver';
-import type { PoolEntry } from './pool/types';
+import type { DrawResult, PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 import { getGlobal, setGlobal } from '@/storage';
 
@@ -160,6 +162,97 @@ function runPoolChecks(): void {
         if (buckets.size < 2) catOk = false;
     }
     check('分组轮询：候选覆盖多个 category 桶（≥2 桶）', catOk);
+}
+
+/**
+ * 1.6) 池旋钮贯通（UI 写面 → normalize → resolver）：置顶超额策略与末段打乱
+ * 在设置页接上写面之前恒为 normalize 默认值——两个参数从未被真实用户数据走
+ * 过。本区把「store 写 → 域读回（钳制后）→ resolver 入参」串成一条链：写面
+ * 漏传、钳制语义漂、resolver 分支与旋钮值脱钩，三处断链任一都在这里红。
+ */
+function runPoolKnobChecks(): void {
+    const settings = useChoiceSettingsStore();
+    const saved = getGlobal(GLOBAL_CHOICE_KEY);
+    // 池规模随域内 count 现值走：置顶条目取 count+2 条恒构成超额（trim 面
+    // 可观测），候选区留 4 条保证任何倍率下都抽得到、不落空态
+    const { count } = choiceStorage.readDomain().gen;
+    const knobPool = [
+        ...Array.from({ length: count + 2 }, (_, i) => makeEntry(`kp${i}`, true)),
+        ...Array.from({ length: 4 }, (_, i) => makeEntry(`kc${i}`, false)),
+    ];
+    const inputOrder = knobPool.filter(e => e.pinned).map(e => e.id).join(',');
+    // resolver 入参与 pool/storage.ts 的生成管线同形（逐项取自读面）：设置页
+    // 写面新增字段若漏进生成管线，这里解析出的结果就与真实生成不是一回事
+    const resolveFromDomain = (seed: number): DrawResult => {
+        const { gen } = choiceStorage.readDomain();
+        return resolvePool({
+            pool: knobPool,
+            count: gen.count,
+            categoriesEnabled: gen.categoriesEnabled,
+            pinnedOverflow: gen.pinnedOverflow,
+            oversamplePct: gen.oversamplePct,
+            shuffleFinal: gen.shuffleFinal,
+            random: mulberry32(seed),
+        });
+    };
+    const orderOf = (result: DrawResult, zone: 'pinned' | 'drawn'): string => result[zone].map(e => e.id).join(',');
+    const contentOf = (result: DrawResult, zone: 'pinned' | 'drawn'): string => [...result[zone].map(e => e.id)].sort().join(',');
+    // 顺序断言取多组固定种子：单组可能偶然同序/偶然全异，多组两面各判一次
+    const ORDER_SEEDS = [0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888];
+    try {
+        // 并排组：同一种子先关后开各抽一轮——末段打乱是纯顺序操作，抽到哪些
+        // 条目不该随开关变（变即是抽取逻辑被开关污染）
+        const pairs = ORDER_SEEDS.map((seed) => {
+            settings.updateGen({ shuffleFinal: false });
+            const off = resolveFromDomain(seed);
+            settings.updateGen({ shuffleFinal: true });
+            return { off, on: resolveFromDomain(seed) };
+        });
+        settings.updateGen({ pinnedOverflow: 'trim', shuffleFinal: false });
+        const written = choiceStorage.readDomain().gen;
+        check(
+            '池旋钮写面：UI 写 trim/不打乱后域读回同值（落档链路贯通）',
+            written.pinnedOverflow === 'trim' && written.shuffleFinal === false,
+            `overflow=${written.pinnedOverflow} shuffle=${String(written.shuffleFinal)}`,
+        );
+
+        const trimmed = resolveFromDomain(0x1a2b);
+        settings.updateGen({ pinnedOverflow: 'send_all' });
+        const sendAll = resolveFromDomain(0x1a2b);
+        check(
+            '池旋钮贯通：置顶超额时 trim 截到条数、send_all 全保留（resolver 随旋钮变）',
+            trimmed.pinned.length === count && sendAll.pinned.length === count + 2,
+            `trim=${trimmed.pinned.length} send_all=${sendAll.pinned.length} count=${count}`,
+        );
+
+        const keptOff = pairs.filter(p => orderOf(p.off, 'pinned') === inputOrder).length;
+        const keptOn = pairs.filter(p => orderOf(p.on, 'pinned') === inputOrder).length;
+        check(
+            '池旋钮贯通：末段打乱关闭时置顶区保持输入序、打开后被打乱（8 组种子）',
+            keptOff === ORDER_SEEDS.length && keptOn === 0,
+            `关=${keptOff}/${ORDER_SEEDS.length} 开=${keptOn}/${ORDER_SEEDS.length}`,
+        );
+
+        check(
+            '池旋钮贯通：末段打乱只改出场序不改内容（同种子开/关两区条目集合逐条一致）',
+            pairs.every(p => contentOf(p.off, 'pinned') === contentOf(p.on, 'pinned') && contentOf(p.off, 'drawn') === contentOf(p.on, 'drawn')),
+            `置顶样例=${orderOf(pairs[0].off, 'pinned')} → ${orderOf(pairs[0].on, 'pinned')}`,
+        );
+
+        // 坏值钳制：写面若送出枚举外/非布尔值，域读回必须是默认（旋钮缺省与
+        // normalize 单一真相，UI 不另立缺省）
+        settings.updateGen({ pinnedOverflow: 'trim_ex', shuffleFinal: 'yes' } as unknown as Partial<ChoiceGenParams>);
+        const clamped = choiceStorage.readDomain().gen;
+        check(
+            '池旋钮写面：非法枚举/非布尔经 normalize 钳回默认（send_all/true）',
+            clamped.pinnedOverflow === DEFAULT_POOL_GEN_PARAMS.pinnedOverflow && clamped.shuffleFinal === DEFAULT_POOL_GEN_PARAMS.shuffleFinal,
+            `overflow=${clamped.pinnedOverflow} shuffle=${String(clamped.shuffleFinal)}`,
+        );
+    } finally {
+        // 还原存回原值（不存 readDomain 的归一投影：那会把夹具没写过的默认
+        // 字段补进存储，与「本区不留残」的纪律相悖）
+        setGlobal(GLOBAL_CHOICE_KEY, saved);
+    }
 }
 
 /**
@@ -1430,6 +1523,7 @@ export async function runChoiceSmoke(): Promise<void> {
     await runTimeoutChecks();
     console.info('=== choice 池抽取/asset 同步/注入/自动生成机判 ===');
     runPoolChecks();
+    runPoolKnobChecks();
     runAssetPoolChecks();
     runInjectionChecks();
     await runAutoGenerateChecks();
@@ -1441,5 +1535,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、asset 同步（335 条/42 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（335 条/42 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }
