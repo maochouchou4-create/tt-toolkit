@@ -11,7 +11,7 @@ TauriTavern（SillyTavern 的 Tauri 分支）的自维护扩展「TT 工具箱�
 1. `src/host/` 是**唯一**允许 import `@sillytavern/*` 的区域（ambient d.ts + `scripts/check-host-anchors.mjs` 锚点机判；HOST_SRC_ROOT 指向本机 TauriTavern 源码树）。
 2. host 适配层调用宿主对象方法须保留接收者（`getPresetManager` 返回 class 实例、方法体走 this；解引用后裸调丢 this——unbound-method 门禁把关）。
 3. AFPL 纪律：参考旧 fork 源码只许借鉴概念，禁止照抄表达式。
-4. 版本链三处一致：`src/version.ts` 字面量常量 + `manifest.json` + `package.json`。改任何 `src/` 代码必须走完「七门全绿 → 重建 dist → `node scripts/dev-harness/build.mjs`」才能 commit。
+4. 版本链三处一致：`src/version.ts` 字面量常量 + `manifest.json` + `package.json`。改任何 `src/` 代码必须走完「七门全绿 → 重建 dist → `node scripts/dev-harness/build.mjs`」才能 commit。manifest 的 `minimum_client_version` 比对基准是宿主所兼容的 **ST 版本**（`CLIENT_VERSION.split(':')[1]`＝`SILLYTAVERN_COMPAT_VERSION`，TauriTavern 2.3.0 ↔ ST 1.18.0），**不是** TauriTavern 应用版本——填应用版本号宿主会拒绝激活扩展（日志报「需要 ST 客户端版本」）。
 5. 条目池唯一真相源＝`src/modules/choice/pool/default-pool.json`。改池＝改 JSON + bump version + 重建，绝不经 TT 设置面写池。
 
 ## 七道门禁（commit 前全绿）

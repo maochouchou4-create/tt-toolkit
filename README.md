@@ -15,7 +15,7 @@ git clone https://github.com/maochouchou4-create/tt-toolkit
 
 仓库自带构建产物（`dist/`），clone 即用，无需本地构建。
 
-宿主版本要求 **TauriTavern 2.3.0**：低于该版本时扩展不会被激活，扩展面板里可能不显示工具箱。
+验证基线为 **TauriTavern 2.3.0**（推荐）；扩展的最低兼容门按宿主所兼容的 SillyTavern 版本登记为 1.18.0，更老的宿主不会被激活（扩展面板里可能不显示工具箱）。
 
 **更新**：TT 扩展面板的「检查更新」即 `git pull`——拉取后刷新页面即可用上新版本。
 
