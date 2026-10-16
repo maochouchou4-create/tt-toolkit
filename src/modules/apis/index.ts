@@ -24,9 +24,8 @@ export function initApis(): ApisInitReport {
     return { persona, apis, taskProfiles };
 }
 
-export { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';
 export { useApisStore } from './store';
 export { TASK_PARAMS } from './task-defaults';
 export { REASONING_EFFORTS } from './task-profiles';
-export type { ReasoningEffort } from './client';
+export type { ReasoningEffort } from './task-profiles';
 export type { ApiProvider } from './types';

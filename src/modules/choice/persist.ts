@@ -11,6 +11,7 @@
  * 是纯数据（{title,content,aim?} 数组＋字符串），不得含函数/响应式代理。
  */
 import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
+import { isRecord } from '@/storage/shape';
 import type { ParsedOption, ParseReport } from './parse';
 
 /** 命名空间内的选项键（命名空间层与单楼派生数据一一对应，不混键）。 */
@@ -28,10 +29,6 @@ export interface StoredFloorOptions {
      * 存量档无此字段，守门若要求在场＝升级后旧楼选项全被判坏档清空。
      */
     dropped?: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 楼层取用：越界/非对象返回 null（读侧坏档与写侧越界统一的守门入口）。 */

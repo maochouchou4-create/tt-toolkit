@@ -30,7 +30,9 @@ import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, wr
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { TASK_IDS } from '@/tasks';
-import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources, type PromptConfig, type TaskKey } from '@/prompts';
+import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources, type PromptConfig, type TaskKey } from '@/prompts';
+// 存储键不经门面外泄：域键常量归归属模块（storage.ts），门面只出行为面。
+import { GLOBAL_PROMPT_CONFIGS_KEY } from '@/prompts/storage';
 import {
     CATALOG_DEFINITIONS_CLOSE_TAG,
     CATALOG_DEFINITIONS_OPEN_TAG,
@@ -49,7 +51,7 @@ import {
     renderOwnershipTable,
     type CatalogBlock,
 } from '@/modules/persona/catalog';
-import { runGeneration, stripYamlFence, collectWorldInfoContext, type GenerationResult } from './generation';
+import { runGeneration, stripYamlFence, collectWorldInfoContext, PersonaRunCancelled, type GenerationResult } from './generation';
 import { renderReviewBrief, REVIEW_BRIEF_NOT_RUN } from './review';
 import { TEXT } from './strings';
 import { overwritePersonaGuarded, usePersonaStore } from './store';
@@ -1246,9 +1248,11 @@ const HOST_ERROR_ENVELOPE_YAML = [
 ].join('\n');
 
 /**
- * 形态夹具七（裁决⑨）：宿主错误正文的另一种形态——**凑够两个顶层块**就能混过
+ * 形态夹具七：宿主错误正文的另一种形态——**凑够两个顶层块**就能混过
  * 形状闸的「块数 ≥2 且有叶」这一关（下面那行 `请求超时: 请重试` 正是它凑出来的
- * 那一叶）。目录是「什么算档案叶」的唯一权威，两个块整块都不在目录里即降级。
+ * 那一叶）。目录是「什么算档案叶」的唯一权威，而这两块整块都在目录外：
+ * 目录对照体检的漂移叶口径只收「目录内块写出的目录外叶」，故这份夹具落在
+ * 它的口径之外——即该形态当前无下游守卫（有意取舍，见形状闸旁的注）。
  */
 const HOST_ERROR_MULTI_BLOCK_YAML = [
     '连接失败:',
@@ -1514,12 +1518,23 @@ function runRedundancyChecks(): void {
         !envelopeShape.ok && envelopeShape.code === 'NO_LEAVES' && envelopeShape.leafCount === 0,
         `shape=${JSON.stringify(envelopeShape)}`);
 
-    // 裁决⑬：形状闸只看得见块数与叶数，宿主错误正文凑够两个顶层块就能混过去
-    // （这一条钉住那个洞本身——降级判定已不在这层，由不抛错的目录对照体检接手）。
+    // 裁决⑬：形状闸只看得见块数与叶数，宿主错误正文凑够两个顶层块就能混过去。
+    // 这一条钉住那个洞本身——**该形态现无守卫**：形状闸放行，目录对照体检的
+    // catalogDriftLeaves 只收目录内块里写出的目录外叶，错误正文的两块整块在
+    // 目录外、口径之外恒不触发（下一条把这条边界钉成机判）。语义查重判据面随
+    // 死码退役是有意决策，形状层不因此自行加码。
     const multiShape = checkProfileShape(HOST_ERROR_MULTI_BLOCK_YAML);
-    check('yaml 形状：错误正文凑够两块时形状闸放行（裁决⑬·洞由目录对照体检接手）',
+    check('yaml 形状：错误正文凑够两块时形状闸放行（裁决⑬·该形态现无下游守卫）',
         multiShape.ok && multiShape.topLevelBlocks === 2 && multiShape.leafCount === 1,
         `shape=${JSON.stringify(multiShape)}`);
+
+    // 反向钉边界：上一条的洞不是「断言缺失」，目录对照体检在这份错误正文上
+    // 恒零命中是口径使然（两块整块在目录外，不属 catalogDriftLeaves 的
+    // 「目录内块写出的目录外叶」）。写成机判是为了让后来人不再把它当漏报去补。
+    const multiShapeDrift = analyzeCatalogDrift(HOST_ERROR_MULTI_BLOCK_YAML, FIXTURE_CATALOG);
+    check('yaml 判据：错误正文（整块目录外）恒不进 catalogDriftLeaves——目录体检只收目录内块的越界叶，故该形态无下游守卫（非漏报）',
+        jsonEq(multiShapeDrift.catalogDriftLeaves, []) && multiShapeDrift.mechanismBlocksOutsideCatalog === 2,
+        `漂移叶=${JSON.stringify(multiShapeDrift.catalogDriftLeaves)} 目录外块=${multiShapeDrift.mechanismBlocksOutsideCatalog}`);
 
     const sampleShape = checkProfileShape(REDUNDANCY_SAMPLE);
     check('yaml 形状：填好的档案形状校验放行（加固⑥的放行侧）',
@@ -1597,6 +1612,126 @@ function fakeSSEStream(chunks: string[]): Response {
             }),
         },
     } as unknown as Response;
+}
+
+/**
+ * persona 链的超时/取消分流（真跑 runGeneration：嵌套在引擎组装→传输→归类
+ * 三层之下，choice 那五条只测得到 choice 的直连路径，测不到这里的嵌套面）。
+ *
+ * 不真等 600 秒：把 setTimeout 换成记录延时的桩，命中该延时就改为手动触发
+ * （①立即触发、③在取消之后触发），「到点中止」因此同步可测。fetch 桩照真实
+ * fetch 的中止语义——收到 abort（或进场时已中止）即以 AbortError 拒绝；不这样
+ * 桩就测不出到点中止的后果，死端点恰恰就是这个样子。
+ *
+ * 桩只认**第一个** 600 秒定时器（后续同延时的照常记录但不再触发）：真实时间轴上
+ * 谁先创建谁先到点，而「同一档位的第二个守卫」正是要防的形态——第二个到点时
+ * 传输层自认不是自己到点，人话超时被换成裸 abort。桩把每个都立刻触发的话，
+ * 这个形态会被桩自己掩盖掉（本条即这么翻红过一次：全触发→绿，首个触发→红）。
+ */
+async function runGenerationTimeoutChecks(): Promise<void> {
+    const originalFetch = globalThis.fetch;
+    const originalSetTimeout = globalThis.setTimeout;
+    let fetchEntered = false;
+    const hangingFetch = (): typeof fetch => (async (_url: string | URL, init?: RequestInit) => {
+        fetchEntered = true;
+        return new Promise<Response>((_resolve, reject) => {
+            const abortLike = (): void => reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
+            if (init?.signal?.aborted) abortLike();
+            else init?.signal?.addEventListener('abort', abortLike);
+        });
+    }) as unknown as typeof fetch;
+    const run = (request: string, signal?: AbortSignal): Promise<GenerationResult> => runGeneration({
+        route: { providerId: 'smoke-endpoint', url: 'https://smoke.example.com/v1', key: 'sk-smoke', model: 'smoke-model', temperature: 1, reasoningEffort: 'high', noPrefill: false },
+        request,
+        wiText: '',
+        greetingsText: '',
+        onPrefillUnsupported: () => undefined,
+        signal,
+    });
+    const caught = async (p: Promise<GenerationResult>): Promise<unknown> => {
+        try {
+            await p;
+            return null;
+        } catch (err) {
+            return err;
+        }
+    };
+    const runlog = useRunlogStore();
+    try {
+        // ①到点：传输层守卫按 persona 档位装 600 秒，到点中止并转成人话超时错误
+        const delays: number[] = [];
+        let firedOnce = false;
+        globalThis.fetch = hangingFetch();
+        globalThis.setTimeout = ((handler: (...args: unknown[]) => void, delay?: number, ...rest: unknown[]) => {
+            if (Number(delay) === TASK_PARAMS.persona.timeoutSec * 1000) {
+                delays.push(Number(delay));
+                if (!firedOnce) {
+                    firedOnce = true;
+                    handler(...rest);
+                }
+                return 0;
+            }
+            return originalSetTimeout(handler, delay, ...rest);
+        }) as unknown as typeof setTimeout;
+        runlog.clear();
+        const timeoutErr = await caught(run('超时试验'));
+        const timeoutRecord = runlog.records[runlog.records.length - 1];
+        check('生成超时：persona 请求装的是 600 秒上限（定时器延时机判——不是别的数，也不是不装），到点按失败可见报出人话超时',
+            TASK_PARAMS.persona.timeoutSec === 600 && delays.includes(600_000)
+            && !(timeoutErr instanceof PersonaRunCancelled)
+            && (timeoutErr as Error)?.message.includes('请求超时（600 秒）')
+            && !((timeoutErr as Error)?.message ?? '').includes('aborted')
+            && !!timeoutRecord && timeoutRecord.ok === false && (timeoutRecord.error ?? '').includes('请求超时'),
+            `timeoutSec=${TASK_PARAMS.persona.timeoutSec} delays=${JSON.stringify(delays)} thrown=${(timeoutErr as Error)?.name}:${((timeoutErr as Error)?.message ?? '').slice(0, 60)} runlog=${timeoutRecord?.error ?? '无'}`);
+
+        // ②外部取消：真实定时器，只等请求发出再取消（请求中 abort→归类才是主战场）
+        globalThis.setTimeout = originalSetTimeout;
+        fetchEntered = false;
+        globalThis.fetch = hangingFetch();
+        const cancelCtrl = new AbortController();
+        const cancelled = run('取消试验', cancelCtrl.signal);
+        for (let i = 0; i < 100 && !fetchEntered; i++) await new Promise(r => originalSetTimeout(r, 5));
+        cancelCtrl.abort();
+        const cancelErr = await caught(cancelled);
+        check('生成取消：外部取消归 PersonaRunCancelled（超时与取消两个语义分流未混走；用户侧提示为「已取消生成」）',
+            cancelErr instanceof PersonaRunCancelled
+            && TEXT.TOAST_CANCELLED === '已取消生成',
+            `thrown=${(cancelErr as Error)?.name}:${(cancelErr as Error)?.message}`);
+
+        // ③竞态：取消先到、到点随后（同一请求窗口内）——到点已成立时不得被改写成
+        // 「已取消」。这条专门钉传输层的超时判定优先级：只把 ② 钉住的话，
+        // 「aborted 就报已取消」的写法照样全绿，而真实端点上用户会在毫秒内先看到
+        // 一句「已取消」——他没按过任何东西。
+        let fireTimeout = (): void => undefined;
+        let capturedOnce = false;
+        globalThis.setTimeout = ((handler: (...args: unknown[]) => void, delay?: number, ...rest: unknown[]) => {
+            if (Number(delay) === TASK_PARAMS.persona.timeoutSec * 1000) {
+                if (!capturedOnce) {
+                    capturedOnce = true;
+                    fireTimeout = () => handler(...rest);
+                }
+                return 0;
+            }
+            return originalSetTimeout(handler, delay, ...rest);
+        }) as unknown as typeof setTimeout;
+        fetchEntered = false;
+        globalThis.fetch = hangingFetch();
+        const raceCtrl = new AbortController();
+        const racing = run('竞态试验', raceCtrl.signal);
+        for (let i = 0; i < 100 && !fetchEntered; i++) await new Promise(r => originalSetTimeout(r, 5));
+        // 取消与到点在同一同步块内先后触发：到点的 timedOut 标志必须在中止
+        // 拒绝被归类之前立起来（拒绝是微任务，同步块内不会插进来）。
+        raceCtrl.abort();
+        fireTimeout();
+        const raceErr = await caught(racing);
+        check('生成超时：取消与到点竞态（取消先到、到点随后）仍按超时报，不被改写成「已取消」',
+            !(raceErr instanceof PersonaRunCancelled)
+            && (raceErr as Error)?.message.includes('请求超时（600 秒）'),
+            `thrown=${(raceErr as Error)?.name}:${(raceErr as Error)?.message}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.setTimeout = originalSetTimeout;
+    }
 }
 
 async function runApiChecks(): Promise<void> {
@@ -2881,6 +3016,7 @@ export async function runPersonaSmoke(): Promise<void> {
     runPureFunctionChecks();
     runRedundancyChecks();
     await runApiChecks();
+    await runGenerationTimeoutChecks();
     await runPersonaE2EChecks();
     await runStoreChecks();
     await runPersonaReviewChecks();

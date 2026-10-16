@@ -285,28 +285,6 @@ export interface ProfileScan {
  */
 export type ProfileUndecidableCode = 'EMPTY' | 'SINGLE_BLOCK' | 'NO_LEAVES';
 
-/** 分类码 → 人读文案（进异常 message 与简报；文案改动不牵动分类）。 */
-const UNDECIDABLE_TEXT: Readonly<Record<ProfileUndecidableCode, string>> = {
-    EMPTY: '空档案·不可判定',
-    SINGLE_BLOCK: '单块档案·不可判定',
-    NO_LEAVES: '零叶档案·不可判定',
-};
-
-/** 不可判定异常：code 给机器分形态，message 给用户看形态。 */
-export class ProfileUndecidableError extends Error {
-    readonly code: ProfileUndecidableCode;
-    readonly topLevelBlocks: number;
-    readonly leafCount: number;
-
-    constructor(code: ProfileUndecidableCode, topLevelBlocks: number, leafCount: number) {
-        super(`档案不可判定：${UNDECIDABLE_TEXT[code]}（顶层块 ${topLevelBlocks}／叶 ${leafCount}）`);
-        this.name = 'ProfileUndecidableError';
-        this.code = code;
-        this.topLevelBlocks = topLevelBlocks;
-        this.leafCount = leafCount;
-    }
-}
-
 export interface ProfileShape {
     ok: boolean;
     /** 不可判定的分类码（ok 时为 null）。 */
@@ -519,7 +497,10 @@ export function shapeOfScan(result: ProfileScan | null): ProfileShape {
  *     块界塌陷后的档案都落在这里。
  *
  * 形状闸只看得见块数与叶数，所以它必然放过「两个顶层块各挂一叶」的宿主错误
- * 正文；那一类由不抛错的目录对照体检去报（catalogDriftLeaves），不在本层加码。
+ * 正文。**该形态目前无守卫**：不抛错的目录对照体检只收「目录内块里写出的
+ * 目录外叶」（catalogDriftLeaves），两块整块在目录外的错误正文落在它的口径
+ * 之外恒不触发。这是取舍不是漏写——语义查重的判据面（analyzeRedundancy）
+ * 随死码退役是有意决策，形状层不因少一个判据面就自行加码。
  */
 export function checkProfileShape(text: unknown): ProfileShape {
     return shapeOfScan(scan(text));

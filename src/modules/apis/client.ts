@@ -51,6 +51,8 @@ import type { RunTask } from '@/modules/runlog/types';
 import { readUpstreamError } from './client-error';
 import { readStream } from './client-sse';
 import { composeOutbound } from './preset-inject';
+// 思考强度档位与其清单同住 task-profiles（枚举单点），传输层只消费类型。
+import type { ReasoningEffort } from './task-profiles';
 
 const log = createTtlog('modules/apis/client');
 
@@ -62,12 +64,6 @@ export interface GenerateMessage {
 
 /** 输出契约档位（choice json_object／persona prompt_only；json_schema 档随生成通道收敛退役——ds 官方 400 且永不被赋值）。 */
 export type OutputContract = 'json_object' | 'prompt_only';
-
-/**
- * 思考强度档位（G3）。'off'＝不发送该字段（默认——见 UI 端点配置的
- * 说明文案）；'low'|'medium'|'high' 映射为 OpenAI reasoning_effort 值。
- */
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
 
 export interface GenerateRequestConfig {
     /** 任务归属（runlog 记录与摘要按任务区分；缺省会静默记错任务名，必填拒绝） */

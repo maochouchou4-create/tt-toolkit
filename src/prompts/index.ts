@@ -28,6 +28,8 @@ export {
     PERSONA_CURATOR_TASK_HEAD,
     PERSONA_GEN_TASK_HEAD,
 } from './defaults';
-export { ensurePromptConfigs, GLOBAL_PROMPT_CONFIGS_KEY } from './storage';
+// 门面只出行为面：GLOBAL_PROMPT_CONFIGS_KEY 是域键常量，归归属模块
+// （storage.ts），要读它的人按域纪律直接深导入。
+export { ensurePromptConfigs } from './storage';
 export { usePromptsStore } from './store';
 export { renderDump, renderTraceCompact } from './dump';

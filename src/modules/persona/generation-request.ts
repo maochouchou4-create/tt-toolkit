@@ -1,15 +1,20 @@
 /**
- * persona 生成链的单次调用面：追加起手词、发起请求、超时守卫、错误分类
- * 与去 prefill 重试。
+ * persona 生成链的单次调用面：追加起手词、发起请求、错误分类与去 prefill
+ * 重试。
  *
  * 为什么独立成面（相对原 generation.ts 内联）：这条面是整仓唯一碰「一段
- * 一次调用」生命周期的地方（起手词的捆绑契约、超时与取消的分流、400 家族
- * 去 prefill 重试的能力学习链），生成链编排与其无关——编排只决定调哪一段、
+ * 一次调用」生命周期的地方（起手词的捆绑契约、取消的分流、400 家族去
+ * prefill 重试的能力学习链），生成链编排与其无关——编排只决定调哪一段、
  * 带不带起手词、失败怎么归并。日志前缀沿用 modules/persona/generation：
  * 排障按前缀认行，改前缀等于改观测口径。
+ *
+ * 超时不在本层：段内超时由传输层守卫按 config.timeoutSec 负责（它本就
+ * 合并外部信号）。本层再装一个同档位守卫时，外层先创建先到点，abort 汇入
+ * 内层的 external 监听，内层 guard 自认「不是自己到点」→人话超时文案被
+ * 换成裸 abort 上抛。到点判定只能有一处，否则「是谁到点」永远答错。
  */
 
-import { callGenerateEndpoint, startRequestTimeout, type GenerateMessage } from '@/modules/apis/client';
+import { callGenerateEndpoint, RequestTimeoutError, type GenerateMessage } from '@/modules/apis/client';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { routeToRequestConfig, type TaskRoute } from '@/modules/apis/task-profiles';
 import { renderTraceCompact, type ModuleTrace } from '@/prompts';
@@ -78,9 +83,10 @@ export interface RequestOnceParams {
  * insert_if_present 语义）、输出契约 prompt_only（纯文本）、stream 恒开、
  * 超时 600s（任务固化档）。
  *
- * 超时与取消在本层是两个事实：超时由传输层的守卫到点触发并转成
- * RequestTimeoutError 上抛，外部取消汇入同一中止通道但由本层降级成
- * 「已取消」轻提示——两者的用户在屏幕上的反应必须分开。
+ * 超时与取消在本层是两个事实，但只归类其中一个：**超时由传输层守卫判**（到点
+ * 转 RequestTimeoutError 再上抛），本层把这类错误原样透传；外部取消由本层
+ * 降级成「已取消」轻提示。两者到点先后同时成立时按**到点优先**（与 choice
+ * 同一口径）：用户在毫秒内先看到的若是「已取消」，而他没按过任何东西。
  */
 export async function requestOnce(params: RequestOnceParams): Promise<string> {
     const { config, messages, trace, prefill, label } = params;
@@ -92,73 +98,71 @@ export async function requestOnce(params: RequestOnceParams): Promise<string> {
     // 已中止的外部信号直接判死：不进请求（本轮的收集/组装段已耗掉的等待
     // 正是用户在此期间点的停止）
     if (params.signal?.aborted) throw new PersonaRunCancelled();
-    // 段内中止通道＝传输层超时守卫（外部取消汇入同一条，见 startRequestTimeout）
-    const guard = startRequestTimeout(timeoutSec, params.signal);
-    try {
-        // 破限前缀由传输层自动前置（client composeOutbound）；prefill 由
-        // 调用方追加尾部，重试需要无 prefill 的独立数组
-        const promptArray: GenerateMessage[] = prefill
-            ? [...messages, { role: 'assistant', content: prefill.content }]
-            : messages;
-        const promptArrayNoPrefill: GenerateMessage[] = messages;
+    // 破限前缀由传输层自动前置（client composeOutbound）；prefill 由
+    // 调用方追加尾部，重试需要无 prefill 的独立数组。段内超时归传输层
+    // 守卫（与 choice 同一口径），本层不再自装同档位的第二个守卫。
+    const promptArray: GenerateMessage[] = prefill
+        ? [...messages, { role: 'assistant', content: prefill.content }]
+        : messages;
+    const promptArrayNoPrefill: GenerateMessage[] = messages;
 
-        const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
-            const result = await callGenerateEndpoint(
-                messages,
-                routeToRequestConfig('persona', config.route),
-                guard.signal,
-            );
-            return result.content;
-        };
+    const doRequest = async (messages: GenerateMessage[]): Promise<string> => {
+        const result = await callGenerateEndpoint(
+            messages,
+            routeToRequestConfig('persona', config.route),
+            params.signal,
+        );
+        return result.content;
+    };
 
-        /** 错误归类（首发与 prefill 重试共用）：取消→哨兵；网络→人话；其余原样抛
-         * （到点超时已由传输层转成人话错误，见 RequestTimeoutError）。 */
-        const classifyFailure = (err: unknown): never => {
-            const errStr = (err && (err instanceof Error ? err.message : err.toString()) || '').toString();
-            const errLower = errStr.toLowerCase();
-            const isNetwork = err && ((err as Error).name === 'TypeError' || errLower.includes('failed to fetch') || errLower.includes('networkerror'));
+    /** 错误归类（首发与 prefill 重试共用）：到点→原样透传；取消→哨兵；
+     *  网络→人话；其余原样抛。 */
+    const classifyFailure = (err: unknown): never => {
+        // 到点优先于取消：传输层已把「自己到点」判成人话超时错误，若它与外部
+        // 取消同时成立（取消先到、到点随后落在同一请求窗口内），先判 aborted
+        // 会把一次真实超时报成「已取消」——用户没按过任何东西。
+        if (err instanceof RequestTimeoutError) throw err;
+        const errStr = (err && (err instanceof Error ? err.message : err.toString()) || '').toString();
+        const errLower = errStr.toLowerCase();
+        const isNetwork = err && ((err as Error).name === 'TypeError' || errLower.includes('failed to fetch') || errLower.includes('networkerror'));
 
-            // 外部取消优先归类：外部 abort 与超时走同一条中止通道，先判它
-            // 防把用户的取消报成端点超时
-            if (params.signal?.aborted) throw new PersonaRunCancelled();
-            if (isNetwork) {
-                throw new Error(`网络请求失败：${errStr}。请检查中转站地址、API Key、网络连通性（梯子 / 公司网络代理等可能拦截）。`);
-            }
-            throw err;
-        };
-
-        try {
-            responseContent = await doRequest(promptArray);
-        } catch (err) {
-            // 分类：1) 网络层错误 2) 400/Bad Request + 带起手词 → 去起手词重试 3) 其它原样抛
-            // （到点超时在上游传输层已转成人话错误，不在本处再分类）。
-            // 宿主错误信封也走本判据：信封正文保留着上游原文（含 statusCode
-            // 一类字段），故 400 家族经信封路径同样命中重试（两条带起手词的
-            // YAML 轮——策展段与档案段——均以 assistant 起手词结尾，被网关以
-            // 「末条是模型轮」拒收正是这一族，兼容重试就是为它准备的；
-            // 复核轮不带起手词，压根不进这个分支）。
-            const errLower = (err && (err instanceof Error ? err.message : err.toString()) || '').toString().toLowerCase();
-            const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
-            if (prefill && isBadRequest) {
-                log.warn('生成失败 (400/Bad Request)，去 prefill 重试', err);
-                params.onPrefillRetry?.();
-                try {
-                    responseContent = await doRequest(promptArrayNoPrefill);
-                    // 去 prefill 才成功＝该端点不收 assistant 尾条的直接证据。
-                    // 本链只报事件：能力记忆落档与用户提示都是调用方的
-                    // 组合根职责（生成链不反写设置域），后续请求直接不带起手词。
-                    // 处置者必填由 prefill 那一捆保证（带起手词必带处置者）。
-                    prefill.onUnsupported();
-                } catch (retryErr) {
-                    // 重试期间的超时/取消/网络错误与首发同口径归类，不裸冒泡
-                    classifyFailure(retryErr);
-                }
-            } else {
-                classifyFailure(err);
-            }
+        // 外部取消归类（timedOut=false 时的裸 AbortError 落这里）
+        if (params.signal?.aborted) throw new PersonaRunCancelled();
+        if (isNetwork) {
+            throw new Error(`网络请求失败：${errStr}。请检查中转站地址、API Key、网络连通性（梯子 / 公司网络代理等可能拦截）。`);
         }
-    } finally {
-        guard.dispose();
+        throw err;
+    };
+
+    try {
+        responseContent = await doRequest(promptArray);
+    } catch (err) {
+        // 分类：1) 网络层错误 2) 400/Bad Request + 带起手词 → 去起手词重试 3) 其它原样抛
+        // （到点超时在上游传输层已转成人话错误，不在本处再分类）。
+        // 宿主错误信封也走本判据：信封正文保留着上游原文（含 statusCode
+        // 一类字段），故 400 家族经信封路径同样命中重试（两条带起手词的
+        // YAML 轮——策展段与档案段——均以 assistant 起手词结尾，被网关以
+        // 「末条是模型轮」拒收正是这一族，兼容重试就是为它准备的；
+        // 复核轮不带起手词，压根不进这个分支）。
+        const errLower = (err && (err instanceof Error ? err.message : err.toString()) || '').toString().toLowerCase();
+        const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
+        if (prefill && isBadRequest) {
+            log.warn('生成失败 (400/Bad Request)，去 prefill 重试', err);
+            params.onPrefillRetry?.();
+            try {
+                responseContent = await doRequest(promptArrayNoPrefill);
+                // 去 prefill 才成功＝该端点不收 assistant 尾条的直接证据。
+                // 本链只报事件：能力记忆落档与用户提示都是调用方的
+                // 组合根职责（生成链不反写设置域），后续请求直接不带起手词。
+                // 处置者必填由 prefill 那一捆保证（带起手词必带处置者）。
+                prefill.onUnsupported();
+            } catch (retryErr) {
+                // 重试期间的超时/取消/网络错误与首发同口径归类，不裸冒泡
+                classifyFailure(retryErr);
+            }
+        } else {
+            classifyFailure(err);
+        }
     }
 
     return responseContent;

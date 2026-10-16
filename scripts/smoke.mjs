@@ -650,12 +650,13 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // 写回即立基线故宿主同值时不打扰/宿主正文偏离快照时问一次且拒答即零写通道
 // 调用·镜像与编辑现场原样）＋切聊天落在世界书收集窗口 1（收集是真挂起点且
 // 不收取消信号·该窗口内切聊天则旧会话描述符不写回 lastRun·请求不发出）。
-// ＝ 死代码清理批：analyzeRedundancy 入口删除后，structural 判据（归属对
-// 第 2 对）随判定面一并退役 −1；其余依赖该入口的断言改钉在仍活的判据面
-// （完全同值走 literalDuplicateSignatures、目录对照走 analyzeCatalogDrift、
-// 形状走 checkProfileShape），断言条数不变、强度不减；prompts 段「旧数组
-// 一次写迁移」换成「旧数组整键重建默认＋warn」仍为 1 条。
-const PERSONA_PASS_EXPECTED = 158;
+// ＝ 错误正文边界 1（两块整块在目录外的宿主错误正文恒不进 catalogDriftLeaves
+// ——目录体检只收「目录内块写出的目录外叶」，故该形态现无下游守卫；写成机判
+// 是为了不让后来人把它当漏报去补）＋超时/取消分流 3（persona 段装 600 秒上限·
+// 到点报人话超时且非取消/外部取消归 PersonaRunCancelled（用户侧提示「已取消生成」）/
+// 取消先到而到点随后仍按超时报——choice 那五条只测得到直连路径，测不到这里的
+// 嵌套面）。
+const PERSONA_PASS_EXPECTED = 162;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {

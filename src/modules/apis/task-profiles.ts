@@ -12,7 +12,7 @@
 
 import { getGlobal, setGlobal } from '@/storage/service';
 import { taskLabel, TASK_IDS, type TaskId } from '@/tasks';
-import type { GenerateRequestConfig, ReasoningEffort } from './client';
+import type { GenerateRequestConfig } from './client';
 import { readApiDomain } from './storage';
 import { TASK_PARAMS } from './task-defaults';
 
@@ -27,6 +27,14 @@ export const TASK_PROFILES_KEY = 'taskProfiles';
  * 与 UI 各拿一份清单漂移。客户端只消费 ReasoningEffort 类型，不重复持表。
  */
 export const REASONING_EFFORTS = ['off', 'low', 'medium', 'high'] as const;
+
+/**
+ * 思考强度档位（由清单派生，禁另写一份字面量联合）：'off'＝不发送该字段
+ * （默认——见 UI 端点配置的说明文案）；'low'|'medium'|'high' 映射为 OpenAI
+ * reasoning_effort 值。派生而非手写是本条存在的理由：清单加档而类型没跟上时，
+ * 这里编译期即断，而手写联合要等某个赋值点撞上才暴露。
+ */
+export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 
 /**
  * 任务档案值：该任务出站走哪个服务商＋哪个模型＋温度/思考强度
