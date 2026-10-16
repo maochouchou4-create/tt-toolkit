@@ -28,7 +28,7 @@
         </button>
         <button v-if="store.hasResult" type="button" class="tt-btn" :disabled="store.isProcessing" @click="store.reroll()">重 roll</button>
         <button v-if="store.hasResult" type="button" class="tt-btn" @click="confirmClear">清空</button>
-        <button type="button" class="tt-btn" :disabled="!store.hasResult" @click="store.saveToPersona()">覆盖当前人设</button>
+        <button type="button" class="tt-btn" :disabled="!store.hasResult" @click="onOverwritePersona">覆盖当前人设</button>
       </div>
 
       <!-- 结果框（可手改；生成/重 roll 共用） -->
@@ -70,8 +70,8 @@
 </template>
 
 <script setup lang="ts">
-import { onActivated, onMounted } from 'vue';
-import { usePersonaStore } from '@/modules/persona/store';
+import { overwritePersonaGuarded, usePersonaStore } from '@/modules/persona/store';
+import { TEXT } from '@/modules/persona/strings';
 import { TTCard, TTStatus } from '@/shell/ui';
 
 const store = usePersonaStore();
@@ -79,6 +79,15 @@ const store = usePersonaStore();
 function confirmClear(): void {
     if (!confirm('清空需求/结果？（已落库的配置不受影响）')) return;
     store.clearAll();
+}
+
+/**
+ * 覆盖写回：宿主正文偏离我方上次同步的快照时先问一次。
+ * 弹窗与文案归本层（仓内 confirm 先例），判据与快照比对在 store；拒答即
+ * 中止，宿主不碰、结果框里的编辑现场原样留着。
+ */
+function onOverwritePersona(): void {
+    void overwritePersonaGuarded(store, () => confirm(TEXT.CONFIRM_OVERWRITE_HOST));
 }
 
 /** 生成按钮双态：空闲＝发起生成；进行中＝取消（长请求逃生，choice 选项条同款）。 */
@@ -91,10 +100,6 @@ function onGreetingChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
     store.selectGreeting(value === '' ? null : Number(value));
 }
-
-/** onActivate 快照纪律：宿主派生数据每次激活刷新（只读宿主，不写域）。 */
-onMounted(() => { store.refreshHostData(); });
-onActivated(() => { store.refreshHostData(); });
 </script>
 
 <style>

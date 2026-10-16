@@ -337,8 +337,11 @@ globalThis.__TT_SMOKE_STUBS__ = {
         const hit = Object.entries(personas).find(([, value]) => value === name);
         return hit ? { avatar: hit[0] } : null;
     },
-    // world-info.js（node 冒烟：空世界书——生成参考链装载用）
-    loadWorldInfo: async name => {
+    // world-info.js（node 冒烟：空世界书——生成参考链装载用）。转发到可变
+    // 实现位：模块存根对非 let 导出取的是函数快照（stub-loader 走
+    // `export const`），冒烟要换实现（挂起窗口机判）只能经这一层间接。
+    loadWorldInfo: name => globalThis.__TT_SMOKE_STUBS__.loadWorldInfoImpl(name),
+    loadWorldInfoImpl: async name => {
         return { entries: {}, name };
     },
 };
@@ -636,8 +639,15 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // ＋目录漂移告警 3（判据层一条：catalogDriftLeaves 只装「目录内块里写出的
 // 目录外叶」，机制挂载块的叶与无主行都不进；接线侧两条：warn 打在复核轮
 // 收尾——模型回「无重复」那条最常见的路也打，载荷只有计数与符号名不带档案
-// 内文；零计数时一条 warn 都不打）。
-const PERSONA_PASS_EXPECTED = 152;
+// 内文；零计数时一条 warn 都不打）＋切聊天取消 in-flight 2（会话切换中止
+// 进行中那轮：互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志留痕
+// ——传输层单一写入点落一条 persona 失败记录且无双记）＋壳真钩子 2（人设
+// tab 描述符注册 onActivate 且每次激活只刷宿主派生快照·结果框编辑现场不动/
+// 覆盖确认文案逐字锁——用户靠这句判断覆盖会丢什么）＋写回保护 2（首次成功
+// 写回即立基线故宿主同值时不打扰/宿主正文偏离快照时问一次且拒答即零写通道
+// 调用·镜像与编辑现场原样）＋切聊天落在世界书收集窗口 1（收集是真挂起点且
+// 不收取消信号·该窗口内切聊天则旧会话描述符不写回 lastRun·请求不发出）。
+const PERSONA_PASS_EXPECTED = 159;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -654,7 +664,7 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 源码里出现即说明有人把段头抄进去了）。
 // ---------------------------------------------------------------------------
 const defaultsBody = readFileSync(new URL('../src/prompts/defaults.ts', import.meta.url), 'utf8')
-    .replace(/import\s*\{[^}]*\}\s*from\s*'\.\/catalog';/, '');
+    .replace(/import\s*\{[^}]*\}\s*from\s*'@\/modules\/persona\/catalog';/, '');
 const SEGMENT_SYMBOL_MAX = [
     ['CATALOG_DEFINITIONS_OPEN_TAG', 1],
     ['OWNERSHIP_TABLE_OPEN_TAG', 1],

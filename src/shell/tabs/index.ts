@@ -7,6 +7,7 @@ import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
 import { useApisStore } from '@/modules/apis/store';
+import { usePersonaStore } from '@/modules/persona/store';
 import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';
@@ -49,6 +50,12 @@ export function createPersonaTab(): ShellTab {
             const app = createApp(PersonaTab);
             app.use(pinia);
             app.mount(container);
+        },
+        // 宿主派生快照（开场白/绑定书单）挂在描述符上，每次点进本 tab 刷一次：
+        // tab 容器只挂载一次、激活只切可见，组件内的 onActivated 在未启用
+        // KeepAlive 的壳里永不触发。只刷派生数据，结果框的编辑现场不动。
+        onActivate() {
+            usePersonaStore(pinia).refreshHostData();
         },
     };
 }

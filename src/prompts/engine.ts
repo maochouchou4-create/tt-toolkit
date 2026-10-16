@@ -17,7 +17,7 @@ import type {
     StoryDirection,
 } from './types';
 import { PERSONA_INJECTION_SOURCES } from './types';
-import { definitionRowKeysFromSchema, renderCatalogDefinitions } from './catalog';
+import { definitionRowKeysFromSchema, renderCatalogDefinitions } from '@/modules/persona/catalog';
 
 /** 聊天历史条目（原始 user/assistant 楼层；<current_scene> 包裹在引擎内做）。 */
 export interface HistoryEntry {

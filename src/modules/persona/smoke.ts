@@ -47,11 +47,12 @@ import {
     renderCatalogDefinitions,
     renderOwnershipTable,
     type CatalogBlock,
-} from '@/prompts/catalog';
+} from '@/modules/persona/catalog';
 import { runGeneration, stripYamlFence, collectWorldInfoContext, type GenerationResult } from './generation';
 import { renderReviewBrief, REVIEW_BRIEF_NOT_RUN } from './review';
 import { TEXT } from './strings';
-import { usePersonaStore } from './store';
+import { overwritePersonaGuarded, usePersonaStore } from './store';
+import { createPersonaTab } from '@/shell/tabs';
 
 interface CapturedRequest {
     url: string;
@@ -2007,6 +2008,82 @@ async function runPersonaE2EChecks(): Promise<void> {
             && store.resultText === resultBeforeCancel,
             `fetchEntered=${String(fetchEntered)} result=${store.resultText}`);
 
+        // 切会话取消：CHAT_CHANGED 到达时中止 in-flight 那轮——它带的
+        // wiText/开场白快照属于旧会话，放它跑完就是把旧档案落进新会话的
+        // 编辑现场。挂起桩只认 signal，与上条同一形状。
+        let chatSwitchEntered = false;
+        globalThis.fetch = ((_url: string | URL, init?: RequestInit) => {
+            chatSwitchEntered = true;
+            return new Promise<Response>((_resolve, reject) => {
+                const abortLike = () => reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+                if (init?.signal?.aborted) abortLike();
+                else init?.signal?.addEventListener('abort', abortLike);
+            });
+        }) as typeof fetch;
+        const resultBeforeChatSwitch = store.resultText;
+        // 记账判据取 nextId 增量而非记录条数：ring 满了以后 push 不再涨长度，
+        // 按条数看会得到「一条没记」的假象。恰好 +1 同时钉住「无双记」。
+        const runlogIdBeforeChatSwitch = useRunlogStore().nextId;
+        store.requestText = '切聊天取消试验';
+        const chatSwitchPending = store.generate();
+        for (let i = 0; i < 100 && !chatSwitchEntered; i++) await new Promise(r => setTimeout(r, 1));
+        store.handleChatChanged();
+        await chatSwitchPending;
+        check('端到端：切聊天中止 in-flight 生成（互斥即刻复位、结果不误写、lastRun 清空）',
+            chatSwitchEntered
+            && store.isProcessing === false && store.processingLabel === ''
+            && store.resultText === resultBeforeChatSwitch && store.lastRun === null,
+            `fetchEntered=${String(chatSwitchEntered)} result=${store.resultText}`);
+        const runlogAfterChatSwitch = useRunlogStore();
+        const cancelRunRecord = runlogAfterChatSwitch.records.find(record => record.id >= runlogIdBeforeChatSwitch);
+        check('端到端：取消在运行日志留痕（传输层单一写入点恰落一条 persona 失败记录，无双记）',
+            runlogAfterChatSwitch.nextId === runlogIdBeforeChatSwitch + 1
+            && cancelRunRecord?.task === 'persona' && cancelRunRecord.ok === false,
+            `nextId ${runlogIdBeforeChatSwitch}→${runlogAfterChatSwitch.nextId} `
+            + `record=${JSON.stringify(cancelRunRecord && { id: cancelRunRecord.id, task: cancelRunRecord.task, ok: cancelRunRecord.ok })}`);
+
+        // 切聊天落在「世界书收集」窗口内：收集是真挂起点且不收取消信号，
+        // abort 抵达时这一轮已在飞、lastRun 却还没落。桩把单书装载做成手动
+        // resolve 的 Promise 造出该窗口（可换实现位经 scripts/smoke.mjs 的
+        // loadWorldInfo 转发层，模块存根取的是函数快照）。
+        const windowStubs = smokeStubs();
+        const originalChatForWindow = windowStubs.chat_metadata;
+        const defaultWorldBookImpl = windowStubs.loadWorldInfoImpl;
+        let worldBookEntered = false;
+        let releaseWorldBook = (): void => {};
+        windowStubs.loadWorldInfoImpl = () => new Promise(resolve => {
+            worldBookEntered = true;
+            releaseWorldBook = () => resolve({
+                entries: { '1': { uid: 1, comment: '窗口条目', content: '窗口内容', key: [], disable: false, depth: 1, position: 0 } },
+            });
+        });
+        windowStubs.setChatMetadata({ ...originalChatForWindow, world_info: '冒烟世界书' });
+        let collectWindowFetchCalls = 0;
+        globalThis.fetch = (() => {
+            collectWindowFetchCalls += 1;
+            throw new Error('收集窗口内不该发出请求——这一轮已被判死');
+        }) as typeof fetch;
+        const resultBeforeCollectWindow = store.resultText;
+        try {
+            store.requestText = '收集窗口切聊天试验';
+            const collectWindowPending = store.generate();
+            for (let i = 0; i < 100 && !worldBookEntered; i++) await new Promise(r => setTimeout(r, 1));
+            store.handleChatChanged();
+            releaseWorldBook();
+            await collectWindowPending;
+            check('端到端：切聊天落在世界书收集窗口内也不写回旧会话 lastRun（请求未发出、结果不误写、互斥复位）',
+                worldBookEntered
+                && store.lastRun === null
+                && collectWindowFetchCalls === 0
+                && store.resultText === resultBeforeCollectWindow
+                && store.isProcessing === false && store.processingLabel === '',
+                `worldBookEntered=${String(worldBookEntered)} lastRun=${JSON.stringify(store.lastRun)} `
+                + `fetch=${collectWindowFetchCalls} isProcessing=${String(store.isProcessing)}`);
+        } finally {
+            windowStubs.setChatMetadata(originalChatForWindow);
+            windowStubs.loadWorldInfoImpl = defaultWorldBookImpl;
+        }
+
         // 空白正文 fail fast（空白也算空的单点判据）：fetch 桩回纯空白 SSE 流
         // ——curator 段 fail-soft 回退默认模板照常，personaGen 段 finalize 抛
         // 「API 返回为空」。用户可见面三件套机判：错误 toast 在场（toastr
@@ -2591,6 +2668,7 @@ async function runStoreChecks(): Promise<void> {
 interface SmokeStubs {
     characters: Record<string, unknown>[];
     chat_metadata: Record<string, unknown>;
+    loadWorldInfoImpl(name: string): Promise<{ entries: Record<string, unknown> }>;
     setCharacters(v: Record<string, unknown>[]): void;
     setChatMetadata(v: Record<string, unknown>): void;
     setThisChid(v: string): void;
@@ -2726,6 +2804,40 @@ async function runPersonaWriteBackChecks(): Promise<void> {
             // 幽灵键防御的取名调用与刷列表调用同走此表，两次以外即纪律漂移
             && switchLog.length === 2 && rendersFor(switchLog, otherAvatarId) === 1,
             `setUserAvatar=${calls.setUserAvatar - setAvatarBefore} setPersonaDescription=${calls.setPersonaDescription - setDescBeforeSwitch} mirror=${String(stubs.power_user.persona_description)} log=${JSON.stringify(switchLog)}`);
+
+        // 写回保护：store 侧快照比对＋确认闸。「拒绝即中止」这条分支住在
+        // .vue 里没有冒烟执行面，闸因此落在模块层（UI 只注入 confirm）——
+        // 拒答时 upsertPersona 一次都不许发生，镜像与编辑现场原样留着。
+        const guardStore = usePersonaStore();
+        const resultBeforeGuard = guardStore.resultText;
+        guardStore.resultText = '冒烟描述·闸门基线';
+        seedPersona(stubs, 'user-default.png', '冒烟闸门人设');
+        let guardAsked = 0;
+        await overwritePersonaGuarded(guardStore, () => { guardAsked += 1; return true; });
+        check('写回保护：首次成功写回即立基线（宿主正文与快照同值，确认闸不打扰）',
+            guardAsked === 0
+            && guardStore.syncedDescription === '冒烟描述·闸门基线'
+            && guardStore.needsOverwriteConfirm() === false,
+            `asked=${guardAsked} snapshot=${String(guardStore.syncedDescription)} drift=${String(guardStore.needsOverwriteConfirm())}`);
+        // 宿主侧被改过（TT 里直接改／换了人设卡）→ 必须先问
+        stubs.power_user.persona_description = '宿主侧手改过的正文';
+        const setDescBeforeGuard = calls.setPersonaDescription;
+        const initBeforeGuard = calls.initPersona;
+        const setAvatarBeforeGuard = calls.setUserAvatar;
+        const mirrorBeforeGuard = stubs.power_user.persona_description;
+        guardAsked = 0;
+        await overwritePersonaGuarded(guardStore, () => { guardAsked += 1; return false; });
+        check('写回保护：宿主正文偏离快照且用户拒绝 → 问一次、零写通道调用、镜像与编辑现场原样',
+            guardAsked === 1
+            && calls.setPersonaDescription === setDescBeforeGuard
+            && calls.initPersona === initBeforeGuard
+            && calls.setUserAvatar === setAvatarBeforeGuard
+            && stubs.power_user.persona_description === mirrorBeforeGuard
+            && guardStore.resultText === '冒烟描述·闸门基线',
+            `asked=${guardAsked} setDesc=${calls.setPersonaDescription - setDescBeforeGuard} `
+            + `init=${calls.initPersona - initBeforeGuard} setAvatar=${calls.setUserAvatar - setAvatarBeforeGuard} `
+            + `mirror=${String(stubs.power_user.persona_description)}`);
+        guardStore.resultText = resultBeforeGuard;
     } finally {
         globalThis.fetch = originalFetch;
         delete personas[uploadPath];
@@ -2736,6 +2848,45 @@ async function runPersonaWriteBackChecks(): Promise<void> {
         delete descriptions[otherAvatarId];
         stubs.power_user.persona_description = descriptionBefore;
     }
+}
+
+// ---------------------------------------------------------------------------
+// 11) 壳真钩子（人设 tab 描述符的 onActivate）＋写回确认文案逐字锁
+// ---------------------------------------------------------------------------
+
+/**
+ * 壳真钩子：宿主派生快照的刷新挂在 tab 描述符的 onActivate 上。组件内的
+ * onActivated 在未启用 KeepAlive 的壳里永不触发——把刷新挂在它上面等于
+ * 每次进 tab 都不刷新（壳真钩子＝壳的激活回调，ApiTab 同款）。
+ *
+ * 断言两件事：钩子真的注册在描述符上；它只刷派生数据（开场白），结果框里
+ * 的编辑现场一个字都不动。
+ */
+function runShellHookChecks(): void {
+    const store = usePersonaStore();
+    const stubs = smokeStubs();
+    const personaTab = createPersonaTab();
+    const backupChars = stubs.characters;
+    const resultBeforeActivate = store.resultText;
+    try {
+        stubs.setCharacters([{ data: { first_mes: '壳钩子新会话开场白' } }]);
+        store.greetings = [];
+        personaTab.onActivate?.();
+        check('壳钩子：人设 tab 描述符注册 onActivate 且每次激活刷宿主派生快照（开场白跟随、resultText 编辑现场不动）',
+            typeof personaTab.onActivate === 'function'
+            && store.greetings.length === 1
+            && store.greetings[0].content === '壳钩子新会话开场白'
+            && store.resultText === resultBeforeActivate,
+            `onActivate=${typeof personaTab.onActivate} greetings=${JSON.stringify(store.greetings)}`);
+    } finally {
+        stubs.setCharacters(backupChars);
+        store.refreshHostData();
+    }
+    // 写回确认文案逐字锁：用户靠这段话判断「覆盖」会丢什么（来源与后果都
+    // 在句子里），改字即改语义——逐字档改动同样要过这一条。
+    check('写回保护：覆盖确认文案逐字（点明两种来源与覆盖后果）',
+        TEXT.CONFIRM_OVERWRITE_HOST === '宿主侧的人设在生成后被修改过（可能你在 TT 里直接改过，或换了卡）。继续覆盖会丢失那些修改。仍要覆盖吗？',
+        TEXT.CONFIRM_OVERWRITE_HOST);
 }
 
 /** 冒烟入口（main.ts node 分支调用）。 */
@@ -2753,10 +2904,11 @@ export async function runPersonaSmoke(): Promise<void> {
     await runPersonaReviewChecks();
     runHostLiveBindingChecks();
     await runPersonaWriteBackChecks();
+    runShellHookChecks();
     if (failures.length > 0) {
         console.error(`[persona-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/「块.叶 → 值」逐叶直改·断言改后叶值·未点名叶逐字不动/「保留」行逐字不动·计数不含保留叶/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写叶值在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/回复不可用一律回滚·点名不存在的叶与写出新完全同值两例/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）全部通过。');
+    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组一次写迁移/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块由目录外叶过半降级·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/structural 报出归属对第 2 对/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/「块.叶 → 值」逐叶直改·断言改后叶值·未点名叶逐字不动/「保留」行逐字不动·计数不含保留叶/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写叶值在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/回复不可用一律回滚·点名不存在的叶与写出新完全同值两例/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝196 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝197（声明叶 196＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
 }

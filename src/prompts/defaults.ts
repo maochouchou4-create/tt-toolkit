@@ -36,7 +36,7 @@ import {
     renderCatalog,
     renderOwnershipTable,
     type CatalogBlock,
-} from './catalog';
+} from '@/modules/persona/catalog';
 import type { PromptConfig, TaskKey } from './types';
 
 /**

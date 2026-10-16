@@ -15,12 +15,12 @@
  * 判定当闸门，它的漏检会原样还给用户。本模块的产出无条件随每份档案一起跑，
  * 由复核那一轮兜它盖不住的面。
  *
- * 导入纪律：目录与生成契约都只从叶子文件取（`@/prompts/catalog`、
- * `@/prompts/defaults`），解析层从同目录的叶子文件取（`./yaml`）。经任何
- * barrel 取会把冒烟与生成链拖进同一条初始化链，在模块初始化期求值模板字面量
- * （TDZ），并让本文件在别的任务上也被执行。
+ * 导入纪律：目录与档案占位符各自从叶子文件取（`@/modules/persona/catalog`、
+ * `@/prompts/defaults`），解析层从同目录的叶子文件取（`./yaml`）。三者都
+ * 不经任何 barrel 取——barrel 会 re-export 冒烟与生成链，经它取会把整条链
+ * 拉进消费方的初始化链并形成环状导入。
  */
-import { OWNERSHIP_PAIRS, catalogKeySet, type CatalogBlock } from '@/prompts/catalog';
+import { OWNERSHIP_PAIRS, catalogKeySet, type CatalogBlock } from '@/modules/persona/catalog';
 import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
 import { ProfileUndecidableError, scanProfileLeaves, shapeOfScan, type ProfileLeafRow, type ProfileScan, type ProfileUndecidableCode } from './yaml';
 

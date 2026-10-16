@@ -45,7 +45,7 @@ import { applyReviewVerdict, ReviewUnusableError, type ReviewBrief } from './rev
 import { analyzeCatalogDrift } from './redundancy';
 import { checkProfileShape, isSchemaSkeleton, parseYamlToBlocks } from './yaml';
 import { TEXT } from './strings';
-import { PERSONA_BLOCK_CATALOG, isSkeletonLeaf } from '@/prompts/catalog';
+import { PERSONA_BLOCK_CATALOG, isSkeletonLeaf } from '@/modules/persona/catalog';
 import { createTtlog } from '@/host/ttlog';
 
 const log = createTtlog('modules/persona/generation');
@@ -225,11 +225,18 @@ interface RequestOnceParams {
 }
 
 /**
+ * persona 侧的任务键（收窄掉 choice）：本模块只组装/导出 persona 两段，
+ * 放 choice 在这里是给「恒不可达的分支」留位置——键写进签名后编译器就会
+ * 把误接挡住，那段抛错守卫随之没有存在面。
+ */
+type PersonaTaskKey = Exclude<TaskKey, 'choice'>;
+
+/**
  * persona 任务消息组装（引擎管线）：按任务键取当前配置（用户在提示词
  * tab 改的就是这套），assemble＋占位符填充＋trace 一条龙。返回值含
  * trace 供调用侧观测。
  */
-function assemblePersonaMessages(task: TaskKey, sources: PersonaAssemblySources): { messages: GenerateMessage[]; trace: ModuleTrace[] } {
+function assemblePersonaMessages(task: PersonaTaskKey, sources: PersonaAssemblySources): { messages: GenerateMessage[]; trace: ModuleTrace[] } {
     const store = usePromptsStore();
     const config = store.configFor(task) ?? createTaskDefaultConfig(task);
     const result = assembleMessages(config.modules, sources);
@@ -629,8 +636,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
  * composeOutbound 同一实现；prefill 是每段请求的局部追加，不属组装产物，
  * 实发全文以运行日志为准）。
  */
-export async function dumpPersonaTask(task: TaskKey): Promise<string> {
-    if (task === 'choice') throw new Error('dumpPersonaTask 只处理 persona 任务');
+export async function dumpPersonaTask(task: PersonaTaskKey): Promise<string> {
     const charName = getCharacterName() || '角色';
     const sources: PersonaAssemblySources = {
         wiText: wrapAsXiTaReference(

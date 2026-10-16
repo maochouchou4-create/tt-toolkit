@@ -9,7 +9,7 @@
  * 的骨架标记推导——骨架与策展清单从此是同一份数据，目录外的键再也塞不进
  * 回退骨架。模版为纯静态骨架——不含任何宏占位符。
  */
-import { renderSkeletonYaml } from '@/prompts/catalog';
+import { renderSkeletonYaml } from '@/modules/persona/catalog';
 
 export const DEFAULT_TEMPLATES = {
     // 默认 User 模版 (主模版)。策展失败回退的 schema 骨架——取目录里带
