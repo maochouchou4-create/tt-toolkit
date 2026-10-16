@@ -17,6 +17,14 @@ import type { PromptConfig, TaskKey } from './types';
 /** 全局域提示词配置集键（冒烟机判直接按此键构造/恢复域，禁第二份字面量）。 */
 export const GLOBAL_PROMPT_CONFIGS_KEY = 'promptConfigs';
 
+/** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** 提示词配置集（本文件 GLOBAL_PROMPT_CONFIGS_KEY） */
+        promptConfigs?: Record<TaskKey, PromptConfig>;
+    }
+}
+
 /** 配置形状守门（Record 形态下逐键校验——外部写坏的键回退默认，不抛错）。 */
 function isConfigShape(value: unknown): value is PromptConfig {
     return typeof value === 'object' && value !== null && Array.isArray((value as PromptConfig).modules);
@@ -89,7 +97,7 @@ function normalizePromptConfigs(raw: unknown): { configs: Record<TaskKey, Prompt
 
 /** 读各任务键配置（纯读：只做内存 normalize，不写 storage——读路径零副作用）。 */
 export function readPromptConfigs(): Record<TaskKey, PromptConfig> {
-    return normalizePromptConfigs(getGlobal<unknown>(GLOBAL_PROMPT_CONFIGS_KEY)).configs;
+    return normalizePromptConfigs(getGlobal(GLOBAL_PROMPT_CONFIGS_KEY)).configs;
 }
 
 /**
@@ -98,6 +106,6 @@ export function readPromptConfigs(): Record<TaskKey, PromptConfig> {
  * 内的模块数组（backfill/strip），写回的是同一份配置。
  */
 export function ensurePromptConfigs(): void {
-    const { configs, changed } = normalizePromptConfigs(getGlobal<unknown>(GLOBAL_PROMPT_CONFIGS_KEY));
+    const { configs, changed } = normalizePromptConfigs(getGlobal(GLOBAL_PROMPT_CONFIGS_KEY));
     if (changed) setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, configs);
 }

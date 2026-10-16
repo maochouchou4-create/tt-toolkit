@@ -25,4 +25,8 @@ export function initApis(): ApisInitReport {
 }
 
 export { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';
-export { runApisSmoke } from './smoke';
+export { useApisStore } from './store';
+export { TASK_PARAMS } from './task-defaults';
+export { REASONING_EFFORTS } from './task-profiles';
+export type { ReasoningEffort } from './client';
+export type { ApiProvider } from './types';

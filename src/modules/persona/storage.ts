@@ -59,6 +59,14 @@ export interface PersonaDomain {
     userContext: UserContext;
 }
 
+/** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** persona 域（本文件 PERSONA_DOMAIN_KEY） */
+        persona?: PersonaDomain;
+    }
+}
+
 // ============================================================================
 // normalize（域形状保真：未知字段丢弃，缺字段补默认）
 // ============================================================================

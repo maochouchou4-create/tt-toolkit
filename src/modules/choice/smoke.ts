@@ -13,7 +13,7 @@ import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTas
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
-import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
+import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceDomain, type ChoiceGenParams } from './api';
 import { applyOption, cancelGeneration, generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
@@ -1370,9 +1370,14 @@ function runTaskRouteChecks(): void {
  * （按值判本身区分不了「旧默认存量」与「用户写旧值」，标记把时代分开）。
  */
 function runGenParamMigrationChecks(): void {
-    const saved = getGlobal<unknown>(GLOBAL_CHOICE_KEY);
+    const saved = getGlobal(GLOBAL_CHOICE_KEY);
+    // 夹具直写未归一形状（迁移机判的前提就是「存档里就是这种半截形状」）——
+    // 域登记门管键不管值形状，写出形状在此显式断言
+    const writeRawDomain = (value: unknown): void => {
+        setGlobal(GLOBAL_CHOICE_KEY, value as unknown as ChoiceDomain);
+    };
     const writeRawGen = (gen: Partial<ChoiceGenParams>): void => {
-        setGlobal(GLOBAL_CHOICE_KEY, { gen });
+        writeRawDomain({ gen });
     };
     try {
         writeRawGen({ count: 4, minChars: 10, maxChars: 60 });
@@ -1382,7 +1387,7 @@ function runGenParamMigrationChecks(): void {
             migrated.count === 4 && migrated.minChars === 30 && migrated.maxChars === 120,
             `count=${migrated.count} min=${migrated.minChars} max=${migrated.maxChars}`,
         );
-        const persisted = getGlobal<Partial<{ genDefaultsV: number; gen: { minChars: number } }>>(GLOBAL_CHOICE_KEY);
+        const persisted = getGlobal(GLOBAL_CHOICE_KEY);
         check(
             '生成参数迁移：存量档迁移随读通道落盘（值换新＋换代标记写入）',
             persisted?.genDefaultsV === 1 && persisted?.gen?.minChars === 30,
@@ -1395,7 +1400,7 @@ function runGenParamMigrationChecks(): void {
             kept.count === 6 && kept.minChars === 10 && kept.maxChars === 60,
             `count=${kept.count} min=${kept.minChars} max=${kept.maxChars}`,
         );
-        setGlobal(GLOBAL_CHOICE_KEY, { gen: { count: 4, minChars: 10, maxChars: 60 }, genDefaultsV: 1 });
+        writeRawDomain({ gen: { count: 4, minChars: 10, maxChars: 60 }, genDefaultsV: 1 });
         const held = choiceStorage.readDomain().gen;
         check(
             '生成参数迁移：换代标记在场 → 用户显式写旧默认（4/10/60）也原样守住',

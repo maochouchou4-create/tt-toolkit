@@ -36,7 +36,7 @@ import { APIS_DOMAIN_KEY, readApiDomain } from './storage';
 import { TASK_PROFILES_KEY, emptyTaskProfile, type TaskProfilesDomain } from './task-profiles';
 import { TASK_IDS } from '@/tasks';
 import type { ApiProvider } from './types';
-import { GLOBAL_CHOICE_KEY } from '@/modules/choice/api';
+import { GLOBAL_CHOICE_KEY, type ChoiceDomain } from '@/modules/choice/api';
 import { LEGACY_KEYS, PERSONA_DOMAIN_KEY, readPersonaDomain } from '@/modules/persona/storage';
 
 const DEFAULT_INDEP_URL = 'https://api.openai.com/v1';
@@ -304,10 +304,13 @@ export function migrateApiDomain(): ApiMigrationReport {
     // 整键重写退休旧字段——normalize 丢弃面在下次读时洗掉 task 等遗留键；
     // v1.3 存量的 choice 域已是 v2 形状，不经此路径） ----
     if (choiceDomain && legacyChoiceApis.length > 0) {
+        // 过渡形状写：v1 存档的 choice 域按原样重建为 v2 键面（gen/pool 在旧
+        // 档缺席就缺席，由 choice 域 normalize 补默认）——迁移不改写用户数据，
+        // 值来源是无类型的旧档原值，登记门管键不管值形状，此处显式断言。
         setGlobal(GLOBAL_CHOICE_KEY, {
             gen: choiceDomain.gen ?? undefined,
             pool: choiceDomain.pool ?? undefined,
-        });
+        } as unknown as ChoiceDomain);
     }
 
     // ---- persona 域 v2 重写（幂等清洗＝旧档 localConfig 键的退休路径：

@@ -16,18 +16,37 @@
  * 跳过＝二次启动 no-op。
  */
 
-import { LEGACY_KEYS, readPersonaDomain } from '@/modules/persona/storage';
+// 下面两个模块 import 只服务本文件的机判段（跨段排序证明：迁移先于清理），
+// 生产清理路径不碰它们——断言语义看的是各域 normalize 后的视图（persona 那条
+// 正是靠 normalize 的丢弃面证明退役键已退场），改读裸域值即改断言。
+import { readPersonaDomain } from '@/modules/persona/storage';
 import { getNavState } from '@/modules/nav/storage';
 import { getGlobal, LEGACY_NAV_AUTO_TOP_KEY, LEGACY_NAV_QR_ACTIVATED_KEY, setGlobal } from './service';
 
 /**
- * 清理键清单：单一真相源＝迁移代码的常量表（persona LEGACY_KEYS＋nav
- * 两个迁移源键，service.ts 导出），此处仅聚合，禁另写字面量。
- * persona 侧自世界书勾选/钉选域退役起为 3 键（pw_wi_selection_v1/
- * pw_pinned_books_v1 已随 v1.0.0 一次性清理离场，无键可管）。
+ * 旧 persona 键名（清理侧冻结副本；迁移侧的真相源＝modules/persona/storage
+ * 的 LEGACY_KEYS）。自世界书勾选/钉选域退役起为 3 键——pw_wi_selection_v1/
+ * pw_pinned_books_v1 已随该域退役移入 persona 侧的退休键清单，不在本段管辖。
+ *
+ * 本段与迁移面之间刻意不共享常量：本清单的语义是「首启一次性清理该删哪些
+ * 键」——一份随首启封存的历史事实；迁移侧的键表则随迁移面演进。两者共用
+ * 一份字面量会把历史快照变成当前迁移面的镜像，将来迁移面加键就会顺手把
+ * 键塞进清理清单（迁移键从不被本段删），语义混淆且跨层依赖 storage→modules。
+ * 两侧字面量漂移的代价有界：漂了也只是少删一个用户早已不用的本地键，
+ * 不碰任何已迁移数据。
+ */
+const LEGACY_PERSONA_STATE_KEY = 'pw_state_v20';
+const LEGACY_PERSONA_UI_STATE_KEY = 'pw_ui_state_v4_preset';
+const LEGACY_PERSONA_DATA_USER_KEY = 'pw_data_user_v1';
+
+/**
+ * 清理键清单：persona 侧冻结副本（上条三个常量）＋nav 两个迁移源键（storage
+ * 服务自持的常量，与迁移面同层，禁在别处另写第二份）。
  */
 export const LEGACY_WIPE_KEYS: readonly string[] = [
-    ...Object.values(LEGACY_KEYS),
+    LEGACY_PERSONA_STATE_KEY,
+    LEGACY_PERSONA_UI_STATE_KEY,
+    LEGACY_PERSONA_DATA_USER_KEY,
     LEGACY_NAV_AUTO_TOP_KEY,
     LEGACY_NAV_QR_ACTIVATED_KEY,
 ];
@@ -63,7 +82,7 @@ function removeKeyIfPresent(key: string): boolean {
  *      saveSettingsDebounced 持久化）。
  */
 export function wipeLegacyKeysOnce(): LegacyWipeReport {
-    if (getGlobal<boolean>(LEGACY_WIPE_FLAG_KEY) === true) {
+    if (getGlobal(LEGACY_WIPE_FLAG_KEY) === true) {
         console.info('[legacy-wipe] 标记在场，跳过（一次性清理已执行过）');
         return { skipped: true, wipedKeys: [] };
     }
@@ -123,16 +142,16 @@ function removeSeed(key: string): void {
 function seedAll(): void {
     seedKey(LEGACY_NAV_AUTO_TOP_KEY, '0');
     seedKey(LEGACY_NAV_QR_ACTIVATED_KEY, '1');
-    seedKey(LEGACY_KEYS.state, JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } }));
-    seedKey(LEGACY_KEYS.uiState, JSON.stringify({ generationPreset: 'pure' }));
-    seedKey(LEGACY_KEYS.dataUser, JSON.stringify({ request: 'wipe-smoke 场景种子', result: '' }));
+    seedKey(LEGACY_PERSONA_STATE_KEY, JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } }));
+    seedKey(LEGACY_PERSONA_UI_STATE_KEY, JSON.stringify({ generationPreset: 'pure' }));
+    seedKey(LEGACY_PERSONA_DATA_USER_KEY, JSON.stringify({ request: 'wipe-smoke 场景种子', result: '' }));
 }
 
 export function runLegacyWipeSmoke(): void {
     console.info('=== legacy-wipe 一次性清理机判 ===');
     const total = LEGACY_WIPE_KEYS.length;
     const presentAtEntry = LEGACY_WIPE_KEYS.filter(keyPresent);
-    const flagAtEntry = getGlobal<boolean>(LEGACY_WIPE_FLAG_KEY) === true;
+    const flagAtEntry = getGlobal(LEGACY_WIPE_FLAG_KEY) === true;
 
     if (presentAtEntry.length === 0) {
         // 一次启动签名：boot（迁移→清理）已跑完——键全删＋标记置位＋
@@ -168,7 +187,7 @@ export function runLegacyWipeSmoke(): void {
         `场景A：重置后清理删除全部 ${total} 键`,
         !reportA.skipped && reportA.wipedKeys.length === total && LEGACY_WIPE_KEYS.every(k => !keyPresent(k)),
     );
-    check('场景A：标记置位', getGlobal<boolean>(LEGACY_WIPE_FLAG_KEY) === true);
+    check('场景A：标记置位', getGlobal(LEGACY_WIPE_FLAG_KEY) === true);
     check('场景A：persona 域逐字节不变（清理不碰已迁移数据）', JSON.stringify(readPersonaDomain()) === personaBefore);
     check('场景A：nav 域逐字节不变', JSON.stringify(getNavState()) === navBefore);
 

@@ -30,7 +30,7 @@ import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, wr
 import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { TASK_IDS } from '@/tasks';
-import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
+import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, GLOBAL_PROMPT_CONFIGS_KEY, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources, type PromptConfig, type TaskKey } from '@/prompts';
 import {
     CATALOG_DEFINITIONS_CLOSE_TAG,
     CATALOG_DEFINITIONS_OPEN_TAG,
@@ -442,7 +442,8 @@ function runPromptsChecks(): void {
     // （ensurePromptConfigs——读路径零副作用后的唯一落盘口），模拟
     // 「旧档在场」的启动即调 init
     const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
-    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [legacySet]);
+    // 夹具直写未归一形状（旧数组档）——域登记门管键不管值形状，显式断言写出形状
+    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [legacySet] as unknown as Record<TaskKey, PromptConfig>);
     const shapeWarnings: string[] = [];
     const originWarn = console.warn;
     console.warn = (...args: unknown[]): void => { shapeWarnings.push(args.map(arg => String(arg)).join(' ')); };
@@ -469,7 +470,7 @@ function runPromptsChecks(): void {
     setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, {
         ...withStale,
         persona_gen: { id: 'default', name: '默认', defaultsVersion: DEFAULTS_VERSION - 1, modules: [] },
-    });
+    } as unknown as Record<TaskKey, PromptConfig>);
     ensurePromptConfigs();
     prompts.$patch({ revision: prompts.revision + 1 });
     const afterRebuild = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, { id?: string; defaultsVersion?: number; modules?: unknown[] }>;
@@ -2673,17 +2674,20 @@ function runHostLiveBindingChecks(): void {
     }
 
     // 2. 写通道活目标：chat_metadata 换引用后写落当前对象、读回当前对象
-    // （livenessProbe 是测试探针键，不入 ChatDomain 登记——keyof 豁免）
+    // （livenessProbe 是测试探针键，不入 ChatDomain 登记——keyof 与值形状
+    // 均由本段显式断言，登记门只管在用子域的键）
     const probeKey = 'livenessProbe' as keyof ChatDomain;
+    type LivenessProbe = { v?: number };
     const originalChat = stubs.chat_metadata;
     try {
         stubs.setChatMetadata({});
-        setChat(probeKey, { v: 1 });
+        setChat(probeKey, { v: 1 } as unknown as ChatDomain[keyof ChatDomain]);
         const domain = stubs.chat_metadata.ttToolkit as Record<string, unknown> | undefined;
-        const probe = domain?.livenessProbe as { v?: number } | undefined;
+        const probe = domain?.livenessProbe as LivenessProbe | undefined;
+        const readBack = getChat(probeKey) as LivenessProbe | undefined;
         check('host 活取用：chat_metadata 换引用后 setChat 写落当前对象、getChat 读当前对象（写通道目标=现取，脱挂写丢失回归红线）',
-            (getChat<{ v: number }>(probeKey))?.v === 1 && probe?.v === 1,
-            `getChat=${JSON.stringify(getChat(probeKey))} 宿主当前对象=${JSON.stringify(probe)}`);
+            readBack?.v === 1 && probe?.v === 1,
+            `getChat=${JSON.stringify(readBack)} 宿主当前对象=${JSON.stringify(probe)}`);
     } finally {
         stubs.setChatMetadata(originalChat);
     }

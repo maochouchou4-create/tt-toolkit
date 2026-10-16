@@ -84,9 +84,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue';
-import { useChoiceSettingsStore } from '@/modules/choice/settings';
-import { useStoryDirectionStore, type DirectionPreset } from '@/modules/choice/direction';
-import { DEFAULT_GEN_PARAMS, type ChoiceGenParams } from '@/modules/choice/api';
+import { DEFAULT_GEN_PARAMS, useChoiceSettingsStore, useStoryDirectionStore, type ChoiceGenParams, type DirectionPreset } from '@/modules/choice';
 import { TTCard, TTField } from '@/shell/ui';
 
 const settings = useChoiceSettingsStore();

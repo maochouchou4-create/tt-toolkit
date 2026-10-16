@@ -166,12 +166,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useApisStore } from '@/modules/apis/store';
+import { REASONING_EFFORTS, TASK_PARAMS, useApisStore, type ApiProvider, type ReasoningEffort } from '@/modules/apis';
 import { TASKS, type TaskId } from '@/tasks';
-import { TASK_PARAMS } from '@/modules/apis/task-defaults';
-import type { ReasoningEffort } from '@/modules/apis/client';
-import { REASONING_EFFORTS } from '@/modules/apis/task-profiles';
-import type { ApiProvider } from '@/modules/apis/types';
 import { showToast } from '@/host';
 import { TTCard, TTCombobox, TTField, TTStatus } from '@/shell/ui';
 

@@ -28,6 +28,8 @@ node scripts/smoke.mjs
 
 smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用例必须同步 bump 期望数，禁止注释跳过或放宽断言来「变绿」。
 
+`check-imports` 兼管源级导入环（Tarjan 强连通分量，与外置说明符隔离同属导入纪律，故不另立命令）：新增环即红；既有环在脚本内 `EXEMPT_CYCLES` 显式登记豁免（每条带理由），登记项若已消解同样判红——豁免面须与结构同进同退。
+
 ## dev-harness（无 TT 宿主时的本机 DOM 验证）
 
 - dist 重建后**必须**重跑 `node scripts/dev-harness/build.mjs`（app.js 是实体文件不是映射，忘了跑＝验证的是旧代码）。
@@ -53,9 +55,9 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 - **单条消息的派生数据**（该楼选项……）＝该消息 `extra.ttToolkit`——写入必须是纯数据（宿主 swipe 会 structuredClone 进新槽位）；写前做对象校验（删楼会使索引左移）、写后立即 `saveCurrentChat()`；**生成开始须主动清旧档**（宿主 `clearMessageData` 白名单不碰 `ttToolkit`，普通 regenerate 不调，宿主不会替扩展清理）；
 - 角色域 `character.data.extensions.ttToolkit` 预留，无写面。
 
-新键义务：域键常量在**归属模块**定义（字面量仅此一份），并登记进 `src/storage/service.ts` 的 `GlobalDomain`/`ChatDomain` 显式键 union——漏登记 vue-tsc 即报错（编译期登记门）；排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
+新键义务：域键常量与域类型都在**归属模块**定义（字面量仅此一份），并在该模块用 `declare module '@/storage/service'` 声明合并登记进 `GlobalDomain`／`ChatDomain`（键与值类型一并登记）——漏登记或形状写错 vue-tsc 即报错（编译期登记门）。登记放在归属模块是为了让服务层不反向 import 功能模块（那会让 storage↔modules 成环）；内联在 service.ts 的例外只有两种：类型定义就在该文件的 nav，以及定义在零依赖叶子模块的 storyDirection。读面仍须经归属模块的 normalize 才可安全展开——类型收紧只在 API 面，坏档容忍不因此消失。排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
 
-旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 3 键 + nav 2 键），勿再引用。
+旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 3 键 + nav 2 键），勿再引用——该段的 persona 键名是清理侧冻结副本（与迁移侧常量表刻意不共享，见该文件注）。
 
 ## 提交与发布
 

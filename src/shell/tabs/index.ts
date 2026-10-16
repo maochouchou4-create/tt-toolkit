@@ -6,8 +6,8 @@
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import type { ShellTab } from '@/shell/types';
-import { useApisStore } from '@/modules/apis/store';
-import { usePersonaStore } from '@/modules/persona/store';
+import { useApisStore } from '@/modules/apis';
+import { usePersonaStore } from '@/modules/persona';
 import ApiTab from './ApiTab.vue';
 import ChoiceSettingsTab from './ChoiceSettingsTab.vue';
 import LogTab from './LogTab.vue';

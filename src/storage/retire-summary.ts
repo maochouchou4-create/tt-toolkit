@@ -11,33 +11,22 @@
  * 作用域：聊天域只清启动时打开的那个聊天——其余聊天不遍历（不碰旧档的
  * 拍板边界；残留键无消费者、惰性无害）。
  *
- * 通道走 host 层 settings 直访而非 storage 服务的 getGlobal/setGlobal：
- * 域键登记面只登记在用的子域，退役键名脱离 GlobalDomain/ChatDomain union
- * 正是「已不在用」的类型级表达。delete 也没有现成原语（服务的写口是整键
- * 替换），故直访域对象。
+ * 通道分工：读面走 storage 服务的域读取（与其它子域同一条通道，取的是域
+ * 对象原始单例不比快照），写面直访 host 层 settings——域键登记面只登记在用
+ * 的子域，退役键名脱离 GlobalDomain/ChatDomain union 正是「已不在用」的
+ * 类型级表达；而服务的写口是整键替换、做不了 delete，故直访域对象。
  */
 
 import { currentChatMetadata, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
-import { CHAT_KEY, GLOBAL_KEY } from './service';
+import { CHAT_KEY, GLOBAL_KEY, readChatDomain, readGlobalDomain } from './service';
+import { isRecord } from './shape';
 
 /** 退役域键名（全局域与聊天域同名两处；字面量仅此一份）。 */
 const RETIRED_KEY = 'summary';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** 域内是否还挂着退役键（缺席＝已完成，删除与读取都以它为门）。 */
 function hasRetiredKey(domain: unknown): boolean {
     return isRecord(domain) && RETIRED_KEY in domain;
-}
-
-function readGlobalDomainRaw(): unknown {
-    return (extension_settings as Record<string, unknown>)[GLOBAL_KEY];
-}
-
-function readChatDomainRaw(): unknown {
-    return currentChatMetadata()[CHAT_KEY];
 }
 
 export interface RetireSummaryReport {
@@ -55,7 +44,7 @@ export function retireSummaryKeys(): RetireSummaryReport {
     const report: RetireSummaryReport = { globalRemoved: false, chatRemoved: false };
     // 两域各自 try：一域失败不得短路另一域，warn 文案各说各的实际尝试范围
     try {
-        if (hasRetiredKey(readGlobalDomainRaw())) {
+        if (hasRetiredKey(readGlobalDomain())) {
             writeExtensionSettings(settings => {
                 const domain = settings[GLOBAL_KEY];
                 if (!hasRetiredKey(domain)) return;
@@ -67,7 +56,7 @@ export function retireSummaryKeys(): RetireSummaryReport {
         console.warn('[tt-toolkit][storage] 全局域 summary 键清理失败（旧键保留，下次启动重试；不影响其余功能）', e);
     }
     try {
-        if (hasRetiredKey(readChatDomainRaw())) {
+        if (hasRetiredKey(readChatDomain())) {
             writeChatMetadata(metadata => {
                 const domain = metadata[CHAT_KEY];
                 if (!hasRetiredKey(domain)) return;
@@ -112,8 +101,8 @@ export function runRetireSummarySmoke(): void {
 
     seedRetiredKeys();
     const report = retireSummaryKeys();
-    check('全局域退役键删除后缺席', report.globalRemoved && !hasRetiredKey(readGlobalDomainRaw()));
-    check('聊天域退役键删除后缺席', report.chatRemoved && !hasRetiredKey(readChatDomainRaw()));
+    check('全局域退役键删除后缺席', report.globalRemoved && !hasRetiredKey(readGlobalDomain()));
+    check('聊天域退役键删除后缺席', report.chatRemoved && !hasRetiredKey(readChatDomain()));
 
     const rerun = retireSummaryKeys();
     check('二跑幂等（键缺席不删不炸）', !rerun.globalRemoved && !rerun.chatRemoved);

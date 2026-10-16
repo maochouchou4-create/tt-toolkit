@@ -40,8 +40,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRunlogStore } from '@/modules/runlog/store';
-import type { RunRecord } from '@/modules/runlog/types';
+import { useRunlogStore, type RunRecord } from '@/modules/runlog';
 
 const store = useRunlogStore();
 const expanded = ref<number | null>(null);

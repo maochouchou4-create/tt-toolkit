@@ -2,15 +2,17 @@
  * 扩展引导：唯一环境分支点（模块不自行探测环境自启动）。
  *
  * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
- * → initChoice()（提示词配置落盘＋__TT_TOOLKIT__.prompts
- * 全局口＋选项条挂载＋MESSAGE_RECEIVED 自动生成监听）
+ * → initChoice()（提示词配置落盘＋选项条挂载＋MESSAGE_RECEIVED
+ * 自动生成监听）→ installPromptsPort()（__TT_TOOLKIT__.prompts 排障口，
+ * 按任务键分派 choice/persona 两侧）
  * → initNav() → initApis()（统一端点表：persona 域迁移先成型，再收编
  * choice/persona 旧 API 字段）→ initPersona() → retireSummaryKeys()（退役
  * 域键删除）→ wipeLegacyKeysOnce()（遗留
  * localStorage 键一次性清理——顺序硬约束，必须位于全部幂等迁移之后）。
  * node 冒烟（无 DOM，scripts/smoke.mjs 驱动）流：initStorage() → host
  * 探测清单 + storage roundtrip → nav 最小初始化 → nav dump。
- * initChoiceMinimal()（默认配置落盘＋全局口，不挂 DOM）→ runChoiceSmoke()
+ * initChoiceMinimal()（默认配置落盘，不挂 DOM）→ installPromptsPort()
+ * → runChoiceSmoke()
  * → initApis() → initPersonaMinimal() → wipeLegacyKeysOnce() ＋
  * runLegacyWipeSmoke()（机判须先于 runPersonaSmoke——后者会中途回收旧键
  * 并重置 persona 域）→ runPersonaSmoke() → retireSummaryKeys() ＋
@@ -33,15 +35,60 @@ import { dumpStorage, runStorageRoundtrip } from '@/storage/debug';
 import { initStorage } from '@/storage';
 import { runLegacyWipeSmoke, wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
 import { retireSummaryKeys, runRetireSummarySmoke } from '@/storage/retire-summary';
-import { initChoice, initChoiceMinimal, runChoiceSmoke } from '@/modules/choice';
+// 冒烟机判不经模块门面直取：人设冒烟反向依赖壳的 tab 描述符（壳钩子断言），
+// 门面一旦透出冒烟入口，壳消费门面即与冒烟成环（环门禁会红）。
+import { initChoice, initChoiceMinimal, assembleCurrent, parseOptions, DEBUG_MALFORMED_RAW } from '@/modules/choice';
+import { runChoiceSmoke } from '@/modules/choice/smoke';
 import { initNav, initNavMinimal } from '@/modules/nav';
-import { initApis, runApisSmoke } from '@/modules/apis';
-import { initPersona, initPersonaMinimal, runPersonaSmoke } from '@/modules/persona';
+import { initApis } from '@/modules/apis';
+import { runApisSmoke } from '@/modules/apis/smoke';
+import { initPersona, initPersonaMinimal, dumpPersonaTask } from '@/modules/persona';
+import { runPersonaSmoke } from '@/modules/persona/smoke';
+import { TASK_KEYS, type TaskKey } from '@/prompts';
 import { version } from '@/version';
 
 /** 存储域 dump 挂入统一排障口（devtools 直取 __TT_TOOLKIT__.storage.dump()）。 */
 function installStoragePort(): void {
     toolkitGlobalPort().storage = Object.freeze({ dump: dumpStorage });
+}
+
+/**
+ * 提示词排障口 __TT_TOOLKIT__.prompts（dump / assemble / parseOptions）：
+ * 用户浏览器验收与排障共用（与生成管线同一条组装路径）。
+ *
+ * 分派登记在引导层：dump 的任务键全集跨模块——choice 走组装管线，persona
+ * 两任务由 persona 模块实现，两者是兄弟模块，谁都不该引对方；引导层是唯一
+ * 同时持有两侧的地方。任务键全集即 dump 支持全集，键外取值给「未知任务键」报错。
+ */
+function installPromptsPort(): void {
+    const port = {
+        version,
+        /**
+         * 全量组装 dump（宿主真实数据；async——世界书扫描是异步的）。
+         * task＝'choice'（默认）走选项生成组装；persona 任务走
+         * dumpPersonaTask（运行时任务态以空呈现，模板与注入全文可见）。
+         */
+        async dump(task?: string | { task?: string }): Promise<string> {
+            const raw = typeof task === 'string' ? task : task?.task;
+            const key = TASK_KEYS.includes(raw as TaskKey) ? (raw as TaskKey) : raw === undefined ? 'choice' : undefined;
+            if (!key) {
+                throw new Error(`未知任务键 ${String(raw)}——可选值：${TASK_KEYS.join(' / ')}`);
+            }
+            const dumpText = key === 'choice'
+                ? (await assembleCurrent()).dumpText
+                : await dumpPersonaTask(key);
+            console.info(dumpText);
+            return dumpText;
+        },
+        /** 组装结果原始形态（消息数组＋trace；choice 任务专用口） */
+        assemble: assembleCurrent,
+        /** 解析纯函数（畸形输出回退路径的确定性探针） */
+        parseOptions,
+        /** 调试用固定畸形样本（配合 parseOptions 验证回退） */
+        DEBUG_MALFORMED_RAW,
+    };
+    Object.freeze(port);
+    toolkitGlobalPort().prompts = port;
 }
 
 /**
@@ -75,6 +122,7 @@ async function runNodeSmoke(): Promise<void> {
         console.warn('=== nav 模块未初始化（__TT_TOOLKIT__.nav 不在场）===');
     }
     initChoiceMinimal();
+    installPromptsPort();
     // 组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
     await runChoiceSmoke();
     // 统一端点表迁移收编（persona 域先成型再收编；报告断言在 smoke.mjs）
@@ -112,6 +160,7 @@ async function main(): Promise<void> {
     registerTab(createPersonaTab());
     registerTab(createLogTab());
     initChoice();
+    installPromptsPort();
     initNav();
     // 统一端点表：persona 域迁移先成型（initApis 内先 migratePersonaDomain），
     // 再收编 choice/persona 旧 API 字段——顺序敏感，勿调换

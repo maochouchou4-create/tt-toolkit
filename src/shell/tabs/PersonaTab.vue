@@ -70,8 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { overwritePersonaGuarded, usePersonaStore } from '@/modules/persona/store';
-import { TEXT } from '@/modules/persona/strings';
+import { TEXT, overwritePersonaGuarded, usePersonaStore } from '@/modules/persona';
 import { TTCard, TTStatus } from '@/shell/ui';
 
 const store = usePersonaStore();

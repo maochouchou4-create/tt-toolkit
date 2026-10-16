@@ -25,33 +25,55 @@ export interface DirectionPreset {
     text: string;
 }
 
+/** 域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** 剧情走向预设列表（本文件 GLOBAL_DIRECTION_PRESETS_KEY） */
+        directionPresets?: DirectionPreset[];
+    }
+}
+
+/**
+ * 剧情走向 normalize（聊天域）：存档形状不可信——旧档是 {tag, freeText}
+ * 形态（六选一标签时代，tag 已废弃不保留），字段缺失/类型不对各归空串。
+ * 纯函数：吃 unknown 出规范形状，读面之外的形状校验也归它一处。
+ */
+export function normalizeStoryDirection(raw: unknown): StoryDirection {
+    const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    return {
+        presetText: typeof value.presetText === 'string' ? value.presetText : '',
+        freeText: typeof value.freeText === 'string' ? value.freeText : '',
+    };
+}
+
+/**
+ * 预设列表 normalize（全局域）：非数组归空表；坏条目（缺 id/text 或类型
+ * 不对）逐条剔除而非抛错——预设是用户可重建的辅助数据，不值得 Fail Fast
+ * 打断组装。
+ */
+export function normalizeDirectionPresets(raw: unknown): DirectionPreset[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+        (p): p is DirectionPreset =>
+            typeof p === 'object' && p !== null && typeof (p as DirectionPreset).id === 'string' && typeof (p as DirectionPreset).text === 'string',
+    );
+}
+
 export const useStoryDirectionStore = defineStore('tt-story-direction', {
     state: () => ({
         /** 写穿计数：读透传 getter 的失效信号 */
         revision: 0,
     }),
     getters: {
+        // 取值按域登记的类型是 StoryDirection，但存档与外部写坏的形状仍可能
+        // 到场——归一由 normalize 面吃 unknown 逐字段守门（收紧只在 API 面）
         storyDirection(): StoryDirection {
             void this.revision;
-            const d = getChat<Partial<StoryDirection>>(CHAT_STORY_DIRECTION_KEY);
-            // 旧档案是 {tag, freeText} 形态（六选一标签时代）：tag 已废弃
-            // （用户拍板固定标签不保留）——读档只取 freeText，tag 丢弃；
-            // presetText 旧档案没有，缺省空串
-            return {
-                presetText: typeof d?.presetText === 'string' ? d.presetText : '',
-                freeText: typeof d?.freeText === 'string' ? d.freeText : '',
-            };
+            return normalizeStoryDirection(getChat(CHAT_STORY_DIRECTION_KEY));
         },
         directionPresets(): DirectionPreset[] {
             void this.revision;
-            const raw = getGlobal<unknown>(GLOBAL_DIRECTION_PRESETS_KEY);
-            if (!Array.isArray(raw)) return [];
-            // 逐项守门：外部写坏的条目（缺 id/text 或类型不对）剔除而非抛错
-            // ——预设列表是用户可重建的辅助数据，不值得 Fail Fast 打断组装
-            return raw.filter(
-                (p): p is DirectionPreset =>
-                    typeof p === 'object' && p !== null && typeof (p as DirectionPreset).id === 'string' && typeof (p as DirectionPreset).text === 'string',
-            );
+            return normalizeDirectionPresets(getGlobal(GLOBAL_DIRECTION_PRESETS_KEY));
         },
     },
     actions: {

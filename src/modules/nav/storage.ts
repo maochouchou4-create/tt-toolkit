@@ -11,11 +11,19 @@ import type { NavStorageState } from '@/storage/service';
 /** nav 域缺省态（域缺席/形状损坏时回退）。 */
 const NAV_DEFAULTS: NavStorageState = { qrActivated: false };
 
-/** nav 域便捷读取（getGlobal 深快照，返回值与存储单例解耦）。 */
+/**
+ * nav 域 normalize（纯函数，吃 unknown）：缺省/非对象归缺省，其余原样透传
+ * ——本域只有布尔标记面，没有需要逐字段重建的复合字段（退役字段的丢弃由
+ * 启动期 initStorage 的 nav 迁移段负责，见 storage/service）。
+ */
+export function normalizeNavState(raw: unknown): NavStorageState {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...NAV_DEFAULTS };
+    return raw as NavStorageState;
+}
+
+/** nav 域便捷读取（getGlobal 深快照后归一；返回值与存储单例解耦）。 */
 export function getNavState(): NavStorageState {
-    const nav = getGlobal<NavStorageState>('nav');
-    if (!nav || typeof nav !== 'object' || Array.isArray(nav)) return { ...NAV_DEFAULTS };
-    return nav;
+    return normalizeNavState(getGlobal('nav'));
 }
 
 /** nav 域便捷写入（读改写整体替换该子域）。 */

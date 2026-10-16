@@ -8,6 +8,7 @@ import { writeChatMetadata, writeExtensionSettings } from '@/host';
 import { CHAT_KEY, GLOBAL_KEY, getChat, getGlobal, readChatDomain, readGlobalDomain, setChat, setGlobal } from './service';
 import type { ChatDomain, GlobalDomain } from './service';
 import { newId } from './id';
+import { isRecord } from './shape';
 
 export interface RoundtripReport {
     scope: 'global' | 'chat';
@@ -21,8 +22,27 @@ export interface RoundtripReport {
 const SMOKE_GLOBAL_KEY = '_smoke' as keyof GlobalDomain;
 const SMOKE_CHAT_KEY = '_smoke' as keyof ChatDomain;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
+/**
+ * 探针读写口：探针键不在域登记面里（登记面只登记在用的子域），因此键挂上
+ * 之后值形状无处可查——由本文件的 ProbeValue 自持，并在这一层一次性断言，
+ * 免得断言散落四处（域登记门管的是在用子域的键，探针不归它管）。
+ */
+type ProbeValue = { token: string };
+
+function writeGlobalProbe(value: ProbeValue): void {
+    setGlobal(SMOKE_GLOBAL_KEY, value as unknown as GlobalDomain[keyof GlobalDomain]);
+}
+
+function readGlobalProbe(): string | undefined {
+    return (getGlobal(SMOKE_GLOBAL_KEY) as unknown as ProbeValue | undefined)?.token;
+}
+
+function writeChatProbe(value: ProbeValue): void {
+    setChat(SMOKE_CHAT_KEY, value as unknown as ChatDomain[keyof ChatDomain]);
+}
+
+function readChatProbe(): string | undefined {
+    return (getChat(SMOKE_CHAT_KEY) as unknown as ProbeValue | undefined)?.token;
 }
 
 /**
@@ -35,8 +55,8 @@ export function runStorageRoundtrip(): RoundtripReport[] {
     const reports: RoundtripReport[] = [];
 
     const globalToken = newId('rt');
-    setGlobal(SMOKE_GLOBAL_KEY, { token: globalToken });
-    const globalRead = getGlobal<{ token: string }>(SMOKE_GLOBAL_KEY)?.token;
+    writeGlobalProbe({ token: globalToken });
+    const globalRead = readGlobalProbe();
     reports.push({
         scope: 'global',
         ok: globalRead === globalToken,
@@ -46,8 +66,8 @@ export function runStorageRoundtrip(): RoundtripReport[] {
     });
 
     const chatToken = newId('rt');
-    setChat(SMOKE_CHAT_KEY, { token: chatToken });
-    const chatRead = getChat<{ token: string }>(SMOKE_CHAT_KEY)?.token;
+    writeChatProbe({ token: chatToken });
+    const chatRead = readChatProbe();
     reports.push({
         scope: 'chat',
         ok: chatRead === chatToken,

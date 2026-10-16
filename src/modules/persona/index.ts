@@ -51,5 +51,6 @@ export function initPersonaMinimal(): void {
     initPersona();
 }
 
-export { runPersonaSmoke } from './smoke';
+export { usePersonaStore, overwritePersonaGuarded } from './store';
+export { TEXT } from './strings';
 export { dumpPersonaTask } from './generation';

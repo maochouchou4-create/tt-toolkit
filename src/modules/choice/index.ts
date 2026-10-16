@@ -1,21 +1,21 @@
 /**
- * choice 模块入口：聊天选项条挂载＋全局口（__TT_TOOLKIT__.prompts dump）。
+ * choice 模块入口：聊天选项条挂载。
  *
  * 选项条停靠：#send_form 之前（输入框上方、不随聊天滚动——#form_sheld
  * 是静态骨架 DOM，宿主先于扩展脚本在场；仍保留轮询兜底防宿主加载流程
  * 变更）。每次组装前现取宿主数据（不缓存）。
+ *
+ * 排障口不在本模块安装：__TT_TOOLKIT__.prompts 的 dump 按任务键分派，
+ * 任务键全集跨模块（persona 两任务由 persona 模块实现），分派权归同时
+ * 持有两侧的引导层（见 src/main.ts）。本模块只出自己那侧的探针。
  */
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import { eventBus, event_types, waitForResource } from '@/host';
-import { toolkitGlobalPort } from '@/global-port';
-import { ensurePromptConfigs, TASK_KEYS, type TaskKey } from '@/prompts';
-import { dumpPersonaTask } from '@/modules/persona';
+import { ensurePromptConfigs } from '@/prompts';
 import { version } from '@/version';
 import { installAutoGenerate } from './auto';
-import { assembleCurrent } from './generator';
 import { latestAssistantFloorIndex } from './persist';
-import { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
 import { syncAssetPool } from './pool/asset';
 import { useChoiceStore } from './store';
 import OptionsBar from './OptionsBar.vue';
@@ -75,65 +75,31 @@ async function mountBarWithRetry(): Promise<void> {
 }
 
 /**
- * 全局口 __TT_TOOLKIT__.prompts：dump / assemble / parseOptions。
- * 用户浏览器验收与排障共用（与生成管线同一条组装路径）。
- * dump 按任务（默认 choice）：任务键全集即 dump 支持全集——每个任务键
- * 都有一路实现，键外取值给「未知任务键」报错。
- */
-function installGlobalPort(): void {
-    const port = {
-        version,
-        /**
-         * 全量组装 dump（宿主真实数据；async——世界书扫描是异步的）。
-         * task＝'choice'（默认）走选项生成组装；persona 任务走
-         * dumpPersonaTask（运行时任务态以空呈现，模板与注入全文可见）。
-         */
-        async dump(task?: string | { task?: string }): Promise<string> {
-            const raw = typeof task === 'string' ? task : task?.task;
-            const key = TASK_KEYS.includes(raw as TaskKey) ? (raw as TaskKey) : raw === undefined ? 'choice' : undefined;
-            if (!key) {
-                throw new Error(`未知任务键 ${String(raw)}——可选值：${TASK_KEYS.join(' / ')}`);
-            }
-            const dumpText = key === 'choice'
-                ? (await assembleCurrent()).dumpText
-                : await dumpPersonaTask(key);
-            console.info(dumpText);
-            return dumpText;
-        },
-        /** 组装结果原始形态（消息数组＋trace；choice 任务专用口） */
-        assemble: assembleCurrent,
-        /** 解析纯函数（畸形输出回退路径的确定性探针） */
-        parseOptions,
-        /** 调试用固定畸形样本（配合 parseOptions 验证回退） */
-        DEBUG_MALFORMED_RAW,
-    };
-    Object.freeze(port);
-    toolkitGlobalPort().prompts = port;
-}
-
-/**
  * choice 模块初始化（浏览器路径，main.ts 引导调用）。
  * node 冒烟路径走 initChoiceMinimal（无 DOM）。
  */
 export function initChoice(): void {
     ensurePromptConfigs();
     syncAssetPool();
-    installGlobalPort();
     installAutoGenerate();
     installFloorSync();
     // 启动即按当前末楼装载（聊天晚于扩展就绪时由四事件补齐）
     useChoiceStore().syncToFloor(latestAssistantFloorIndex());
     void mountBarWithRetry();
-    console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（全局口 __TT_TOOLKIT__.prompts）`);
+    console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（组装管线与选项条）`);
 }
 
-/** node 冒烟最小初始化：默认配置落盘＋asset 池同步＋全局口在场（dump 走存根数据机判），不挂 DOM。 */
+/** node 冒烟最小初始化：默认配置落盘＋asset 池同步＋自动生成守卫，不挂 DOM。 */
 export function initChoiceMinimal(): void {
     ensurePromptConfigs();
     syncAssetPool();
-    installGlobalPort();
     installAutoGenerate();
     installFloorSync();
 }
 
-export { runChoiceSmoke } from './smoke';
+/** 组装结果原始形态（排障口 assemble 探针的实现在此，choice 任务专用）。 */
+export { assembleCurrent } from './generator';
+export { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
+export { useChoiceSettingsStore } from './settings';
+export { useStoryDirectionStore, type DirectionPreset } from './direction';
+export { DEFAULT_GEN_PARAMS, type ChoiceGenParams } from './api';

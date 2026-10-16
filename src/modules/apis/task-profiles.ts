@@ -45,6 +45,14 @@ export interface TaskProfile {
 /** 域形状：全任务行齐全（normalize 补缺行）。 */
 export type TaskProfilesDomain = Record<TaskId, TaskProfile>;
 
+/** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** 任务档案（本文件 TASK_PROFILES_KEY） */
+        taskProfiles?: TaskProfilesDomain;
+    }
+}
+
 /** 未配置行的统一形状（迁移初始化与删除联动共用同一「回未配置态」语义）。 */
 export function emptyTaskProfile(): TaskProfile {
     return { providerId: '', model: '' };
@@ -84,7 +92,7 @@ export function normalizeTaskProfiles(value: unknown): TaskProfilesDomain {
 
 /** 读任务档案（读侧归一：缺行补未配置态）。 */
 export function readTaskProfiles(): TaskProfilesDomain {
-    return normalizeTaskProfiles(getGlobal<unknown>(TASK_PROFILES_KEY));
+    return normalizeTaskProfiles(getGlobal(TASK_PROFILES_KEY));
 }
 
 /** 写任务档案单通道（写侧再归一：坏值不经写通道持久化）。 */

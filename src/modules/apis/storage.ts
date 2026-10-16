@@ -18,9 +18,19 @@ export const APIS_DOMAIN_KEY = 'apis';
 /** 破限预设名键（extension_settings.ttToolkit 顶层；''＝不启用）。 */
 export const JAILBREAK_PRESET_KEY = 'jailbreakPreset';
 
+/** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** 统一服务商表（本文件 APIS_DOMAIN_KEY） */
+        apis?: ApiProvider[];
+        /** 破限预设名（本文件 JAILBREAK_PRESET_KEY） */
+        jailbreakPreset?: string;
+    }
+}
+
 /** 读选中破限预设名（''＝不启用：键缺席/非字符串皆归 ''）。 */
 export function readJailbreakPreset(): string {
-    const raw = getGlobal<unknown>(JAILBREAK_PRESET_KEY);
+    const raw = getGlobal(JAILBREAK_PRESET_KEY);
     return typeof raw === 'string' ? raw : '';
 }
 

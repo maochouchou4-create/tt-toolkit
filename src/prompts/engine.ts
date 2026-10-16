@@ -11,10 +11,12 @@ import type {
     AssemblyMessage,
     ChoiceInjectionSource,
     InjectionSource,
+    InjectModule,
     ModuleTrace,
     PersonaInjectionSource,
     PromptModule,
     StoryDirection,
+    TextModule,
 } from './types';
 import { PERSONA_INJECTION_SOURCES } from './types';
 import { definitionRowKeysFromSchema, renderCatalogDefinitions } from '@/modules/persona/catalog';
@@ -314,6 +316,94 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
 }
 
 /**
+ * 单模块求值的产出计划（消息序列 ＋ 留痕注记）。组装主循环只认这一个
+ * 形态——任务族的差异全部封在族实现内，循环本身不认识 choice/persona。
+ */
+interface ModulePlan {
+    /** 本模块是否注入（false＝停用、跨族数据、或解析出空内容）。 */
+    injected: boolean;
+    /** 留痕注记：跳过原因或解析注记（dump 的逐项可见粒度即此）。 */
+    note: string;
+    /** 产出的消息（聊天历史展开为多条；跳过为空）。 */
+    messages: AssemblyMessage[];
+}
+
+/** 跳过的模块（不产消息，只留痕）。 */
+function skipped(note: string): ModulePlan {
+    return { injected: false, note, messages: [] };
+}
+
+/** 产出单条消息的模块（内容由引擎统一 trim：注入文本的空白不进管线）。 */
+function emitted(mod: PromptModule, content: string, note: string): ModulePlan {
+    return { injected: true, note, messages: [{ role: mod.role, content: content.trim() }] };
+}
+
+/** 解析器结果→计划（空内容与空注记的收口单点，两个族的解析器同此约定）。 */
+function resolved(mod: PromptModule, result: { content: string; note: string }): ModulePlan {
+    return result.content.trim()
+        ? emitted(mod, result.content, result.note)
+        : skipped(result.note || '注入内容为空');
+}
+
+/** 文本模块的计划（占位符填充链由所属族给；填完为空即跳过）。 */
+function planText(mod: TextModule, family: AssemblyFamily): ModulePlan {
+    const content = family.fillText(mod.content);
+    return content.trim() ? emitted(mod, content, '') : skipped('文本为空');
+}
+
+/**
+ * 组装族：两族的占位符键名、注入源集合、聊天历史处理三处都不同，合成
+ * 一套只会让每处都挂「若属另一族」的守卫。族＝这三处差异的唯一归属地。
+ */
+interface AssemblyFamily {
+    /** 文本模块的占位符填充。 */
+    fillText(content: string): string;
+    /** inject 模块的产出计划。 */
+    planInject(mod: InjectModule): ModulePlan;
+}
+
+/** choice 族：注入源为非 persona 的全部源，含聊天历史展开。 */
+function choiceFamily(sources: AssemblySources): AssemblyFamily {
+    return {
+        fillText: content => fillPlaceholders(content, sources),
+        planInject(mod) {
+            if (isPersonaSource(mod.source)) {
+                return skipped('该注入源属于人设任务（选项生成组装无此数据）');
+            }
+            if (mod.source === 'chat_history') {
+                if (sources.history.length === 0) return skipped('聊天历史为空');
+                return {
+                    injected: true,
+                    note: `${sources.history.length} 条楼层，末条 AI 楼层已用 <current_scene> 包裹`,
+                    messages: historyToMessages(sources.history),
+                };
+            }
+            // 注入成功的 trace 保留 resolve 给的 note（如 external_slot 的
+            // 逐槽位清单）——「逐项可见」的粒度与注入内容一致，不降级为空注记
+            return resolved(mod, resolveInjectContent(mod.source, sources));
+        },
+    };
+}
+
+/** persona 族：注入源只有 persona_wi，其余源在本族无数据即留痕跳过。 */
+function personaFamily(sources: PersonaAssemblySources): AssemblyFamily {
+    return {
+        fillText: content => fillPersonaPlaceholders(content, sources),
+        planInject(mod) {
+            if (!isPersonaSource(mod.source)) {
+                return skipped('该注入源属于其他生成任务（本次 persona 组装无此数据）');
+            }
+            return resolved(mod, resolvePersonaInjectContent(mod.source, sources));
+        },
+    };
+}
+
+/** 分流单点：sources 判别谓词→组装族（族外不再出现任务族分支）。 */
+function familyOf(sources: AssemblySources | PersonaAssemblySources): AssemblyFamily {
+    return isPersonaSources(sources) ? personaFamily(sources) : choiceFamily(sources);
+}
+
+/**
  * 组装消息数组（模块管线主入口；choice/persona 任务共用）。
  *
  * 消息序列规则：
@@ -323,14 +413,16 @@ function wrapTag(tag: string, body: string, sources: AssemblySources): string {
  *   - 相邻同 role 合并（system/assistant；user 不互相合并——聊天历史末
  *     条 user 与任务指令同为 user 时，合并会把「任务指令」混进历史正文，
  *     user 消息在提示词里是独立输入边界）。
- *   - persona sources 时走 persona 占位符/注入源；任务源与 sources 形态
- *     不匹配的模块跳过并留痕（手改存档才会出现，不做静默吞）。
+ *   - 主循环只做「求值 → 产消息 → 留痕」三件事；族差异经 familyOf 单点
+ *     分派。任务源与 sources 形态不匹配的模块跳过后留痕（手改存档才会
+ *     出现，不做静默吞）。
  */
 export function assembleMessages(
     modules: PromptModule[],
     sources: AssemblySources | PersonaAssemblySources,
 ): AssemblyResult {
     const sorted = [...modules].sort((a, b) => a.order - b.order);
+    const family = familyOf(sources);
     const messages: AssemblyMessage[] = [];
     const trace: ModuleTrace[] = [];
 
@@ -339,59 +431,18 @@ export function assembleMessages(
             trace.push({ moduleId: mod.id, moduleName: mod.name, kind: mod.kind, source: mod.kind === 'inject' ? mod.source : undefined, injected: false, note: '模块已停用' });
             continue;
         }
-        if (mod.kind === 'text') {
-            const content = (
-                isPersonaSources(sources)
-                    ? fillPersonaPlaceholders(mod.content, sources)
-                    : fillPlaceholders(mod.content, sources)
-            ).trim();
-            if (!content) {
-                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'text', injected: false, note: '文本为空' });
-                continue;
-            }
-            pushMessage(messages, { role: mod.role, content });
-            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'text', injected: true, note: '' });
-            continue;
+        const plan = mod.kind === 'text' ? planText(mod, family) : family.planInject(mod);
+        for (const message of plan.messages) {
+            pushMessage(messages, message);
         }
-        // inject 模块：persona 形态先分流（persona 源解析；choice 源无数据跳过）
-        if (isPersonaSources(sources)) {
-            if (!isPersonaSource(mod.source)) {
-                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于其他生成任务（本次 persona 组装无此数据）' });
-                continue;
-            }
-            const { content, note } = resolvePersonaInjectContent(mod.source, sources);
-            if (!content.trim()) {
-                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
-                continue;
-            }
-            pushMessage(messages, { role: mod.role, content: content.trim() });
-            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
-            continue;
-        }
-        if (isPersonaSource(mod.source)) {
-            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: '该注入源属于人设任务（选项生成组装无此数据）' });
-            continue;
-        }
-        if (mod.source === 'chat_history') {
-            if (sources.history.length === 0) {
-                trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: 'chat_history', injected: false, note: '聊天历史为空' });
-                continue;
-            }
-            for (const m of historyToMessages(sources.history)) {
-                pushMessage(messages, m);
-            }
-            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: 'chat_history', injected: true, note: `${sources.history.length} 条楼层，末条 AI 楼层已用 <current_scene> 包裹` });
-            continue;
-        }
-        const { content, note } = resolveInjectContent(mod.source, sources);
-        if (!content.trim()) {
-            trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: false, note: note || '注入内容为空' });
-            continue;
-        }
-        // 注入成功的 trace 保留 resolve 给的 note（如 external_slot 的
-        // 逐槽位清单）——「逐项可见」的粒度与注入内容一致，不降级为空注记
-        pushMessage(messages, { role: mod.role, content: content.trim() });
-        trace.push({ moduleId: mod.id, moduleName: mod.name, kind: 'inject', source: mod.source, injected: true, note });
+        trace.push({
+            moduleId: mod.id,
+            moduleName: mod.name,
+            kind: mod.kind,
+            source: mod.kind === 'inject' ? mod.source : undefined,
+            injected: plan.injected,
+            note: plan.note,
+        });
     }
 
     return { messages, trace };

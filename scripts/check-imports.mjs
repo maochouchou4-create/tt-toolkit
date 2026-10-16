@@ -30,13 +30,18 @@
  *      extension_settings（宿主侧 const 单例，只原地改从不换引用）。
  *      残余绕过面（多行 const 中转＋`export { x }` 间接导出）不设防
  *      ——属刻意规避且评审可见。
+ *   7. 源级导入环（Tarjan 强连通分量，见职责 7 的口径说明）：src 树按
+ *      import / export-from / 动态 import 三形态建有向图，含环 SCC 即环；
+ *      新增环 → exit 1，既有环走 EXEMPT_CYCLES 显式豁免（理由随代码
+ *      同行，不另立文档）。并入本门禁而非另立脚本：多一个独立环节＝多
+ *      一次被跳过的机会，环检测的价值恰在「必跑」。
  *
  * 注：块注释内不得出现「斜杠+星」闭合序列，涉及 @sillytavern 与
  * glob 的措辞一律加空格隔开。
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, posix, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -273,9 +278,158 @@ function collectSnapshotViolations() {
 
 collectSnapshotViolations();
 
+// ---- 7. 源级导入环（Tarjan 强连通分量） ------------------------------------
+
+const CYCLE_EXTS = ['.ts', '.tsx', '.jsx', '.js', '.mjs', '.vue'];
+
+// 说明符→文件：先按原样，再试常见后缀与目录入口（贴齐本仓 import 惯例）。
+const CYCLE_SUFFIXES = ['', '.ts', '.vue', '/index.ts', '/index.vue'];
+
+// 三种导入形态（import / 动态 import / export-from）。注释已在上文剥离——
+// 注释里的说明符不是导入边。
+const CYCLE_IMPORT_FORMS = [
+    /(?:^|[\n;])\s*import\s+(?:type\s+)?(?:[^'"();]*?\sfrom\s*)?['"]([^'"]+)['"]/g,
+    /(?:^|[\n;])\s*export\s+(?:type\s+)?(?:\*|\{[^}]*\})[^'"]*?from\s*['"]([^'"]+)['"]/g,
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+];
+
+/**
+ * 既有环的显式豁免登记（每条带 reason，理由与登记同行）。
+ *
+ * apis 四文件环的性质：端点表与任务档案互为读写源——删端点或切 provider
+ * 要重置该 provider 名下的任务档案（storage → task-profiles），而任务路由
+ * 解析又必须回读端点表拿 baseUrl（task-profiles → storage）；client ↔
+ * preset-inject 则是出站消息的组装面与传输面互相引用。两侧本就是同一个
+ * 「服务商配置」概念的两面，硬断开只能把这份上下文在调用侧搬来搬去，
+ * 属 apis 域的独立重构。本门禁守的是「不新增」，不负责改既有结构。
+ */
+const EXEMPT_CYCLES = [
+    {
+        files: [
+            'src/modules/apis/client.ts',
+            'src/modules/apis/preset-inject.ts',
+            'src/modules/apis/storage.ts',
+            'src/modules/apis/task-profiles.ts',
+        ],
+        reason: 'apis 域「端点表 ↔ 任务档案」互为读写源（重置档案／回读端点）与 client↔preset-inject 的组装—传输互引同属服务商配置整体；断开须连带改调用点，属 apis 域独立重构。',
+    },
+];
+
+function resolveModuleFile(base, known) {
+    for (const suffix of CYCLE_SUFFIXES) {
+        if (known.has(base + suffix)) return base + suffix;
+    }
+    return null;
+}
+
+function resolveCycleTarget(fromFile, specifier, known) {
+    if (specifier.startsWith('@/')) return resolveModuleFile(`src/${specifier.slice(2)}`, known);
+    if (!specifier.startsWith('.')) return null;
+    const dir = posix.dirname(fromFile);
+    return resolveModuleFile(dir === '.' ? specifier : posix.join(dir, specifier), known);
+}
+
+/** src 树导入有向图（键＝仓库相对路径，值＝去重排序的邻接表）。 */
+function buildImportGraph() {
+    const files = walkFiles(SRC_DIR, CYCLE_EXTS).filter(f => !f.endsWith('.d.ts'));
+    const known = new Set(files.map(f => relative(ROOT, f).replaceAll('\\', '/')));
+    const graph = new Map();
+    for (const file of files) {
+        const from = relative(ROOT, file).replaceAll('\\', '/');
+        const text = stripComments(readFileSync(file, 'utf8'));
+        const edges = new Set();
+        for (const re of CYCLE_IMPORT_FORMS) {
+            re.lastIndex = 0;
+            for (const match of text.matchAll(re)) {
+                const target = resolveCycleTarget(from, match[1], known);
+                if (target && target !== from) edges.add(target);
+            }
+        }
+        graph.set(from, [...edges].sort());
+    }
+    return graph;
+}
+
+/**
+ * Tarjan 强连通分量（迭代实现：深图不爆栈）。返回全部含环分量——
+ * 环即分量大小 >1。自环不成边（模块不得导入自身，es 模块图无此形态），
+ * 故不必单列判据。
+ */
+function findCycles(graph) {
+    let counter = 0;
+    const index = new Map();
+    const low = new Map();
+    const onStack = new Set();
+    const stack = [];
+    const cycles = [];
+    for (const start of graph.keys()) {
+        if (index.has(start)) continue;
+        const work = [[start, 0]];
+        while (work.length > 0) {
+            const [v, pi] = work[work.length - 1];
+            if (pi === 0) {
+                index.set(v, counter);
+                low.set(v, counter);
+                counter += 1;
+                stack.push(v);
+                onStack.add(v);
+            }
+            const kids = graph.get(v) ?? [];
+            let descended = false;
+            for (let i = pi; i < kids.length; i += 1) {
+                const w = kids[i];
+                if (!index.has(w)) {
+                    work[work.length - 1][1] = i + 1;
+                    work.push([w, 0]);
+                    descended = true;
+                    break;
+                }
+                if (onStack.has(w)) low.set(v, Math.min(low.get(v), index.get(w)));
+            }
+            if (descended) continue;
+            if (low.get(v) === index.get(v)) {
+                const component = [];
+                for (;;) {
+                    const w = stack.pop();
+                    onStack.delete(w);
+                    component.push(w);
+                    if (w === v) break;
+                }
+                if (component.length > 1) cycles.push(component.sort());
+            }
+            work.pop();
+            if (work.length > 0) {
+                const parent = work[work.length - 1][0];
+                low.set(parent, Math.min(low.get(parent), low.get(v)));
+            }
+        }
+    }
+    return cycles;
+}
+
+function checkCycles() {
+    const cycles = findCycles(buildImportGraph());
+    const idOf = files => [...files].sort().join(' | ');
+    const unexempt = new Map(cycles.map(c => [idOf(c), c]));
+    let exempted = 0;
+    for (const entry of EXEMPT_CYCLES) {
+        if (unexempt.delete(idOf(entry.files))) {
+            exempted += 1;
+        } else {
+            problems.push(`豁免表漂移：登记的环已不存在（${entry.files.join(' | ')}）——豁免面须随结构同进同退，请从 EXEMPT_CYCLES 删除该条目`);
+        }
+    }
+    for (const files of unexempt.values()) {
+        problems.push(`新增源级导入环：${files.join(' | ')}（成环 SCC ${files.length} 个文件）。确属既有结构请登记 EXEMPT_CYCLES 并写明理由，否则先断开环`);
+    }
+    return { total: cycles.length, exempted };
+}
+
+const cycleReport = checkCycles();
+
 if (problems.length > 0) {
     for (const p of problems) console.error(`[check-imports] FAIL: ${p}`);
     process.exit(1);
 }
 
-console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中。`);
+console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中；源级导入环：含环 SCC ${cycleReport.total} 处，其中登记豁免 ${cycleReport.exempted} 处、新增 0 处。`);

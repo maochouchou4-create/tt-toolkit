@@ -52,6 +52,14 @@ export interface ChoiceDomain {
     genDefaultsV?: 1;
 }
 
+/** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
+declare module '@/storage/service' {
+    interface GlobalDomain {
+        /** choice 域（生成参数＋条目池；本文件 GLOBAL_CHOICE_KEY） */
+        choice?: ChoiceDomain;
+    }
+}
+
 export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     count: 4,
     minChars: 30,
@@ -91,7 +99,9 @@ function normalizeGenParams(raw: Partial<ChoiceGenParams>): ChoiceGenParams {
 }
 
 function readDomain(): ChoiceDomain {
-    const raw = getGlobal<Partial<ChoiceDomain>>(GLOBAL_CHOICE_KEY);
+    // 读回的是存档原值：类型是 ChoiceDomain，字段可缺可坏——缺省合并与逐
+    // 字段重建在下面做（normalize 面吃不可信形状，收紧只在 API 面）。
+    const raw: Partial<ChoiceDomain> | undefined = getGlobal(GLOBAL_CHOICE_KEY);
     let genRaw: Partial<ChoiceGenParams> = raw?.gen ?? {};
     if (raw !== undefined && raw.genDefaultsV !== GEN_DEFAULTS_V) {
         // 存量档一次性换代（回写形态对齐 prompt 域整键重建）：三值全等
@@ -103,7 +113,9 @@ function readDomain(): ChoiceDomain {
         if (legacyShaped) {
             genRaw = { ...genRaw, minChars: DEFAULT_GEN_PARAMS.minChars, maxChars: DEFAULT_GEN_PARAMS.maxChars };
         }
-        setGlobal(GLOBAL_CHOICE_KEY, { ...raw, gen: genRaw, genDefaultsV: GEN_DEFAULTS_V });
+        // 迁移回写刻意落「只换了三值」的未归一 gen（其余历史字段原样保留，
+        // 归一仍在读侧做）——域登记门管键不管值形状，此处显式断言写出形状。
+        setGlobal(GLOBAL_CHOICE_KEY, { ...raw, gen: genRaw, genDefaultsV: GEN_DEFAULTS_V } as unknown as ChoiceDomain);
     }
     return {
         // 缺省合并＋逐字段重建＋池参数值域钳制（raw 里的历史值不可信：
