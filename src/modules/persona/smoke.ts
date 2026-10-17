@@ -798,12 +798,12 @@ function runPromptsChecks(): void {
         curatorText.includes(`行为细节块（${DETAIL_BLOCKS_LITERAL}）`),
         `期望串=${DETAIL_BLOCKS_LITERAL}`);
 
-    // 版本钉＝20 的绝对锁：DEFAULTS_VERSION 再动（升降皆然）本条即红，改版人
+    // 版本钉＝21 的绝对锁：DEFAULTS_VERSION 再动（升降皆然）本条即红，改版人
     // 必须同步核对本套件上面的政策词面锁与期望计数。它锁不住「改了正文忘
     // bump」——版本未动时绝对/相对断言都绿，那个坑的真兜底是词面锁本身；
     // choice/smoke.ts 另有同款钉，此处重复一份保 persona 套件自包含。
-    check('prompts：DEFAULTS_VERSION＝20（策展收紧改版随版本 bump·存量快照重建可达）',
-        DEFAULTS_VERSION === 20);
+    check('prompts：DEFAULTS_VERSION＝21（策展收紧改版随版本 bump·存量快照重建可达）',
+        DEFAULTS_VERSION === 21);
 
     // 提示词正文锁：策展段与档案段是两次独立请求。档案段正文引用「原则 7」这类
     // 只有策展段才有的规则编号＝引用一个本请求读不到的判据（要填的键集合由

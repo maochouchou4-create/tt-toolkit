@@ -81,12 +81,14 @@ function normalizePromptConfigs(raw: unknown): { configs: Record<TaskKey, Prompt
         configs[task] = createTaskDefaultConfig(task);
         changed = true;
     }
-    // 默认配置版本化重建：任务键无编辑面＝default 配置只能是旧默认
-    // 快照，版本落后即整键重建（覆盖无损）；非 default 定制配置不覆盖
+    // 默认配置版本化重建：版本落后即整键重建为新版默认。default 配置多为
+    // 旧默认快照（任务键现无编辑面），但已删的历史模板编辑器写过 default id
+    // 的定制——那部分用户编辑会被替换，靠下方 warn 留痕；非 default 定制不覆盖
     // （防御分支——当前无定制来源，理论不存在）。
     for (const task of TASK_KEYS) {
         const config = configs[task]!;
         if (config.id !== 'default' || config.defaultsVersion === DEFAULTS_VERSION) continue;
+        console.warn(`tt-toolkit：${task} 的默认提示词版本落后（${config.defaultsVersion}→${DEFAULTS_VERSION}），整键重建为新版默认——用户编辑过的内容不再保留`);
         configs[task] = createTaskDefaultConfig(task);
         changed = true;
     }

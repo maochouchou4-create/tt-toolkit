@@ -515,7 +515,10 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ 池旋钮接 UI：贯通机判 5（写面落档读回同值／trim 截到条数且 send_all
 // 全保留／末段打乱关闭保持输入序而打开被打乱 8 组种子两面／开关只改出场
 // 序不改两区内容／非法枚举与非布尔钳回 normalize 默认）＝ +5。
-const CHOICE_PASS_EXPECTED = 164;
+// ＝ 池重制与直球可辨性：资产锁改值（130 条/9 分类集合全等）随数据跟随不计，
+// 新增锁 5——题材词表零命中 1／规则 7 直球位 1／输出契约标题与 aim 忠实性 1／
+// 规则 6 新元素边界 1／few_shot 直球示例换血 1 ＝ +5。
+const CHOICE_PASS_EXPECTED = 169;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -603,7 +606,7 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // L0 归属优先级对 10 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
 // 之前·叶数段字面量、目录 definition 非空率 100%、countText 覆盖词面只配模板叶块、
 // L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死（原则 7 逐叶裁叶＋
-// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推不出才选＋让位序＋元层剥离、推论名单块名串＝手抄字面量六块、DEFAULTS_VERSION＝20 锁定、
+// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推不出才选＋让位序＋元层剥离、推论名单块名串＝手抄字面量六块、DEFAULTS_VERSION＝21 锁定、
 // gen 值厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）
 // ＋档案段生成契约 11（要求 7 事实唯一归属：归属顺序 ①–⑦ 按序＋关键条款与末句
 // 三维度例外；每个「→」归属处落在真实块名或「块名·叶名」；规则 4 跨叶不复述

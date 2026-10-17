@@ -21,9 +21,15 @@ export interface PoolDomainData {
 
 export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [] };
 
-/** 池抽取参数缺省值（与 fork 旧数据 generation 块的实测值对齐：oversample 100/send_all/shuffle）。 */
+/** 池抽取参数缺省值（send_all/shuffle 与 fork 旧数据 generation 块对齐）。 */
 export const DEFAULT_POOL_GEN_PARAMS: PoolGenParams = {
-    oversamplePct: 100,
+    /**
+     * 注入行数＝1 置顶＋(count−1)＋ceil((count−1)×oversamplePct/100)，与 resolver.drawAmount 同式。
+     * 150 的来源：count=4 出厂默认下抽 8 条跨桶候选（100% 只抽 6 条）——轮询制下
+     * 多抽即多盖分类桶；count=6 下抽 13 条。默认值只送达全新安装：存量用户的 gen
+     * 早已被历史写通道物化（改任一控件或池版本变更都会整域落盘），属用户域不自动覆盖。
+     */
+    oversamplePct: 150,
     // 按分类轮询默认开（每轮选项尽量来自不同分类，保证多样性）。
     // 旧用户存了 false 的由 syncAssetPool 首次同步做一次性翻转，之后纯用户域。
     categoriesEnabled: true,

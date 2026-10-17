@@ -19,10 +19,10 @@
         <span>按分类轮询（每轮选项尽量来自不同分类，保证多样性）</span>
       </label>
       <TTField label="每次生成条数">
-        <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, 4) })">
+        <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, DEFAULT_GEN_PARAMS.count) })">
       </TTField>
       <TTField label="候选倍率（%）">
-        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" min="0" max="500" step="10" @change="settings.updateGen({ oversamplePct: clampInt($event, 0, 500, 100) })">
+        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" min="0" max="500" step="10" @change="settings.updateGen({ oversamplePct: clampInt($event, 0, 500, DEFAULT_GEN_PARAMS.oversamplePct) })">
       </TTField>
       <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
       <TTField label="置顶超额策略">

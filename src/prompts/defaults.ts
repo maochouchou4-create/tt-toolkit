@@ -34,7 +34,7 @@ export {
  * 默认模板版本号：默认模板改版即 bump——storage 层据此识别存量旧默认
  * 快照并整键重建（任务键无编辑面＝不存在用户定制，覆盖无损）。
  */
-export const DEFAULTS_VERSION = 20;
+export const DEFAULTS_VERSION = 21;
 
 /**
  * 池条目注入模块（choice 任务专属）：默认模板与存量档补建共用的唯一

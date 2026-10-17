@@ -261,13 +261,18 @@ function runPoolKnobChecks(): void {
 function runAssetPoolChecks(): void {
     // ---- 静态形状（纯函数，不依赖存储态）----
     const { masterPool } = buildAssetPool();
-    check('asset：内置池 335 条（扩池后）', masterPool.length === 335, `实际 ${masterPool.length}`);
+    check('asset：内置池 130 条（纯走法制版）', masterPool.length === 130, `实际 ${masterPool.length}`);
     const cats = new Set(masterPool.map(e => e.category));
-    check('asset：42 个分类（扩池后）', cats.size === 42, `实际 ${cats.size}`);
+    check(
+        'asset：9 个分类（纯走法制版）',
+        cats.size === 9 && ['接住对方', '关系走法', '言语走法', '身体行动', '局面推进', '外部变化', '节奏调度', '视角形式', 'NSFW'].every(c => cats.has(c)),
+        `实际 ${[...cats].join('/')}`,
+    );
     const transition = masterPool.find(e => e.type === '转场推进');
-    check('asset：转场推进转固定（pinned）', !!transition && transition.pinned, `pinned=${String(transition?.pinned)}`);
-    const ids = new Set(masterPool.map(e => e.id));
-    check('asset：条目 id 确定性且唯一（asset-<序号>）', ids.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${ids.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
+    // pinned 恰 1 是注入公式（1 置顶＋(count−1)＋…）与设置页估算行的共同前提，多一条即静默分家。
+    check('asset：转场推进转固定（pinned 且全池唯一）', !!transition && transition.pinned && masterPool.filter(e => e.pinned).length === 1, `pinned=${String(transition?.pinned)} 共 ${masterPool.filter(e => e.pinned).length}`);
+    const types = new Set(masterPool.map(e => e.type));
+    check('asset：条目 type 唯一（走法名即身份，id 是下标生成的派生值）', types.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${types.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
     // 条目级 rule 字段已弃（v2 起移除，v3 连数据形状都不带）
     check('asset：条目规则字段移除（v3，数据形状不再含 rule）', masterPool.every(e => !('rule' in e)), `带 rule 条目 ${masterPool.filter(e => 'rule' in e).length}`);
 
@@ -282,7 +287,7 @@ function runAssetPoolChecks(): void {
     choiceStorage.updateGenParams({ categoriesEnabled: false });
     syncAssetPool();
     let domain = choiceStorage.readDomain();
-    check('asset 首次同步：空池覆盖为 335 条并标记 assetVersion', domain.pool.masterPool.length === 335 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
+    check('asset 首次同步：空池覆盖为 130 条并标记 assetVersion', domain.pool.masterPool.length === 130 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
     check('asset 首次同步：categoriesEnabled 旧 false 翻转为 true', domain.gen.categoriesEnabled === true, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 用户手动关：后续同步不得回翻（gen 纯用户域）
     choiceStorage.updateGenParams({ categoriesEnabled: false });
@@ -298,7 +303,7 @@ function runAssetPoolChecks(): void {
     domain = choiceStorage.readDomain();
     check(
         'asset 版本变更：污染池全量恢复（垃圾清除、gen 不动）',
-        domain.pool.masterPool.length === 335 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
+        domain.pool.masterPool.length === 130 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
         `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
     );
 }
@@ -716,7 +721,7 @@ async function runApplyOptionChecks(): Promise<void> {
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
 function runAssemblyChecks(): string {
     const config = createDefaultPromptConfig();
-    check('默认模板版本＝20（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 20, `v=${String(config.defaultsVersion)}`);
+    check('默认模板版本＝21（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 21, `v=${String(config.defaultsVersion)}`);
     const sources = syntheticSources();
     const result = assembleMessages(config.modules, sources);
 
@@ -826,6 +831,20 @@ function runAssemblyChecks(): string {
     const offResult = assembleMessages(modulesOff, sources);
     const extTrace = offResult.trace.find(t => t.moduleId === 'inject_external_slot');
     check('模块开关优先（关掉后不注入）', extTrace?.injected === false, `note=${extTrace?.note ?? '（无 trace）'}`);
+
+    // 池与模板的交付面锁：池侧扫 type/content/category 三面（题材硬编码
+    // 主要落在分类名上，只扫正文会漏），模板侧四锁（规则 6 新元素边界／
+    // 规则 7 直球位／输出契约标题与 aim 忠实性／few_shot 直球示例）——
+    // 全是字面量锁，正文改字即翻红。
+    const { masterPool } = buildAssetPool();
+    const BANNED = ['商队', '义体', '尸群', '丧尸', '公会', '师门', '末世', '辐射', '黑客', '修炼', '境界', '法宝', '灵根', '战技', '魔法', '江湖', '内力', '骑士', '精灵', '星舰', '机甲', '异能', '学院', '神殿', '祭坛', '神明', '侦探', '宫廷', '王朝', '战斗异能', '权谋斗争', '末日生存', '校园职场', '奇幻冒险', '科幻未来', '推理调查'];
+    // 三面各成一段再扫：字段直接相接会在边界拼出词表词造成假红。
+    const bannedHits = (w: string) => masterPool.some(e => [e.type, e.content, e.category].join('\n').includes(w));
+    check('asset：无题材硬编码残留（题材词表零命中）', !BANNED.some(bannedHits), BANNED.filter(bannedHits).join('/'));
+    check('写作规则锁「直接回应」直球位', allText.includes('至少一条选项是对它的直接回应') && allText.includes('不绕开、不岔走'));
+    check('输出契约锁标题与 aim 忠实性', allText.includes('核心动作') && allText.includes('不许埋在修饰里') && allText.includes('不得与正文动作相悖'));
+    check('规则 6 锁新元素边界（背景服务＋不得偷走这一拍）', allText.includes('只能作背景') && allText.includes('不得偷走这一拍') && allText.includes('新元素不许把它挤掉'));
+    check('few_shot 直球示例换血（岔开话题退役）', allText.includes('痛快应下') && !allText.includes('岔开话题'));
 
     const traceText = renderTraceCompact(result);
     console.info(`[choice-smoke] trace: ${traceText}`);
@@ -1535,5 +1554,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（335 条/42 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（130 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }
