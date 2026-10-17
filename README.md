@@ -35,6 +35,20 @@ git clone https://github.com/maochouchou4-create/tt-toolkit
 
 提示词组装是人设、角色卡、世界书、场景、走向、外部注入等分段的统一管线（`__TTK_PROMPTS__` 全局口可 dump 观测）；外部注入全自动：宿主侧其他扩展写入 extension prompts 的内容按深度排序自动并入，无需手工搬运。
 
+## 池子与提示词在哪看
+
+工具箱不在界面里做池浏览页——内置条目与提示词的单一真相源就是仓库文件，想看想改直接翻这几个文件：
+
+| 想看什么 | 文件 | 里头是什么 |
+| --- | --- | --- |
+| 选项池全部内置条目 | `src/modules/choice/pool/default-pool.json` | 130 条走法·9 分类；每条＝type（走法名，全池唯一）＋content（注入提示词的正文）＋category。「转场推进」是唯一置顶条目。文件顶部的 `version` 是池版本唯一来源，改条目就 bump 它——存量档启动时按它判断要不要整池重建 |
+| 选项生成的规则与输出格式 | `src/prompts/default-texts.ts` | `CHOICE_CORE_RULES_TEXT`（九条写作规则，含直球位与新元素边界）、`CHOICE_OUTPUT_FORMAT_TEXT`（JSON 形状、标题必须点出核心动作、aim 忠实性）、`CHOICE_FEW_SHOT_TEXT`（四条输出示例） |
+| 人设生成的模板正文 | 同文件 `src/prompts/default-texts.ts` | `PERSONA_CURATOR_PROMPT`（策展段）与 `PERSONA_GEN_PROMPT`（档案段）；档案目录定义在 `src/prompts/catalog.ts` |
+| 默认生成参数 | `src/modules/choice/pool/normalize.ts` | `DEFAULT_POOL_GEN_PARAMS`：条数、候选倍率（默认 150，只对全新安装生效——老存档保留自己保存过的值，想调去「选项生成」页）等 |
+| 模板/池的版本号 | `src/prompts/defaults.ts` | `DEFAULTS_VERSION`；模板改版必须 bump，存量默认配置靠它整键重建吃上新规则 |
+
+改模板或池属于一次改版：bump 对应版本号、七道质量门全绿、重建 `dist/` 再提交（命令见「开发」节）；普通用户侧 `git pull` 后刷新 TT 即生效。
+
 ## 与其他记忆插件共存
 
 记忆（前情摘要、人物关系、剧情状态）建议交给外部记忆插件——例如小白X 的「剧情总结」。它把总结写进 TT 的公共注入区后，工具箱会自动把这部分内容带进每一次选项生成，无需任何配置；总结过的老楼层也会由它折叠收纳，不会挤占上下文。
