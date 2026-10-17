@@ -777,8 +777,33 @@ function runPromptsChecks(): void {
 
     check('prompts：机制挂载开放段在场',
         curatorText.includes('<mechanism_mounts>') && curatorText.includes('示例之外出现任何机制同样挂载'));
-    check('prompts：新口径生效（上限 16＋元层剥离）',
-        curatorText.includes('上限 16') && !curatorText.includes('扮演红线') && !curatorText.includes('呈现偏好'));
+    // 「不超过 10」锁出现次数＝2（原则 3 与 [约束] 各一次）＝两处上限同值
+    // 同改：单改一处时另一处仍供给词面，策展指令两处口径矛盾会全绿。「地基
+    // 块之外」锁让位优先序的读法——删「之外」二字语义反转（弱块让位变地基
+    // 块让位），全部词面断言却照样绿。
+    check('prompts：策展收紧口径生效（上限 10 两处同值＋推不出才选＋让位序＋元层剥离）',
+        curatorText.split('不超过 10').length - 1 === 2
+        && curatorText.includes('推不出的才选')
+        && curatorText.includes('收紧一档') && curatorText.includes('不算点名')
+        && curatorText.includes('地基块之外')
+        && !curatorText.includes('上限 16') && !curatorText.includes('不超过 16')
+        && !curatorText.includes('扮演红线') && !curatorText.includes('呈现偏好'));
+
+    // 推论名单块名串：策展指令里的名单由 detailBlockList() 从目录派生成文，
+    // 断言侧用手抄字面量锁（BEHAVIOR_BLOCKS_LITERAL 同款先例）——字面量与
+    // 派生名单的漂移恰是这条断言的本职：名单改了、断言不跟＝翻红；从模板
+    // 派生期望＝与被测同源恒绿，等于没测。
+    const DETAIL_BLOCKS_LITERAL = '情绪光谱/身体反应/睡眠与梦/声音气息/恋爱/情史依恋';
+    check('prompts：推论名单块名串＝手抄字面量六块（策展端行为细节收紧的适用范围）',
+        curatorText.includes(`行为细节块（${DETAIL_BLOCKS_LITERAL}）`),
+        `期望串=${DETAIL_BLOCKS_LITERAL}`);
+
+    // 版本钉＝20 的绝对锁：DEFAULTS_VERSION 再动（升降皆然）本条即红，改版人
+    // 必须同步核对本套件上面的政策词面锁与期望计数。它锁不住「改了正文忘
+    // bump」——版本未动时绝对/相对断言都绿，那个坑的真兜底是词面锁本身；
+    // choice/smoke.ts 另有同款钉，此处重复一份保 persona 套件自包含。
+    check('prompts：DEFAULTS_VERSION＝20（策展收紧改版随版本 bump·存量快照重建可达）',
+        DEFAULTS_VERSION === 20);
 
     // 提示词正文锁：策展段与档案段是两次独立请求。档案段正文引用「原则 7」这类
     // 只有策展段才有的规则编号＝引用一个本请求读不到的判据（要填的键集合由
@@ -3004,6 +3029,12 @@ function runShellHookChecks(): void {
     check('写回保护：覆盖确认文案逐字（点明两种来源与覆盖后果）',
         TEXT.CONFIRM_OVERWRITE_HOST === '宿主侧的人设在生成后被修改过（可能你在 TT 里直接改过，或换了卡）。继续覆盖会丢失那些修改。仍要覆盖吗？',
         TEXT.CONFIRM_OVERWRITE_HOST);
+    // 需求框 placeholder 逐字锁：引导句是「点名」通道的用户侧唯一提示，被删
+    // 时无任何门禁信号；句序（问句→引导→示例收尾）也是锁的一部分——引导句
+    // 贴着示例省略号会被断行并进上一句读完。
+    check('壳文案：生成需求 placeholder 逐字（点名通道引导句在前、示例收尾）',
+        TEXT.PERSONA_REQUEST_PLACEHOLDER === '想要一个什么样的人设？想在某方面出细节就写进来（如「想要他吃醋的样子」）。例如：温和的图书管理员，暗中收藏禁忌典籍……',
+        TEXT.PERSONA_REQUEST_PLACEHOLDER);
 }
 
 /** 冒烟入口（main.ts node 分支调用）。 */

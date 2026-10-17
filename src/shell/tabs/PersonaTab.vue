@@ -18,7 +18,7 @@
           v-model="store.requestText"
           class="tt-ctrl tt-ctrl--area tt-persona-area"
           rows="4"
-          placeholder="想要一个什么样的人设？例如：温和的图书管理员，暗中收藏禁忌典籍……"
+          :placeholder="TEXT.PERSONA_REQUEST_PLACEHOLDER"
         />
       </details>
 

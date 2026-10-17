@@ -716,7 +716,7 @@ async function runApplyOptionChecks(): Promise<void> {
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
 function runAssemblyChecks(): string {
     const config = createDefaultPromptConfig();
-    check('默认模板版本＝19（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 19, `v=${String(config.defaultsVersion)}`);
+    check('默认模板版本＝20（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 20, `v=${String(config.defaultsVersion)}`);
     const sources = syntheticSources();
     const result = assembleMessages(config.modules, sources);
 

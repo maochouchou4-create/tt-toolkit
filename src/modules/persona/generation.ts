@@ -114,9 +114,9 @@ export async function collectWorldInfoContext(): Promise<string> {
 type PersonaTaskKey = Exclude<TaskKey, 'choice'>;
 
 /**
- * persona 任务消息组装（引擎管线）：按任务键取当前配置（用户在提示词
- * tab 改的就是这套），assemble＋占位符填充＋trace 一条龙。返回值含
- * trace 供调用侧观测。
+ * persona 任务消息组装（引擎管线）：按任务键取当前配置（任务键无编辑面，
+ * 实际生效的就是默认模板这一套），assemble＋占位符填充＋trace 一条龙。
+ * 返回值含 trace 供调用侧观测。
  */
 function assemblePersonaMessages(task: PersonaTaskKey, sources: PersonaAssemblySources): { messages: GenerateMessage[]; trace: ModuleTrace[] } {
     const store = usePromptsStore();
