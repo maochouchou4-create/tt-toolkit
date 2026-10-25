@@ -45,7 +45,7 @@ git clone https://github.com/maochouchou4-create/tt-toolkit
 | 选项生成的规则与输出格式 | `src/prompts/default-texts.ts` | `CHOICE_CORE_RULES_TEXT`（九条写作规则，含直球位与新元素边界）、`CHOICE_OUTPUT_FORMAT_TEXT`（JSON 形状、标题必须点出核心动作、aim 忠实性）、`CHOICE_FEW_SHOT_TEXT`（四条输出示例） |
 | 人设生成的模板正文 | 同文件 `src/prompts/default-texts.ts` | `PERSONA_CURATOR_PROMPT`（策展段）与 `PERSONA_GEN_PROMPT`（档案段）；档案目录定义在 `src/modules/persona/catalog.ts` |
 | 默认生成参数 | `src/modules/choice/pool/normalize.ts` | `DEFAULT_POOL_GEN_PARAMS`：条数、候选倍率（默认 150，只对全新安装生效——老存档保留自己保存过的值，想调去「选项生成」页）等 |
-| 模板/池的版本号 | `src/prompts/defaults.ts` | `DEFAULTS_VERSION`；模板改版必须 bump，存量默认配置靠它整键重建吃上新规则 |
+| 模板/池的版本号 | `src/prompts/defaults.ts` | 模板即代码常量，随 dist 发布即刻生效，无存量迁移面（版本化重建机器已随 tt-slim 批 C 退役）；池版本号见条目池一行 |
 
 改模板或池属于一次改版：bump 对应版本号、七道质量门全绿、重建 `dist/` 再提交（命令见「开发」节）；普通用户侧 `git pull` 后刷新 TT 即生效。
 

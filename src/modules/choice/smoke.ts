@@ -6,7 +6,7 @@
  * parseOptions 代码路径（dist 加载即覆盖）。输出 PASS/FAIL 行供
  * scripts/smoke.mjs 收口断言。
  */
-import { assembleMessages, createDefaultPromptConfig, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
+import { assembleMessages, DEFAULT_PROMPT_CONFIGS, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
@@ -310,7 +310,7 @@ function runAssetPoolChecks(): void {
 
 /** 3) 注入：pool_entries 模块的分区呈现与空态（池规则并入模板，独立段已删）。 */
 function runInjectionChecks(): void {
-    const config = createDefaultPromptConfig();
+    const config = DEFAULT_PROMPT_CONFIGS.choice;
     const supply: PoolInjectionSupply = {
         pinned: [{ type: '检查酒馆', content: '仔细检查酒馆每个角落' }],
         drawn: [{ type: '打听消息', content: '向酒保打听传闻' }],
@@ -721,8 +721,7 @@ async function runApplyOptionChecks(): Promise<void> {
 
 /** 组装纯函数路径机判（默认模板集＋合成源）。 */
 function runAssemblyChecks(): string {
-    const config = createDefaultPromptConfig();
-    check('默认模板版本＝21（漏 bump 时本门红：存量默认快照不会被重建）', config.defaultsVersion === 21, `v=${String(config.defaultsVersion)}`);
+    const config = DEFAULT_PROMPT_CONFIGS.choice;
     const sources = syntheticSources();
     const result = assembleMessages(config.modules, sources);
 

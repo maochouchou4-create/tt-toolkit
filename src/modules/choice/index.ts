@@ -15,7 +15,6 @@
 import { createApp } from 'vue';
 import { pinia } from '@/pinia';
 import { eventBus, event_types, waitForResource } from '@/host';
-import { ensurePromptConfigs } from '@/prompts';
 import { version } from '@/version';
 import { installAutoGenerate } from './auto';
 import { latestAssistantFloorIndex } from './persist';
@@ -84,7 +83,6 @@ async function mountBarWithRetry(): Promise<void> {
  * node 冒烟路径走 initChoiceMinimal（无 DOM）。
  */
 export function initChoice(): void {
-    ensurePromptConfigs();
     syncAssetPool();
     installAutoGenerate();
     installFloorSync();
@@ -94,9 +92,8 @@ export function initChoice(): void {
     console.info(`[tt-toolkit][choice] 选项生成核心已初始化 v${version}（组装管线与选项条）`);
 }
 
-/** node 冒烟最小初始化：默认配置落盘＋asset 池同步＋自动生成守卫，不挂 DOM。 */
+/** node 冒烟最小初始化：asset 池同步＋自动生成守卫＋楼层同步，不挂 DOM。 */
 export function initChoiceMinimal(): void {
-    ensurePromptConfigs();
     syncAssetPool();
     installAutoGenerate();
     installFloorSync();

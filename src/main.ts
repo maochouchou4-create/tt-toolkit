@@ -2,7 +2,7 @@
  * 扩展引导：唯一环境分支点（模块不自行探测环境自启动）。
  *
  * 浏览器（TT 宿主窗口）流：initStorage() → mountShell() → registerTab×4
- * → initChoice()（提示词配置落盘＋选项条挂载＋MESSAGE_RECEIVED
+ * → initChoice()（选项条挂载＋MESSAGE_RECEIVED
  * 自动生成监听）→ installPromptsPort()（__TT_TOOLKIT__.prompts 排障口，
  * 按任务键分派 choice/persona 两侧）
  * → initNav() → initApis()（统一端点域装载）→ initPersona()。

@@ -16,7 +16,7 @@
  */
 import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages, upsertPersona } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
-import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
+import { getChat, setChat } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
 import { readPersonaDomain, writePersonaDomain } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
@@ -29,9 +29,7 @@ import { readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPres
 import { writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { TASK_IDS } from '@/tasks';
-import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources, type PromptConfig, type TaskKey } from '@/prompts';
-// 存储键不经门面外泄：域键常量归归属模块（storage.ts），门面只出行为面。
-import { GLOBAL_PROMPT_CONFIGS_KEY } from '@/prompts/storage';
+import { DEFAULT_PROMPT_CONFIGS, assembleMessages, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources } from '@/prompts';
 import {
     CATALOG_DEFINITIONS_CLOSE_TAG,
     CATALOG_DEFINITIONS_OPEN_TAG,
@@ -188,73 +186,10 @@ function resolveCatalogKey(token: string): string | null {
 }
 
 function runPromptsChecks(): void {
-    const prompts = usePromptsStore();
-    const raw = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
-    const record = (raw ?? {}) as Record<string, unknown>;
-    const choiceModules = (record.choice as { modules?: unknown[] } | undefined)?.modules;
-    check('prompts：全任务键 Record 齐备（choice 17 模块回归红线）',
-        !Array.isArray(raw) && typeof raw === 'object' && raw !== null
-        && TASK_KEYS.every(k => record[k] !== undefined)
-        && Array.isArray(choiceModules) && choiceModules.length === 17
-        && prompts.configFor('persona_curator') !== null
-        && prompts.configFor('persona_gen') !== null,
-        `keys=${Object.keys(record).join('/')}`);
-
-    // 旧档（单元素数组）不再迁移：域形状只认 Record，数组档整键重建为默认
-    // 并留一条 warn——重建会丢掉用户编辑过的提示词，是可感知的数据重置，
-    // 静默做等于让用户以为自己的提示词还在。落盘仍走启动 init
-    // （ensurePromptConfigs——读路径零副作用后的唯一落盘口），模拟
-    // 「旧档在场」的启动即调 init
-    const legacySet = { id: 'legacy-set', name: '旧套', modules: [{ kind: 'text', id: 't1', name: '文本', role: 'user', order: 10, content: '旧指令', enabled: true }] };
-    // 夹具直写未归一形状（旧数组档）——域登记门管键不管值形状，显式断言写出形状
-    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, [legacySet] as unknown as Record<TaskKey, PromptConfig>);
-    const shapeWarnings: string[] = [];
-    const originWarn = console.warn;
-    console.warn = (...args: unknown[]): void => { shapeWarnings.push(args.map(arg => String(arg)).join(' ')); };
-    try {
-        ensurePromptConfigs();
-    } finally {
-        console.warn = originWarn;
-    }
-    // 外部直写域后必须打失效信号（revision++）——读透传 getter 只跟踪
-    // revision，否则返回首次调用的缓存快照看不到外部写
-    prompts.$patch({ revision: prompts.revision + 1 });
-    const rebuiltChoice = prompts.configFor('choice');
-    const rawAfter = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as unknown;
-    check('prompts：旧数组形态整键重建为默认并留 warn（不迁移旧套·重建是数据重置必须留痕）',
-        rebuiltChoice?.id === 'default' && !Array.isArray(rawAfter) && rawAfter !== null
-        && TASK_KEYS.every(k => (rawAfter as Record<string, unknown>)[k] !== undefined)
-        && shapeWarnings.length === 1 && shapeWarnings[0].includes(GLOBAL_PROMPT_CONFIGS_KEY),
-        `choice=${rebuiltChoice?.id ?? '（无）'} warn=${shapeWarnings.length}/${shapeWarnings[0] ?? '（无）'}`);
-
-    // 默认配置版本化重建：版本落后的默认快照（defaultsVersion 落后于当前
-    // ——真实升级存量的形态）启动后被整键重建为新版并盖新版本号
-    // （id!=='default' 的定制键不覆盖——防御分支）
-    const withStale = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, unknown>;
-    setGlobal(GLOBAL_PROMPT_CONFIGS_KEY, {
-        ...withStale,
-        persona_gen: { id: 'default', name: '默认', defaultsVersion: DEFAULTS_VERSION - 1, modules: [] },
-    } as unknown as Record<TaskKey, PromptConfig>);
-    ensurePromptConfigs();
-    prompts.$patch({ revision: prompts.revision + 1 });
-    const afterRebuild = getGlobal(GLOBAL_PROMPT_CONFIGS_KEY) as Record<string, { id?: string; defaultsVersion?: number; modules?: unknown[] }>;
-    const rebuiltModuleIds = (afterRebuild.persona_gen?.modules ?? []).map(m => (m as { id?: string }).id);
-    // 按 module id 断言在场：单靠条数会把「少一个模块、多一个模块」两类错互相
-    // 抵消掉（3 换 2 时长度照样不变），id 缺失则一定翻红；反过来条数也不能丢
-    // ——多出来的模块带着正确的 id 一律照过，「不多」这个方向没有 id 判据能
-    // 兜住，而全仓再没有第二处数 persona_gen 模块个数。两条方向都上。
-    check('prompts：旧默认快照版本化重建（整键重建＋版本号写入＋两个模块按 id 在场且不多余）',
-        afterRebuild.persona_gen?.id === 'default'
-        && afterRebuild.persona_gen?.defaultsVersion === DEFAULTS_VERSION
-        && rebuiltModuleIds.includes('inject_persona_wi')
-        && rebuiltModuleIds.includes('persona_gen_prompt')
-        && rebuiltModuleIds.length === 2,
-        `modules=${rebuiltModuleIds.join('/')} 数=${rebuiltModuleIds.length}`);
-
-    const curatorConfig = prompts.configFor('persona_curator');
-    const genConfig = prompts.configFor('persona_gen');
-    const curatorText = (curatorConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
-    const genText = (genConfig?.modules.find(m => m.kind === 'text')?.content ?? '');
+    // 默认模板改读代码常量（DEFAULT_PROMPT_CONFIGS）后，域存储与版本化
+    // 重建机器已随 tt-slim 批 C 退役——本段只剩模板正文的机判锁。
+    const curatorText = DEFAULT_PROMPT_CONFIGS.persona_curator.modules.find(m => m.kind === 'text')?.content ?? '';
+    const genText = DEFAULT_PROMPT_CONFIGS.persona_gen.modules.find(m => m.kind === 'text')?.content ?? '';
     check('prompts：curator 默认模板占位符（{{charInfo}}/{{userRequirements}}）',
         curatorText.includes('{{charInfo}}') && curatorText.includes('{{userRequirements}}'));
     check('prompts：persona_gen 默认模板占位符（{{charInfo}}/{{greetings}}/{{template}}/{{catalog_definitions}}/{{input}}）',
@@ -560,13 +495,6 @@ function runPromptsChecks(): void {
         curatorText.includes(`行为细节块（${DETAIL_BLOCKS_LITERAL}）`),
         `期望串=${DETAIL_BLOCKS_LITERAL}`);
 
-    // 版本钉＝21 的绝对锁：DEFAULTS_VERSION 再动（升降皆然）本条即红，改版人
-    // 必须同步核对本套件上面的政策词面锁与期望计数。它锁不住「改了正文忘
-    // bump」——版本未动时绝对/相对断言都绿，那个坑的真兜底是词面锁本身；
-    // choice/smoke.ts 另有同款钉，此处重复一份保 persona 套件自包含。
-    check('prompts：DEFAULTS_VERSION＝21（策展收紧改版随版本 bump·存量快照重建可达）',
-        DEFAULTS_VERSION === 21);
-
     // 提示词正文锁：策展段与档案段是两次独立请求。档案段正文引用「原则 7」这类
     // 只有策展段才有的规则编号＝引用一个本请求读不到的判据（要填的键集合由
     // <target_schema> 定死，它拿不到「哪些键本该空」），所以反向守门锁死这条。
@@ -767,11 +695,9 @@ const assemblySources: PersonaAssemblySources = {
 };
 
 function runPersonaAssemblyChecks(): void {
-    const prompts = usePromptsStore();
-
     // curator 管线：wi 一条 system（任务级预设源已退役——预设影响走传输层
     // 破限注入，不进引擎），user 指令占位符清零
-    const curator = assembleMessages(prompts.configFor('persona_curator')?.modules ?? [], assemblySources);
+    const curator = assembleMessages(DEFAULT_PROMPT_CONFIGS.persona_curator.modules, assemblySources);
     check('persona 组装：curator 管线（wi system＋user 指令、占位符清零、无预设段）',
         curator.messages.length === 2
         && curator.messages[0].role === 'system'
@@ -782,7 +708,7 @@ function runPersonaAssemblyChecks(): void {
 
     // gen 管线：{{template}}←策展 schema、{{greetings}}、{{input}} 全填；
     // 指令层无 {{user}} 宏——User 锚定行直接进正文
-    const gen = assembleMessages(prompts.configFor('persona_gen')?.modules ?? [], assemblySources);
+    const gen = assembleMessages(DEFAULT_PROMPT_CONFIGS.persona_gen.modules, assemblySources);
     const genUser = gen.messages[gen.messages.length - 1].content;
     check('persona 组装：persona_gen 管线（占位符全部填充＋User 锚定行在场）',
         gen.messages.length === 2 && gen.messages[1].role === 'user'
@@ -837,7 +763,7 @@ function runPersonaAssemblyChecks(): void {
     // 提示词编辑面已删（toggleModule action 同删）——
     // 改本地数组改造（choice smoke modulesOff 同款；modules[].enabled
     // 字段保留、引擎照读的实证）
-    const genModules = prompts.configFor('persona_gen')?.modules ?? [];
+    const genModules = DEFAULT_PROMPT_CONFIGS.persona_gen.modules;
     const offModules = genModules.map(m => (m.id === 'persona_gen_prompt' ? { ...m, enabled: false } : m));
     const off = assembleMessages(offModules, assemblySources);
     const offTrace = off.trace.find(t => t.moduleId === 'persona_gen_prompt');

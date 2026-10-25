@@ -537,7 +537,9 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ 池重制与直球可辨性：资产锁改值（130 条/9 分类集合全等）随数据跟随不计，
 // 新增锁 5——题材词表零命中 1／规则 7 直球位 1／输出契约标题与 aim 忠实性 1／
 // 规则 6 新元素边界 1／few_shot 直球示例换血 1 ＝ +5。
-const CHOICE_PASS_EXPECTED = 165;
+// ＝ tt-slim 批 C 提示词域清残：默认模板版本断言 1（DEFAULTS_VERSION＝21）
+// 随版本化重建机器退役删除 ＝ −1。
+const CHOICE_PASS_EXPECTED = 164;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -579,28 +581,13 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
     failures.push('debugForceRaw 生成管线机判未见 PASS 输出（开关未接生成路径或断言被删）');
 }
 
-// 提示词配置初始化：默认模板落进全局域 storage（choice
-// 17 模块——反 OOC 要点并入 core_rules，退役的记忆桥注入模块已删）。
-// 存储形态 Record<taskKey, PromptConfig> 三任务键：choice 17 模块红线；
-// persona 两任务键在场（各 2 模块：wi/任务指令——preset 源已随任务级
-// 预设选择退役；已退休的 persona_refine 任务键不在期望清单——存量配置
-// 读侧出局，写回自然清除）。退休的 summary 两任务键同理：TASK_KEYS 收窄
-// 后读侧出局、ensurePromptConfigs 写回时自然清除。
-const promptDomain = (globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit ?? {}).promptConfigs;
-const promptTaskKeys = promptDomain && typeof promptDomain === 'object' ? Object.keys(promptDomain) : [];
-const promptChoiceModules = Array.isArray(promptDomain?.choice?.modules) ? promptDomain.choice.modules.length : -1;
-const personaKeyOk = ['persona_curator', 'persona_gen'].every(k => Array.isArray(promptDomain?.[k]?.modules) && promptDomain[k].modules.length > 0);
-if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) {
-    failures.push(`默认提示词配置未正确初始化（期望 Record 三任务键、choice 17 模块；实际键 ${promptTaskKeys.join(',') || '无'}、choice 模块数 ${promptChoiceModules}）`);
-}
-
 // ---------------------------------------------------------------------------
 // persona 机判：纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成＝prompts 5（全任务键齐备含 choice 17 模块红线/旧数组整键重建默认＋warn/
-// 旧默认快照版本化重建按 module id 在场且不多余/curator 与 persona_gen
-// 两任务默认占位符）＋persona 组装
+// 期望构成＝prompts 2（curator 与 persona_gen 两任务默认占位符——模板
+// 改读 DEFAULT_PROMPT_CONFIGS 代码常量后，域存储与版本化重建用例随机器
+// 退役）＋persona 组装
 // 7（curator 管线/persona_gen 管线占位符全填＋档案段正文零跨段引用「原则 N·要求
 // N·策展段」三类标记全扫/档案段正文「块名·叶名」全落目录真实键/叶边界段随本次
 // schema 收敛且行集＝字面量四行/叶边界段整段逐字节＝收敛成文/模块开关闭环）＋persona dump 观测口 2＋纯函数 12＋api 16（含 finish_reason=length 截断
@@ -621,8 +608,8 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // L0 归属优先级对 10 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
 // 之前·叶数段字面量、目录 definition 非空率 100%、countText 覆盖词面只配模板叶块、
 // L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死（原则 7 逐叶裁叶＋
-// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推不出才选＋让位序＋元层剥离、推论名单块名串＝手抄字面量六块、DEFAULTS_VERSION＝21 锁定、
-// gen 值厚度与行为心理类传导；默认快照重建断言按 module id 存在性并上条数不多余）
+// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推不出才选＋让位序＋元层剥离、推论名单块名串＝手抄字面量六块、
+// gen 值厚度与行为心理类传导）
 // ＋档案段生成契约 11（要求 7 事实唯一归属：归属顺序 ①–⑦ 按序＋关键条款与末句
 // 三维度例外；每个「→」归属处落在真实块名或「块名·叶名」；规则 4 跨叶不复述
 // 半句追加在跨叶互补之后；三组反例五栏同构——重复写法/为什么不合格/重写的版本
@@ -686,7 +673,10 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // ＝ tt-slim 批 B 退役历史机器：迁移幂等＋统一端点收编＋退休键清理 17 条
 // 与端点删除联动清空 1 条随三步迁移机器删除 ＝ −18（联动重置行为由 apis
 // 套件「删服务商联动重置（boot2 幂等前提）」同款断言承接，覆盖不丢）。
-const PERSONA_PASS_EXPECTED = 152;
+// ＝ tt-slim 批 C 提示词域清残：域存储三用例（全任务键齐备/旧数组重建
+// ＋warn/版本化重建按 id 在场）与版本钉 1 条（DEFAULTS_VERSION＝21）随
+// promptConfigs 域机器退役删除 ＝ −4。
+const PERSONA_PASS_EXPECTED = 148;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -824,4 +814,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

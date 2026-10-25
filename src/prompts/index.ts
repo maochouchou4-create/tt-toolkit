@@ -22,14 +22,8 @@ export { collectAssemblySources } from './sources';
 // 不外露（可编辑面会把一份返回格式契约交给用户改坏，而改坏只静默降级）。
 export { assemblePersonaReviewMessages, PERSONA_REVIEW_TASK_HEAD } from './review';
 export {
-    DEFAULTS_VERSION,
-    createDefaultPromptConfig,
-    createTaskDefaultConfig,
+    DEFAULT_PROMPT_CONFIGS,
     PERSONA_CURATOR_TASK_HEAD,
     PERSONA_GEN_TASK_HEAD,
 } from './defaults';
-// 门面只出行为面：GLOBAL_PROMPT_CONFIGS_KEY 是域键常量，归归属模块
-// （storage.ts），要读它的人按域纪律直接深导入。
-export { ensurePromptConfigs } from './storage';
-export { usePromptsStore } from './store';
 export { renderDump, renderTraceCompact } from './dump';

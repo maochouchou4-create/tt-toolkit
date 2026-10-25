@@ -1,7 +1,7 @@
 /**
  * node 冒烟编排（无 DOM，scripts/smoke.mjs 驱动）串行链：
  * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化 →
- * nav dump → initChoiceMinimal()（默认配置落盘，不挂 DOM）→
+ * nav dump → initChoiceMinimal()（不挂 DOM 的最小初始化）→
  * installPromptsPort() → runChoiceSmoke() → initApis()（域装载）→
  * initPersonaMinimal() → runPersonaSmoke()（提示词引擎/纯函数/api 形状/
  * 端到端/复核回合）→ runApisSmoke()（apis 域机判收尾：十断言，批量设置行

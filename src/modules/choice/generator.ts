@@ -14,7 +14,7 @@ import {
     assembleMessages,
     collectAssemblySources,
     renderDump,
-    usePromptsStore,
+    DEFAULT_PROMPT_CONFIGS,
     type PoolInjectionSupply,
 } from '@/prompts';
 import type { ModuleTrace } from '@/prompts';
@@ -90,9 +90,7 @@ export function beginGenerationCycle(): { anchorIndex: number | null; anchorMess
  * 传给 sources/engine，prompts 层不回读 choice 域（单向供给）。
  */
 export async function assembleCurrent(): Promise<{ dumpText: string; messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; trace: ModuleTrace[] }> {
-    const promptsStore = usePromptsStore();
-    const config = promptsStore.effectiveConfig;
-    if (!config) throw new Error('提示词配置缺席（storage 未初始化？）');
+    const config = DEFAULT_PROMPT_CONFIGS.choice;
     const gen = choiceStorage.readDomain().gen;
     const poolInjection: PoolInjectionSupply = drawPoolInjection();
     const sources = await collectAssemblySources({

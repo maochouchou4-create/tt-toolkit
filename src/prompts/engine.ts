@@ -294,11 +294,10 @@ function resolveInjectContent(
             const note = `固定 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条${pool.pinned.length >= sources.count ? '（固定条目已覆盖数量规则）' : ''}`;
             return { content: wrapTag('pool_entries', parts.join('\n\n'), sources), note };
         }
-        // 存档不可信：非 default 配置不经版本整键重建（storage 只认
-        // default id），退役源可能残留——按「跳过留痕、不静默吞」纪律
-        // 空段留痕，不让解构炸在组装中段（形态对齐 persona 解析的 default）
+        // 防御分支：注入源类型新增而未接 case 时按「跳过留痕、不静默吞」
+        // 纪律空段留痕，不让解构炸在组装中段（形态对齐 persona 解析的 default）
         default:
-            return { content: '', note: `未知注入源 ${String(source)}（存档残留）` };
+            return { content: '', note: `未知注入源 ${String(source)}` };
     }
 }
 
@@ -414,8 +413,8 @@ function familyOf(sources: AssemblySources | PersonaAssemblySources): AssemblyFa
  *     条 user 与任务指令同为 user 时，合并会把「任务指令」混进历史正文，
  *     user 消息在提示词里是独立输入边界）。
  *   - 主循环只做「求值 → 产消息 → 留痕」三件事；族差异经 familyOf 单点
- *     分派。任务源与 sources 形态不匹配的模块跳过后留痕（手改存档才会
- *     出现，不做静默吞）。
+ *     分派。任务源与 sources 形态不匹配的模块跳过后留痕（代码装配错误——
+ *     新增注入源漏接 case 才会出现，不做静默吞）。
  */
 export function assembleMessages(
     modules: PromptModule[],

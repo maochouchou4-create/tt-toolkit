@@ -3,7 +3,7 @@
  *
  * 统一单条模块管线：文本模块（规则/任务/格式）与注入模块（人设/角色卡/
  * 世界书/历史/外部搬运）同一条 order 排序——单一排序契约，不分两套列表。
- * 提示词单一真相源＝configs[] 每套自带 modules[]，无工作副本无快照
+ * 提示词单一真相源＝每套 PromptConfig 自带 modules[]，无工作副本无快照
  * 双份。编辑面已删——模板内置在代码（defaults），
  * 引擎照常读 modules；enabled 字段保留（引擎行为面）。
  */
@@ -14,7 +14,8 @@ export type PromptRole = 'system' | 'user' | 'assistant';
 /**
  * 提示词任务键（引擎多任务化）。各生成管线各自持一套
  * PromptConfig——choice（选项生成）、persona 两段（策展 schema、按
- * schema 填充人设）。存储形态 Record<taskKey, PromptConfig>。
+ * schema 填充人设）。任务集形态 Record<TaskKey, PromptConfig>
+ * （DEFAULT_PROMPT_CONFIGS，代码常量，无存储面）。
  *
  * 键数与「一次生成发几轮」不是一回事：人设链现在发三轮，第三轮（查重复核）
  * 刻意不占任务键——它的指令与返回格式是一份契约，可编辑＝可静默降级
@@ -22,7 +23,7 @@ export type PromptRole = 'system' | 'user' | 'assistant';
  */
 export type TaskKey = 'choice' | 'persona_curator' | 'persona_gen';
 
-/** 全部任务键（读侧补缺/迁移遍历用）。 */
+/** 全部任务键（DEFAULT_PROMPT_CONFIGS 的键集；排障口按任务分派以此为准）。 */
 export const TASK_KEYS: readonly TaskKey[] = ['choice', 'persona_curator', 'persona_gen'];
 
 /**
@@ -98,8 +99,6 @@ export interface PromptConfig {
     id: string;
     name: string;
     modules: PromptModule[];
-    /** 写入时的默认模板版本——default 配置据此被版本化重建（storage 层），定制配置可缺席。 */
-    defaultsVersion?: number;
 }
 
 /**

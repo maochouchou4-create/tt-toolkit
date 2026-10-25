@@ -2,7 +2,7 @@
  * 统一设置存储（三域一层服务）。
  *
  * 域划分：
- *   - 全局域 extension_settings.ttToolkit：提示词配置集、条目池、API 配置、
+ *   - 全局域 extension_settings.ttToolkit：条目池、API 配置、
  *     UI 偏好、nav 域标记。各内容子域自带版本机制
  *     （如 choice 域 assetVersion），顶层不再持 schema version 概念。
  *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置。
