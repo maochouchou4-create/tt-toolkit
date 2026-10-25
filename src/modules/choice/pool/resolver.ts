@@ -26,13 +26,34 @@ function sampleWithoutReplacement<T>(items: T[], amount: number, random: RandomS
 }
 
 /**
+ * 候选倍率值域唯一真源：设置页控件属性（min/max/step）与 normalize 写读钳制
+ * 都从这里取——值域改一处，UI 与存档钳制不会各自漂。
+ */
+export const OVERSAMPLE_LIMITS = { min: 0, max: 500, step: 10 } as const;
+
+/**
+ * 超额量核心：base＋ceil(base×pct/100)；非正/非有限倍率按 0 计（与钳制面的
+ * 合法域语义一致）。抽取量与注入行数估算共用这一份实现，两式不会分家。
+ */
+function oversampledAmount(base: number, oversamplePct: number): number {
+    const pct = Number.isFinite(oversamplePct) && oversamplePct > 0 ? oversamplePct : 0;
+    return base + Math.ceil((base * pct) / 100);
+}
+
+/**
  * 候选抽取量数学：remaining + ceil(remaining×pct/100)，封顶池大小（抽不出多于池里有的）。
  * remaining = max(count - pinned.length, 0)：pinned 已超额时不再补抽（超发语义由 overflow 策略管）。
  */
 export function drawAmount(remaining: number, oversamplePct: number, poolSize: number): number {
-    const pct = Number.isFinite(oversamplePct) && oversamplePct > 0 ? oversamplePct : 0;
-    const want = remaining + Math.ceil((remaining * pct) / 100);
-    return Math.min(want, poolSize);
+    return Math.min(oversampledAmount(remaining, oversamplePct), poolSize);
+}
+
+/**
+ * 注入行数估算（设置页信息行的单源公式）：置顶区＋抽取基数（count−pinned）＋其超额。
+ * 不封顶：估算面无池大小入参，条数≤10、倍率≤500 时恒小于池大小（无需封顶展示）。
+ */
+export function estimateInjectionLines(count: number, pinned: number, oversamplePct: number): number {
+    return pinned + oversampledAmount(Math.max(count - pinned, 0), oversamplePct);
 }
 
 /**

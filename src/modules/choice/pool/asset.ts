@@ -12,7 +12,7 @@
  * 首次同步注释）。assetVersion 标记使重复启动零写入（幂等快路径）。
  */
 import assetJson from './default-pool.json';
-import type { PoolEntry } from './types';
+import type { PoolCategory, PoolEntry } from './types';
 import type { PoolDomainData } from './normalize';
 import { choiceStorage } from '../api';
 
@@ -22,7 +22,8 @@ interface PoolAsset {
     entries: Array<{
         type: string;
         content: string;
-        category: string;
+        /** 池分类集合与 POOL_CATEGORIES 名单全等由 choice/smoke.ts 名单全等断言机判。 */
+        category: PoolCategory;
         pinned?: boolean;
     }>;
 }

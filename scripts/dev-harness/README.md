@@ -23,14 +23,15 @@ node scripts/dev-harness/serve.mjs
 | `harness.css` | 宿主骨架与皮肤模拟：SmartTheme 变量双主题、.drawer-content/.mes 等 |
 | `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 各键（与 dist 的全部外部 import 一一对应，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`）＋假聊天数据 |
 | `dist-harness/` | **生成物**（build.mjs 产出，勿手改）——dist 全部 .js 逐文件重写后的 ESM 模块（chunk 间相对 import 原样保留；node 冒烟 chunk 不入内） |
-| `build.mjs` | 把 `dist/*.js` 的外部 import 重写为 `const {...} = globalThis.__TT_HARNESS__.<key>` 解构，逐文件产出 `dist-harness/`；fail-fast 锁产物形状（BOOT DONE 标记恰一 chunk、入口零标记、外部 import 计数 >0） |
+| `transform.mjs` | 转换单源（dist → dist-harness 的逐文件重写＋STUBS 对照表）：build.mjs 生成与 `scripts/smoke.mjs` 的产物漂移门共用——漂移门判据＝现 dist 过同一份转换与 dist-harness/ 逐字一致 |
+| `build.mjs` | 读 `dist/*.js` 逐文件调 transform.mjs 产出 `dist-harness/`；fail-fast 锁产物形状（BOOT DONE 标记恰一 chunk、入口零标记、外部 import 计数 >0） |
 | `serve.mjs` | 仓根静态 HTTP 服务（默认 4173，路径穿越守门）——自动化浏览器（Playwright 等）需走 HTTP，file:// 会被封 |
 | `screenshots/` | 布局自查基线截图（明/暗/窄视口三轮，见下） |
 
 ## stub 覆盖面（消费契约）
 
 stubs.js 只实现 tt-toolkit 实际消费的最小面；新增宿主依赖时 dist 的 import 语句会变，
-build.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更新 build.mjs 的 STUBS 表。
+transform.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更新 transform.mjs 的 STUBS 表。
 
 - `events.js`：`event_types`（APP_READY/CHAT_CHANGED/MESSAGE_UPDATED/CHARACTER_MESSAGE_RENDERED/SETTINGS_LOADED）、`eventSource`（on/once/makeLast/makeFirst/removeListener/emit/emitAndWait）
 - `script.js`：`saveSettingsDebounced`（内存日志）、`chat_metadata`、`characters`、`this_chid`、`getRequestHeaders`、`substituteParams`（{{user}}/{{char}} 等替换）、`sendTextareaMessage`（真把消息追加进假聊天）

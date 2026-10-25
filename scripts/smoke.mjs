@@ -22,6 +22,7 @@ import { spawn } from 'node:child_process';
 import { register } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { HARNESS_FILE_HEADER, transformDistFile } from './dev-harness/transform.mjs';
 
 const DIST_ENTRY = new URL('../dist/index.js', import.meta.url);
 // 子进程模式开关（boot2 隔离面，见文末二次启动段）：本脚本以 SMOKE_BOOT2_CHILD=1
@@ -539,6 +540,8 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 规则 6 新元素边界 1／few_shot 直球示例换血 1 ＝ +5。
 // ＝ tt-slim 批 C 提示词域清残：默认模板版本断言 1（DEFAULTS_VERSION＝21）
 // 随版本化重建机器退役删除 ＝ −1。
+// ＝ tt-slim 批 D 单源与门禁小件：分类名单断言改从 POOL_CATEGORIES 常量派生、
+// applyOption 断言改名（点击行为三分支快照）——用例零增删 ＝ ±0。
 const CHOICE_PASS_EXPECTED = 164;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
@@ -684,27 +687,6 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 }
 
 // ---------------------------------------------------------------------------
-// 目录派生段只有一份（标签符号计数）：叶边界段与归属优先级表各由 catalog 的
-// 渲染函数成文一次，而两条逐字节锁都只在 OPEN 标签到 CLOSE 标签的切片里比
-// ——模板正文别处再手抄一整段进去，两条锁一声不吭，出去的档案段里同一个边界
-// 列表出现两遍且能各自漂。判据＝符号在 defaults.ts 正文（去掉 import 块，
-// 数的是「用了几处」而不是「声明＋用了」）里的出现次数：两个标签各恰好一处，
-// CATALOG_DEFINITIONS_HEADER 零处（段头只活在 catalog 的渲染函数里，它在模板
-// 源码里出现即说明有人把段头抄进去了）。
-// ---------------------------------------------------------------------------
-const defaultsBody = readFileSync(new URL('../src/prompts/defaults.ts', import.meta.url), 'utf8')
-    .replace(/import\s*\{[^}]*\}\s*from\s*'@\/modules\/persona\/catalog';/, '');
-const SEGMENT_SYMBOL_MAX = [
-    ['CATALOG_DEFINITIONS_OPEN_TAG', 1],
-    ['OWNERSHIP_TABLE_OPEN_TAG', 1],
-    ['CATALOG_DEFINITIONS_HEADER', 0],
-];
-const overusedSymbols = SEGMENT_SYMBOL_MAX.filter(([symbol, max]) => (defaultsBody.split(symbol).length - 1) > max);
-if (overusedSymbols.length > 0) {
-    failures.push(`目录派生段只有一份：defaults.ts 里 ${overusedSymbols.map(([s, m]) => `${s} 出现 ${defaultsBody.split(s).length - 1} 次（上限 ${m}）`).join('、')}——同段被手抄了第二份`);
-}
-
-// ---------------------------------------------------------------------------
 // apis 机判：批量设置行写通道（[apis-smoke] 行收口，runNodeSmoke 末位——
 // 见 src/main.ts runNodeSmoke 接线）
 // ---------------------------------------------------------------------------
@@ -809,9 +791,69 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
     failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
 }
 
+// ---------------------------------------------------------------------------
+// 版本链机器门（挂账⑫）：三处版本（src/version.ts / manifest.json /
+// package.json）一致且＝收官版本。版本 bump＝三处＋本节 EXPECTED_VERSION
+// 同步改——漏改任何一处这里红。
+// ---------------------------------------------------------------------------
+const EXPECTED_VERSION = '1.28.0';
+const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
+// 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
+// version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿
+const versionTsMatch = readFileSync(new URL('../src/version.ts', import.meta.url), 'utf8').match(/^export const version = '([^']+)';/m);
+const versionChain = [
+    ['src/version.ts', versionTsMatch?.[1]],
+    ['manifest.json', readJsonVersion('../manifest.json')],
+    ['package.json', readJsonVersion('../package.json')],
+];
+for (const [where, v] of versionChain) {
+    if (v !== EXPECTED_VERSION) {
+        failures.push(`版本链不一致：${where}＝${v ?? '（解析失败）'}，期望 ${EXPECTED_VERSION}（三处＋本门 EXPECTED_VERSION 同步 bump）`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 产物漂移守护（挂账⑪）：dist 现产物逐文件跑与 build.mjs 同一份转换
+// （scripts/dev-harness/transform.mjs 单源），与仓内 dist-harness/ 逐字
+// 比对——改 src 重建 dist 后忘跑 harness build、或有人手改 dist-harness，
+// 都在这里红。失败文案点名先重跑构建：忘跑构建的「漂移」最常见，先补跑
+// 再看真假，防把旧产物误读成真漂移。
+// ---------------------------------------------------------------------------
+const DRIFT_HINT = '——先重跑 node scripts/dev-harness/build.mjs 再看真假漂移（本门只证 dist↔dist-harness 一致；若 dist 本身疑旧，先 pnpm build）';
+const harnessDirUrl = new URL('../scripts/dev-harness/', import.meta.url);
+const harnessOutDirUrl = new URL('dist-harness/', harnessDirUrl);
+// 期望集＝dist 全部 .js 减冒烟 chunk（与 build.mjs 的取舍同款判据）
+const expectedHarnessNames = distJsFiles
+    .filter(f => !readFileSync(new URL(f, distDirUrl), 'utf8').includes('[node-smoke] BOOT DONE'))
+    .sort();
+const actualHarnessNames = existsSync(harnessOutDirUrl)
+    ? readdirSync(harnessOutDirUrl).filter(f => f.endsWith('.js')).sort()
+    : [];
+for (const name of actualHarnessNames) {
+    if (!expectedHarnessNames.includes(name)) {
+        failures.push(`dist-harness 漂移：多出产物 ${name}（dist 已无对应文件）${DRIFT_HINT}`);
+    }
+}
+for (const name of expectedHarnessNames) {
+    const harnessFileUrl = new URL(`dist-harness/${name}`, harnessDirUrl);
+    if (!existsSync(harnessFileUrl)) {
+        failures.push(`dist-harness 漂移：缺产物 ${name}${DRIFT_HINT}`);
+        continue;
+    }
+    try {
+        const { code } = transformDistFile(readFileSync(new URL(name, distDirUrl), 'utf8'), name);
+        const expected = HARNESS_FILE_HEADER(name) + code;
+        if (readFileSync(harnessFileUrl, 'utf8') !== expected) {
+            failures.push(`dist-harness 漂移：${name} 与 dist 现产物的转换结果不一致${DRIFT_HINT}`);
+        }
+    } catch (e) {
+        failures.push(`dist-harness 漂移：${name} 转换失败（${e.message}）${DRIFT_HINT}`);
+    }
+}
+
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链三处（version.ts/manifest.json/package.json）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);

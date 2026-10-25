@@ -20,7 +20,7 @@ import { readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { useChoiceSettingsStore } from './settings';
 import { drawAmount, resolvePool } from './pool/resolver';
-import type { DrawResult, PoolEntry } from './pool/types';
+import { POOL_CATEGORIES, type DrawResult, type PoolCategory, type PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 import { getGlobal, setGlobal } from '@/storage';
 
@@ -106,7 +106,9 @@ function mulberry32(seed: number): () => number {
 }
 
 function makeEntry(id: string, pinned: boolean, category = '默认'): PoolEntry {
-    return { id, type: `选项${id}`, content: `${id}的行动正文`, category, pinned };
+    // 夹具分类＝有意不在名单内的合成桶键（resolver 把 category 当纯字符串
+    // 桶键用）；类型收紧的判定面是存档读侧（normalize），不追溯冒烟夹具
+    return { id, type: `选项${id}`, content: `${id}的行动正文`, category: category as PoolCategory, pinned };
 }
 
 /** 1) 抽取分布与数学（种子 PRNG 驱动 resolvePool 纯函数）。 */
@@ -264,8 +266,8 @@ function runAssetPoolChecks(): void {
     check('asset：内置池 124 条（纯走法制版）', masterPool.length === 124, `实际 ${masterPool.length}`);
     const cats = new Set(masterPool.map(e => e.category));
     check(
-        'asset：9 个分类（纯走法制版）',
-        cats.size === 9 && ['接住对方', '关系走法', '言语走法', '身体行动', '局面推进', '外部变化', '节奏调度', '视角形式', 'NSFW'].every(c => cats.has(c)),
+        'asset：分类集合与 POOL_CATEGORIES 名单全等（纯走法制版）',
+        cats.size === POOL_CATEGORIES.length && POOL_CATEGORIES.every(c => cats.has(c)),
         `实际 ${[...cats].join('/')}`,
     );
     const transition = masterPool.find(e => e.type === '转场推进');
@@ -296,7 +298,9 @@ function runAssetPoolChecks(): void {
     check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
     choiceStorage.writeDomain(d => {
-        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x', pinned: false });
+        // 'x' 是有意的名单外污染值（本断言测「版本变更全量恢复」）——normalize
+        // 对名单外分类按原值放行，坏值能在池里活着正是恢复机判的前提
+        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x' as string as PoolCategory, pinned: false });
         d.pool.assetVersion = 0;
     });
     syncAssetPool();
@@ -667,17 +671,20 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：坏档（aim 在场非字符串）回退 null', readFloorOptions(0) === null);
 }
 
+/** 断言名（守卫分支与实测分支同名，FAIL 定位同窗）。 */
+const APPLY_OPTION_ASSERTION = 'applyOption 点击行为三分支快照（fill/append/send 落到发送通道的文本，aim 一律不外泄）';
+
 /**
- * 点击应用面机判（契约红线：aim 不随发言外发）——三个点击行为
- * fill/append/send 各自落到宿主发送通道的文本都必须只有正文。aim 属显示
- * 与存档面；它一旦混进发送内容，主模型会拿到一句写给玩家看的元信息。
- * 断言窗口内由 scripts/smoke.mjs 的发送面桩提供 #send_textarea（node
- * 冒烟全程无 DOM，装卸理由见该桩）。
+ * 点击应用面机判：applyOption 三个点击行为（fill/append/send）各自落到宿主
+ * 发送通道的文本快照——fill 拼正文、append 拼草稿、send 发正文，且 aim 一律
+ * 不随发送外泄（契约红线：aim 属显示与存档面，混进发送内容＝主模型拿到一句
+ * 写给玩家看的元信息）。断言窗口内由 scripts/smoke.mjs 的发送面桩提供
+ * #send_textarea（node 冒烟全程无 DOM，装卸理由见该桩）。
  */
 async function runApplyOptionChecks(): Promise<void> {
     const stubs = smokeStubs();
     if (!stubs) {
-        check('applyOption 发送内容不含 aim', false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
+        check(APPLY_OPTION_ASSERTION, false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
         return;
     }
     const option = { title: '摊牌', content: '林霜把录音笔推到桌子中央：「那就别再绕了。」', aim: '逼对方当场表态' };
@@ -706,7 +713,7 @@ async function runApplyOptionChecks(): Promise<void> {
         sent = last(surface.sends);
 
         check(
-            'applyOption 发送内容不含 aim',
+            APPLY_OPTION_ASSERTION,
             filled === option.content
                 && appended === draft + option.content
                 && sent === option.content

@@ -57,6 +57,7 @@ git clone https://github.com/maochouchou4-create/tt-toolkit
 
 ## 数据说明
 
+- **tt-slim 瘦身程序收官（v1.28.0）**：四批（发布件分块／历史机器退役／提示词域清残／单源与门禁小件）全部落地——分类名单、注入行数公式与倍率值域、构建产物一致性、版本链一致性均已收成单源＋机器门；除 ≤480px 窄壳回退样式删除外零使用面变化。
 - **历史机器已退役（tt-slim 批 B）**：旧版数据的三步迁移（persona 域搬入、统一端点收编、任务档案化）与旧 localStorage 遗留键的一次性清理机器已整体删除。从 v1.9.x 及更早版本一路升级上来的存量档不受影响（数据早已迁完）；带着从未迁移过的远古存档直上新版时不再自动收编——端点需在「API」页手动重配，导航 QR 激活态会重走一次激活，旧 localStorage 键残留为无害孤儿。
 - 所有新数据统一存放在 `extension_settings.ttToolkit`（全局域）与 `chat_metadata.ttToolkit`（聊天域），随 TT 自身的 settings 持久化，不另立存储。
 
@@ -93,6 +94,8 @@ pnpm build
 pnpm harness                          # 生成 scripts/dev-harness/dist-harness/（产物模块）
 node scripts/dev-harness/serve.mjs    # http://127.0.0.1:4173/scripts/dev-harness/
 ```
+
+门序依赖：`pnpm harness` 不在七门清单里，但 smoke 尾部的产物漂移门（dist 现产物经转换与 `dist-harness/` 逐字比对）要求它在 smoke 之前对最新 dist 跑过——改 src 后按 `pnpm build` → `pnpm harness` → 其余各门（含 smoke）推进；提交前七门与 harness build 全绿。
 
 浏览器打开上述地址即可操作完整扩展 UI（主题切换、数据重置按钮在顶栏），详见 `scripts/dev-harness/README.md`。
 

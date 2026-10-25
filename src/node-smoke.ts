@@ -3,7 +3,7 @@
  * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化 →
  * nav dump → initChoiceMinimal()（不挂 DOM 的最小初始化）→
  * installPromptsPort() → runChoiceSmoke() → initApis()（域装载）→
- * initPersonaMinimal() → runPersonaSmoke()（提示词引擎/纯函数/api 形状/
+ * initPersona() → runPersonaSmoke()（提示词引擎/纯函数/api 形状/
  * 端到端/复核回合）→ runApisSmoke()（apis 域机判收尾：十断言，批量设置行
  * 两行齐换，夹具自持清场）→ boot 收尾标记（消费侧等待面）。
  *
@@ -25,7 +25,7 @@ import { runChoiceSmoke } from '@/modules/choice/smoke';
 import { initNavMinimal } from '@/modules/nav';
 import { initApis } from '@/modules/apis';
 import { runApisSmoke } from '@/modules/apis/smoke';
-import { initPersonaMinimal } from '@/modules/persona';
+import { initPersona } from '@/modules/persona';
 import { runPersonaSmoke } from '@/modules/persona/smoke';
 import { installPromptsPort, installStoragePort } from '@/ports';
 import { version } from '@/version';
@@ -58,7 +58,7 @@ export async function runNodeSmoke(bootId: string): Promise<void> {
     // 统一端点域装载（apis 域读写走 storage 懒归一，无启动期写面）
     initApis();
     // 纯函数＋store 互斥＋端到端（断言在 smoke.mjs 收口）
-    initPersonaMinimal();
+    initPersona();
     await runPersonaSmoke();
     // apis 域机判收尾（十断言，批量写两行齐换；夹具自持清场，置于末位不扰动前序域）
     runApisSmoke();

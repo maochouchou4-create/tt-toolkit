@@ -1,10 +1,11 @@
 // dev-harness 构建器：ESM 逐文件形态（批 A 起 dist 为多 chunk）——读 dist/
-// 全部 .js 产物，逐文件把 @sillytavern 相对路径 import（../ 上溯形态）重写为
-// 对 globalThis.__TT_HARNESS__ 的解构，产出 scripts/dev-harness/dist-harness/
-// 下同名文件；chunk 间相对 import（./ 形态）原样保留（宿主本就按 ESM 加载
-// dist，模块形态保真度更高；import.meta.url 在模块里原生合法，不再替换）。
-// node 冒烟 chunk（含 [node-smoke] BOOT DONE 标记）不进 harness：浏览器
-// 分支永不执行它，复制过去只是多一份不会加载的死代码。
+// 全部 .js 产物，逐文件经 transform.mjs 重写外部 import，产出
+// scripts/dev-harness/dist-harness/ 下同名文件；chunk 间相对 import（./ 形态）
+// 原样保留（宿主本就按 ESM 加载 dist，模块形态保真度更高；import.meta.url
+// 在模块里原生合法，不再替换）。node 冒烟 chunk（含 [node-smoke] BOOT DONE
+// 标记）不进 harness：浏览器分支永不执行它，复制过去只是多一份不会加载的
+// 死代码。转换逻辑单源在 transform.mjs——scripts/smoke.mjs 的产物漂移门跑
+// 同一份转换与本脚本产物逐字比对，两处各写一份＝漂移门自己测自己。
 // 消费契约（stub 面）见同目录 README.md；dist 形态变化时（import 语句
 // 增删）本脚本 fail fast，先更新 STUBS 表再复跑。
 // 产物须走 HTTP 加载（node scripts/dev-harness/serve.mjs）：ESM 相对路径
@@ -12,6 +13,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HARNESS_FILE_HEADER, transformDistFile } from './transform.mjs';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const root = join(harnessDir, '..', '..');
@@ -20,22 +22,6 @@ const outDir = join(harnessDir, 'dist-harness');
 
 const BOOT_DONE_MARK = '[node-smoke] BOOT DONE';
 const ENTRY_NAME = 'index.js';
-
-// 外部 import 说明符 basename → __TT_HARNESS__ 键（stubs.js 同表维护）
-const STUBS = {
-    'events.js': 'events',
-    'script.js': 'script',
-    'extensions.js': 'extensions',
-    'st-context.js': 'st_context',
-    'SlashCommand.js': 'slash_command',
-    'SlashCommandParser.js': 'slash_command_parser',
-    'RossAscends-mods.js': 'ross_ascends_mods',
-    'power-user.js': 'power_user',
-    'world-info.js': 'world_info',
-    'personas.js': 'personas',
-    'utils.js': 'utils',
-    'i18n.js': 'i18n',
-};
 
 const distFiles = readdirSync(distDir).filter(f => f.endsWith('.js')).sort();
 if (distFiles.length === 0) {
@@ -60,26 +46,9 @@ let hits = 0;
 let written = 0;
 for (const name of distFiles) {
     if (markerFiles.includes(name)) continue;
-    const source = readFileSync(join(distDir, name), 'utf8');
-    const rewritten = source.replace(/import\s*\{([^}]+)\}\s*from\s*"([^"]+)";/g, (whole, names, spec) => {
-        // chunk 间相对 import 原样保留（ESM 形态不分块不拼接）
-        if (!spec.startsWith('../')) return whole;
-        const base = spec.split('/').pop();
-        const key = STUBS[base];
-        if (!key) {
-            throw new Error(`dev-harness: 未知外部 import 说明符（先在 STUBS 登记）: ${spec}（${name}）`);
-        }
-        hits += 1;
-        // `event_types as rn` → `event_types: rn`（import 改名到解构改名的语法转换）
-        const destructured = names
-            .split(',')
-            .map(n => n.trim())
-            .filter(Boolean)
-            .map(n => n.replace(/\s+as\s+/, ': '))
-            .join(', ');
-        return `const { ${destructured} } = globalThis.__TT_HARNESS__.${key};`;
-    });
-    writeFileSync(join(outDir, name), `// 本文件由 build.mjs 生成（源＝dist/${name}）——勿手改\n${rewritten}`);
+    const { code, hits: fileHits } = transformDistFile(readFileSync(join(distDir, name), 'utf8'), name);
+    hits += fileHits;
+    writeFileSync(join(outDir, name), HARNESS_FILE_HEADER(name) + code);
     written += 1;
 }
 if (hits === 0) {

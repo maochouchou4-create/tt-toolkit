@@ -2,8 +2,9 @@
  * PersonaWeaver fork 入口。
  *
  * 入口只走工具箱 tab（/tt-toolbox 进壳），不挂 .persona_controls_buttons_block
- * 旧按钮、不新增 DOM 锚点（已拍板）。initPersona 负责 store 初始化；
- * node 冒烟路径走 initPersonaMinimal（无 DOM）。
+ * 旧按钮、不新增 DOM 锚点（已拍板）。initPersona 是两路（浏览器引导与 node
+ * 冒烟）共用的唯一初始化入口——node 下宿主事件总线为冒烟存根，CHAT_CHANGED
+ * 监听安装幂等无害。
  *
  * MODIFICATIONS（相对上游 PersonaWeaver fork）：
  * - callPopup 弹窗改 shell 内「人设」tab（PersonaTab.vue）。
@@ -29,17 +30,12 @@ function installChatChangedListener(): void {
 }
 
 /**
- * persona 模块初始化（浏览器路径，main.ts 引导调用）。
+ * persona 模块初始化（浏览器引导与 node 冒烟同走此入口）。
  * 幂等：重复启动只做内存态装载。
  */
 export function initPersona(): void {
     usePersonaStore().init();
     installChatChangedListener();
-}
-
-/** node 冒烟最小初始化：store 初始化（存根数据），不挂 DOM。 */
-export function initPersonaMinimal(): void {
-    initPersona();
 }
 
 export { usePersonaStore, overwritePersonaGuarded } from './store';

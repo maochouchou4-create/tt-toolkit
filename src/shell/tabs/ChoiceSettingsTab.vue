@@ -22,7 +22,7 @@
         <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, DEFAULT_GEN_PARAMS.count) })">
       </TTField>
       <TTField label="候选倍率（%）">
-        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" min="0" max="500" step="10" @change="settings.updateGen({ oversamplePct: clampInt($event, 0, 500, DEFAULT_GEN_PARAMS.oversamplePct) })">
+        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" :min="OVERSAMPLE_LIMITS.min" :max="OVERSAMPLE_LIMITS.max" :step="OVERSAMPLE_LIMITS.step" @change="settings.updateGen({ oversamplePct: clampInt($event, OVERSAMPLE_LIMITS.min, OVERSAMPLE_LIMITS.max, DEFAULT_GEN_PARAMS.oversamplePct) })">
       </TTField>
       <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
       <TTField label="置顶超额策略">
@@ -95,7 +95,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue';
-import { DEFAULT_GEN_PARAMS, useChoiceSettingsStore, useStoryDirectionStore, type ChoiceGenParams, type DirectionPreset } from '@/modules/choice';
+import { DEFAULT_GEN_PARAMS, estimateInjectionLines, OVERSAMPLE_LIMITS, useChoiceSettingsStore, useStoryDirectionStore, type ChoiceGenParams, type DirectionPreset } from '@/modules/choice';
 import { TTCard, TTField } from '@/shell/ui';
 
 const settings = useChoiceSettingsStore();
@@ -138,13 +138,11 @@ function clampInt(event: Event, min: number, max: number, fallback: number): num
     return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-// 候选估算＝1 固定项＋(条数−1) 抽取基数×(1＋倍率)，与 resolver.drawAmount
-// 同式（条数≤10、倍率≤500 时恒小于池大小，无需封顶展示）
-const candidateEstimate = computed(() => {
-    const drawn = settings.gen.count - 1;
-    const pct = Number.isFinite(settings.gen.oversamplePct) && settings.gen.oversamplePct > 0 ? settings.gen.oversamplePct : 0;
-    return 1 + drawn + Math.ceil((drawn * pct) / 100);
-});
+// 候选估算行：公式单源＝resolver.estimateInjectionLines（与抽取量同式）。
+// 置顶数恒传常量 1、不从池读：「全池恰一条置顶」由 choice/smoke.ts 的
+// pinned 全池唯一机判锁（asset：转场推进转固定（pinned 且全池唯一））保证，
+// UI 面不新增对池的数据依赖。
+const candidateEstimate = computed(() => estimateInjectionLines(settings.gen.count, 1, settings.gen.oversamplePct));
 
 // ---- 剧情走向卡（随提示词 tab 删除从 PromptEditorTab
 //      搬回本页；数据域与写入通道零改动） ----

@@ -105,3 +105,4 @@ export { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
 export { useChoiceSettingsStore } from './settings';
 export { useStoryDirectionStore, type DirectionPreset } from './direction';
 export { DEFAULT_GEN_PARAMS, type ChoiceGenParams } from './api';
+export { OVERSAMPLE_LIMITS, estimateInjectionLines } from './pool/resolver';

@@ -472,22 +472,6 @@ function onSave(): void {
     grid-column: 4 / -1;
 }
 
-/* 窄壳回退：任务名整行、四控件两列两行（程序化关联靠 aria-label 兜底） */
-@media (max-width: 480px) {
-    .tt-task-grid-row {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
-
-    .tt-task-grid-cell--name {
-        grid-column: 1 / -1;
-    }
-
-    /* 4/-1 在两列模板下＝线 3，起点 4>终点触发 Grid 纠错交换挤进隐式第三列——显式回 auto 随两列意图换行 */
-    .tt-task-batch-actions {
-        grid-column: auto;
-    }
-}
-
 .tt-api-hint {
     font-size: var(--tt-fs-hint);
     opacity: 0.65;

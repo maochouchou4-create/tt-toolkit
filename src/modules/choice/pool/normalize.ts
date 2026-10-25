@@ -6,7 +6,8 @@
  * 拆成独立纯模块，两边单向引用，不出环。
  */
 
-import type { PoolEntry, PoolGenParams } from './types';
+import { POOL_CATEGORIES, type PoolCategory, type PoolEntry, type PoolGenParams } from './types';
+import { OVERSAMPLE_LIMITS } from './resolver';
 
 /** choice 域下的池子对象形状。 */
 export interface PoolDomainData {
@@ -24,9 +25,10 @@ export const EMPTY_POOL_DATA: PoolDomainData = { masterPool: [] };
 /** 池抽取参数缺省值（send_all/shuffle 与 fork 旧数据 generation 块对齐）。 */
 export const DEFAULT_POOL_GEN_PARAMS: PoolGenParams = {
     /**
-     * 注入行数＝1 置顶＋(count−1)＋ceil((count−1)×oversamplePct/100)，与 resolver.drawAmount 同式。
      * 150 的来源：count=4 出厂默认下抽 8 条跨桶候选（100% 只抽 6 条）——轮询制下
-     * 多抽即多盖分类桶；count=6 下抽 13 条。默认值只送达全新安装：存量用户的 gen
+     * 多抽即多盖分类桶；count=6 下抽 13 条。注入行数公式与倍率值域的单源在
+     * resolver（estimateInjectionLines／OVERSAMPLE_LIMITS），此处不复写。
+     * 默认值只送达全新安装：存量用户的 gen
      * 早已被历史写通道物化（改任一控件或池版本变更都会整域落盘），属用户域不自动覆盖。
      */
     oversamplePct: 150,
@@ -50,6 +52,10 @@ function asArray(v: unknown): unknown[] {
     return Array.isArray(v) ? v : [];
 }
 
+// 名单外分类的留痕去重（按分类值每进程只 warn 一次）：normalize 每次读域都
+// 重跑，不去重会把同一条坏档刷成日志风暴；去重只影响告警量，不改放行行为。
+const warnedCategories = new Set<string>();
+
 /** 单条池条目规范化：id trim（旧档部分 id 尾部带 \r）、缺字段补缺省。 */
 export function normalizePoolEntry(raw: unknown): PoolEntry | null {
     if (typeof raw !== 'object' || raw === null) return null;
@@ -57,11 +63,19 @@ export function normalizePoolEntry(raw: unknown): PoolEntry | null {
     const id = asString(r.id).trim();
     // id 为空的条目无法定位，直接丢弃
     if (!id) return null;
+    const category = asString(r.category);
+    // 分类名单校验（单源 POOL_CATEGORIES）：名单外值不拦不洗、按原值放行——
+    // category 是分组轮询的桶键，未知值自成一桶仍可参与轮询，分桶行为不变；
+    // 类型面收紧到 PoolCategory，坏档容忍不因此消失（warn 只为留痕可排障）。
+    if (!(POOL_CATEGORIES as readonly string[]).includes(category) && !warnedCategories.has(category)) {
+        warnedCategories.add(category);
+        console.warn(`[tt-toolkit][choice] 池条目分类不在 POOL_CATEGORIES 名单内，按原值放行：${JSON.stringify(category)}`);
+    }
     return {
         id,
         type: asString(r.type),
         content: asString(r.content),
-        category: asString(r.category),
+        category: category as PoolCategory,
         pinned: asBool(r.pinned, false),
     };
 }
@@ -96,7 +110,7 @@ export function normalizePoolGenParams<T extends PoolGenParams>(gen: T): T {
     const overflow = gen.pinnedOverflow;
     return {
         ...gen,
-        oversamplePct: Number.isFinite(rawPct) ? Math.min(Math.max(Math.trunc(rawPct), 0), 500) : DEFAULT_POOL_GEN_PARAMS.oversamplePct,
+        oversamplePct: Number.isFinite(rawPct) ? Math.min(Math.max(Math.trunc(rawPct), OVERSAMPLE_LIMITS.min), OVERSAMPLE_LIMITS.max) : DEFAULT_POOL_GEN_PARAMS.oversamplePct,
         categoriesEnabled: asBool(gen.categoriesEnabled, DEFAULT_POOL_GEN_PARAMS.categoriesEnabled),
         pinnedOverflow: overflow === 'send_all' || overflow === 'trim' ? overflow : DEFAULT_POOL_GEN_PARAMS.pinnedOverflow,
         shuffleFinal: asBool(gen.shuffleFinal, DEFAULT_POOL_GEN_PARAMS.shuffleFinal),
