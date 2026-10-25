@@ -1,27 +1,16 @@
 /**
- * 统一端点模块入口：一次性迁移（boot 时调用）。
+ * 统一端点模块入口。
  *
- * initApis 顺序敏感：persona 域必须先经 migratePersonaDomain 从旧
- * localStorage 键成型（端点旧字段以过渡形状进域），migrateApiDomain 才能收到
- * persona 侧收编原料。两步各自幂等，二次启动零重写。
+ * initApis 只做域装载（pinia store 实例化）：服务商表与任务档案的读写全走
+ * storage 层懒归一（读侧补默认/坏值钳制），无启动期写面——历史上的
+ * 三步迁移机器（persona 域成型、统一端点收编、任务档案化）随 tt-slim
+ * 批 B 历史机器退役整体删除。
  */
 
-import { migratePersonaDomain } from '@/modules/persona/storage';
-import { migrateApiDomain, migrateTaskProfiles, type ApiMigrationReport, type TaskProfileMigrationReport } from './migration';
-import type { PersonaMigrationReport } from '@/modules/persona/storage';
+import { useApisStore } from './store';
 
-export interface ApisInitReport {
-    persona: PersonaMigrationReport;
-    apis: ApiMigrationReport;
-    taskProfiles: TaskProfileMigrationReport;
-}
-
-export function initApis(): ApisInitReport {
-    const persona = migratePersonaDomain();
-    const apis = migrateApiDomain();
-    // 任务档案迁移后置：收编通道落表的 model 字段（同启动携带）由它收编
-    const taskProfiles = migrateTaskProfiles();
-    return { persona, apis, taskProfiles };
+export function initApis(): void {
+    useApisStore();
 }
 
 export { useApisStore } from './store';

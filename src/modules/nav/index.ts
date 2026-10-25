@@ -11,9 +11,7 @@
  *     （只判 role==='assistant' 在普通聊天匹配 0 条——批3 回归根因）；
  *   - 斜杠执行器走宿主 executeSlashCommandsWithOptions，缺席时脚本内
  *     滚动作兜底；
- *   - qrActivated 持久化改走统一存储（storage.service 启动时迁移旧
- *     localStorage 键；遗留键 v1.0.0 起由 storage/legacy-wipe 首启一次性
- *     清理）；
+ *   - qrActivated 持久化改走统一存储（storage.service，全局域 nav 子域）；
  *   - 日志转发走 host/ttlog（createTtlog 工厂），target 仍为 "msgnav"，
  *     落盘 tauritavern.log.*；
  *   - 入口仍为 TT 原生快速回复栏：「tt-toolkit 导航」按钮集（三导航键

@@ -1,6 +1,6 @@
 /**
- * node 冒烟的 persona 机判部分：迁移幂等＋统一端点收编＋五任务
- * 提示词引擎＋api 客户端形状＋store 互斥＋人设写回渲染通道。
+ * node 冒烟的 persona 机判部分：全任务提示词引擎＋api 客户端形状＋
+ * store 互斥＋人设写回渲染通道。
  *
  * 设计：与 choice/smoke.ts 同构（check() 打 [persona-smoke] PASS/FAIL 行，
  * scripts/smoke.mjs 收口断言）。全部走合成数据——不依赖宿主在场数据，
@@ -18,16 +18,15 @@ import { event_types, extension_settings, getCurrentCharacter, getTavernContext,
 import { toolkitGlobalPort } from '@/global-port';
 import { getChat, getGlobal, setChat, setGlobal } from '@/storage/service';
 import type { ChatDomain } from '@/storage/service';
-import { migratePersonaDomain, readPersonaDomain, writePersonaDomain, LEGACY_KEYS, RETIRED_KEYS } from './storage';
+import { readPersonaDomain, writePersonaDomain } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves } from './yaml';
 import { analyzeCatalogDrift, isJudgeableLeaf, isSameLeafValue, literalDuplicateSignatures, normalizeLeafValue } from './redundancy';
 import { PROFILE_PLACEHOLDER_VALUES } from '@/prompts/defaults';
 import { normalizeApiBase, normalizeApiUrl, buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { useRunlogStore } from '@/modules/runlog/store';
-import { migrateApiDomain, migrateTaskProfiles } from '@/modules/apis/migration';
-import { deleteEndpoint, readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
-import { readTaskProfiles, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { readApiDomain, setProviderNoPrefill, writeApiDomain, writeJailbreakPreset } from '@/modules/apis/storage';
+import { writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { TASK_IDS } from '@/tasks';
 import { DEFAULTS_VERSION, TASK_KEYS, ensurePromptConfigs, usePromptsStore, assembleMessages, PERSONA_REVIEW_TASK_HEAD, PERSONA_CURATOR_TASK_HEAD, PERSONA_GEN_TASK_HEAD, type PersonaAssemblySources, type PromptConfig, type TaskKey } from '@/prompts';
@@ -136,252 +135,14 @@ function jsonEq(actual: unknown, expected: unknown): boolean {
     return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
-/** localStorage 存根访问（smoke.mjs 提供 Map 形态）。 */
-const ls = {
-    get(key: string): string | null {
-        return globalThis.localStorage?.getItem(key) ?? null;
-    },
-    set(key: string, value: string): void {
-        globalThis.localStorage?.setItem(key, value);
-    },
-    remove(key: string): void {
-        globalThis.localStorage?.removeItem(key);
-    },
-};
-
-/** 抹掉 persona 域（直接动存根单例，模拟「域缺席」首启动）。 */
-function wipeDomain(): void {
-    const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
-    if (tt) delete tt.persona;
-}
-
-/** 统一服务商表＋choice 域＋任务档案域整体抹掉（收编场景需要三域从零起步）。 */
-function wipeApiScenarioDomains(): void {
-    const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
-    if (tt) {
-        delete tt.apis;
-        delete tt.choice;
-        delete tt.persona;
-        delete tt.taskProfiles;
-        delete tt.activeEndpointId;
-    }
-}
-
-/** 全任务档案统一种子（全部指向同一服务商＋模型——迁移保真与 e2e 前置共用）。 */
+/**
+ * 全任务档案统一种子（全部指向同一服务商＋模型——端到端/复核/互斥分区的
+ * 档案前置）。
+ */
 function seedTaskProfiles(providerId: string, model: string): void {
     const profiles = {} as TaskProfilesDomain;
     for (const id of TASK_IDS) profiles[id] = { providerId, model };
     writeTaskProfiles(profiles);
-}
-
-function domainJson(): string {
-    return JSON.stringify(readPersonaDomain());
-}
-
-/** 原始域形状（未经 normalize 的存根直读——过渡字段断言必须走这里）。 */
-function rawPersona(): Record<string, unknown> {
-    const tt = extension_settings.ttToolkit as Record<string, unknown> | undefined;
-    return (tt?.persona ?? {}) as Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
-// 1) 迁移幂等（空 localStorage→写域；旧键→搬入；统一端点收编；二次零重写）
-// ---------------------------------------------------------------------------
-
-function runMigrationChecks(): void {
-    // 清场：域+全部旧键+退休键
-    wipeDomain();
-    for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
-    for (const key of RETIRED_KEYS) ls.remove(key);
-
-    // 1a. 空 localStorage → 写默认域
-    const first = migratePersonaDomain();
-    const defaults = readPersonaDomain();
-    check('迁移：空 localStorage 首启动写入默认域（只剩 userContext）',
-        !first.skipped && first.migratedKeys.length === 0
-        && !('uiState' in (defaults as unknown as Record<string, unknown>))
-        && defaults.userContext.request === '' && defaults.userContext.result === '',
-        `skipped=${first.skipped} migrated=${first.migratedKeys.join(',') || '无'}`);
-
-    // 1b. 预置 3 旧键 + 1 退休键 → 域缺席 → 搬入
-    const legacyState = {
-        localConfig: {
-            apiSource: 'independent',
-            indepApiUrl: 'https://relay.example.com/v1',
-            indepApiKey: 'sk-legacy',
-            indepApiModel: 'deepseek-chat',
-            indepTimeout: 600,
-            indepStream: false,
-            thinkingEffort: 'high',
-            // 注意：无 apiProfiles（触发收档迁移「默认配置 1」）
-        },
-    };
-    ls.set(LEGACY_KEYS.state, JSON.stringify(legacyState));
-    ls.set(LEGACY_KEYS.uiState, JSON.stringify({ generationPreset: 'Pure' }));
-    ls.set(LEGACY_KEYS.dataUser, JSON.stringify({ request: '写个侦探', result: '姓名: 阿德', hasResult: true, template: '旧字段应被丢弃' }));
-    ls.set('pw_template_v6_new_yaml', '旧退休键残留');
-    wipeDomain();
-
-    const second = migratePersonaDomain();
-    const migrated = readPersonaDomain();
-    check('迁移：2 旧键搬入（uiState 键退役不读——快照留存）',
-        second.migratedKeys.length === 2
-        && LEGACY_KEYS.state && second.migratedKeys.includes(LEGACY_KEYS.state)
-        && !second.migratedKeys.includes(LEGACY_KEYS.uiState)
-        && second.migratedKeys.includes(LEGACY_KEYS.dataUser),
-        `migrated=${second.migratedKeys.join(',')}`);
-    // 过渡透传已随 localConfig 域退役换形：端点旧字段不再进域，收编原料
-    // 由 apis/migration 直接读 legacy 快照键（此处断言域新形状＋快照原样
-    // 保留——「只读不写」纪律的读侧证明）
-    check('迁移：localConfig 键不进域（任务参数固化；端点旧字段走 legacy 快照）',
-        !('localConfig' in rawPersona())
-        && ls.get(LEGACY_KEYS.state)?.includes('indepApiUrl') === true);
-    check('迁移：userContext 形状正确＋uiState 键不进域（任务级预设选择退役）',
-        !('uiState' in (migrated as unknown as Record<string, unknown>))
-        && migrated.userContext.request === '写个侦探' && migrated.userContext.result === '姓名: 阿德'
-        && !('template' in (migrated.userContext as unknown as Record<string, unknown>))
-        && !('hasResult' in (migrated.userContext as unknown as Record<string, unknown>))
-        && ls.get(LEGACY_KEYS.uiState) !== null);
-    check('迁移：域形状收缩（wiSelection/pinnedBooks/extraBooks 不再是域字段）',
-        !('wiSelection' in (migrated as unknown as Record<string, unknown>))
-        && !('pinnedBooks' in (migrated as unknown as Record<string, unknown>)));
-    // v1.1.0 存量域（含世界书勾选/钉选字段＋v1.3/v1.4 的 localConfig 旧键）
-    // 导入：normalize 丢弃退役字段，其余字段逐项保真——判据「迁移数据未受损」
-    // 的读侧证明
-    wipeDomain();
-    (extension_settings.ttToolkit as Record<string, unknown>).persona = {
-        localConfig: { stream: true, thinkingEffort: 'off', timeoutSec: 300, endpointId: 'v1.3旧引用', extraBooks: ['v1.1.0追加书'] },
-        wiSelection: { charA: { '旧书': ['1', '2'] } },
-        pinnedBooks: ['v1.1.0钉选书'],
-        uiState: { generationPreset: 'pure' },
-        userContext: { request: 'v1.1.0现场', result: '姓名: 旧人设' },
-    };
-    const upgraded = readPersonaDomain();
-    check('迁移：v1.1.0 存量域导入（退役字段丢弃、其余字段逐项相等）',
-        !('uiState' in (upgraded as unknown as Record<string, unknown>))
-        && upgraded.userContext.request === 'v1.1.0现场' && upgraded.userContext.result === '姓名: 旧人设'
-        && !('wiSelection' in (upgraded as unknown as Record<string, unknown>))
-        && !('pinnedBooks' in (upgraded as unknown as Record<string, unknown>))
-        && !('localConfig' in (upgraded as unknown as Record<string, unknown>)));
-    check('迁移：退休键 removeItem 清理（pw_template_v6_new_yaml）',
-        second.retiredKeysCleaned.includes('pw_template_v6_new_yaml') && ls.get('pw_template_v6_new_yaml') === null);
-    check('迁移：旧键保留作 legacy 快照（防回滚丢增量）',
-        ls.get(LEGACY_KEYS.state) !== null && ls.get(LEGACY_KEYS.dataUser) !== null);
-
-    // 1e. 统一端点收编场景（choice 旧 apis[]＋persona 配置档撞 id/去重）
-    // —— 三域全部从零起步，模拟旧版存档升级到统一端点表的一次性迁移
-    for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
-    wipeApiScenarioDomains();
-    const tt = extension_settings.ttToolkit as Record<string, unknown>;
-    tt.choice = {
-        apis: [
-            { id: 'c1', name: 'choice端点一', apiurl: 'https://choice.example.com/v1', key: 'sk-c1', model: 'm-choice', stream: false, temperature: 0.3, max_tokens: 777, outputContract: 'json_schema' },
-            { id: 'c2', name: 'choice端点二', apiurl: 'https://choice-two.example.com/v1', key: 'sk-c2', model: 'm-choice-2', stream: true, temperature: 0.9, max_tokens: 1024 },
-        ],
-        activeApiId: 'c2',
-        gen: { count: 5, contextRounds: 2, minChars: 5, maxChars: 50, clickBehavior: 'append', debugForceRaw: false },
-        pool: { masterPool: [] },
-    };
-    // 预置一条已经学到能力的统一表条目（回滚旧版再升级的现场：收编会逐字段
-    // 重建整表，写口又绕开读侧归一——漏带 noPrefill ＝ 每跑一次抹回 false）。
-    // 直写原始域（writeApiDomain 会按读侧口径归一，测不到写口真实行为）。
-    tt.apis = [
-        { id: 'pre-learned', name: '预置服务商', url: 'https://pre.example.com/v1', key: 'sk-pre', models: ['m-pre'], model: 'm-pre', noPrefill: true },
-    ];
-    ls.set(LEGACY_KEYS.state, JSON.stringify({
-        localConfig: {
-            apiSource: 'independent',
-            indepApiUrl: 'https://custom.example.com/v1',
-            indepApiKey: 'sk-custom',
-            indepApiModel: 'gpt-custom',
-            indepTimeout: 90,
-            indepStream: true,
-            thinkingEffort: 'medium',
-            apiProfiles: [
-                // id 'c2' 与 choice 侧撞车且端点不同 → 收编时重分配新 id
-                { id: 'c2', name: '撞车档', url: 'https://persona.example.net/v1', key: 'sk-p', model: 'm-persona' },
-                // url+model 与 choice c1 相同 → 去重并入（id 映射到 c1）
-                { id: 'p-dup', name: '重复档', url: 'https://choice.example.com/v1', key: 'sk-p2', model: 'm-choice' },
-            ],
-            activeApiProfileId: 'p-dup',
-        },
-    }));
-    migratePersonaDomain();
-    const report = migrateApiDomain();
-    const tpReport = migrateTaskProfiles();
-    const endpoints = readApiDomain();
-    const c1 = endpoints.find(e => e.id === 'c1');
-    const c2 = endpoints.find(e => e.id === 'c2');
-    const remapped = endpoints.find(e => e.name === '撞车档');
-    check('收编：choice 旧 apis 并入统一表（id 保留、字段零丢失）',
-        !report.skipped && report.collectedFrom.includes('choice') && report.endpointCount === 4
-        && !!c1 && c1.name === 'choice端点一' && c1.url === 'https://choice.example.com/v1' && c1.key === 'sk-c1'
-        && !!c2 && c2.url === 'https://choice-two.example.com/v1' && c2.key === 'sk-c2');
-    check('收编：persona 侧撞 id 重分配＋同端点去重（idRemaps/mergedDuplicates）',
-        report.mergedDuplicates === 1
-        && report.idRemaps.length === 1 && report.idRemaps[0].from === 'c2' && typeof report.idRemaps[0].to === 'string'
-        && !!remapped && remapped.id !== 'c2',
-        `remaps=${JSON.stringify(report.idRemaps)} merged=${report.mergedDuplicates}`);
-    const rawChoice = (tt.choice ?? {}) as Record<string, unknown>;
-    check('收编：choice 域 v2 重写（产物 {gen,pool} 无 task 键）',
-        !('task' in rawChoice)
-        && ((rawChoice.gen ?? {}) as Record<string, unknown>).count === 5
-        && Array.isArray(((rawChoice.pool ?? {}) as Record<string, unknown>).masterPool)
-        && !('apis' in rawChoice) && !('activeApiId' in rawChoice),
-        `choice=${JSON.stringify(rawChoice)}`);
-    // 任务档案化迁移（v1.9 通道二）：旧活动键 c2 命中条目 → 任务档案收编
-    // {c2, m-choice-2}；apis 条目 model 字段删除；activeEndpointId 键退役
-    const ttRaw = extension_settings.ttToolkit as Record<string, unknown>;
-    const rawApisAfter = Array.isArray(ttRaw.apis) ? (ttRaw.apis as Array<Record<string, unknown>>) : [];
-    const profilesAfter = (ttRaw.taskProfiles ?? {}) as Record<string, { providerId?: unknown; model?: unknown }>;
-    check('任务档案迁移：全部任务行初始化为旧活动端点 {c2, m-choice-2}',
-        !tpReport.skipped && tpReport.initializedFrom === 'activeEndpoint' && tpReport.providerized >= 3
-        && TASK_IDS.every(id => profilesAfter[id]?.providerId === 'c2' && profilesAfter[id]?.model === 'm-choice-2'),
-        `report=${JSON.stringify(tpReport)} profiles=${JSON.stringify(profilesAfter)}`);
-    check('任务档案迁移：apis 条目 model 字段收编后删除、activeEndpointId 键不在',
-        rawApisAfter.length === 4 && rawApisAfter.every(e => !('model' in e))
-        && !('activeEndpointId' in ttRaw));
-    check('收编：既有统一表条目的端点能力记忆随收编保留（不回退成 false）',
-        readApiDomain().find(e => e.id === 'pre-learned')?.noPrefill === true,
-        `entry=${JSON.stringify(readApiDomain().find(e => e.id === 'pre-learned'))}`);
-    const afterCollect = readPersonaDomain();
-    check('收编：persona 域 v2 重写（整键清洗后无 localConfig/uiState 键；选中不参与提升——choice 优先）',
-        !('localConfig' in (afterCollect as unknown as Record<string, unknown>))
-        && !('localConfig' in rawPersona())
-        && !('uiState' in (afterCollect as unknown as Record<string, unknown>)));
-
-    // 1f. 二次启动零重写（统一表＋档案域在场 → 三通道全部 skip，逐字节不变）
-    const apisBefore = JSON.stringify(tt.apis);
-    const choiceBefore = JSON.stringify(tt.choice);
-    const personaBefore = domainJson();
-    const personaSecond = migratePersonaDomain();
-    const apisSecond = migrateApiDomain();
-    const tpSecond = migrateTaskProfiles();
-    check('收编：二次启动零重写（三步迁移均 skip、三域逐字节不变）',
-        personaSecond.skipped && apisSecond.skipped && tpSecond.skipped
-        && JSON.stringify(tt.apis) === apisBefore
-        && JSON.stringify(tt.choice) === choiceBefore
-        && domainJson() === personaBefore);
-
-    // 1h. 删被档案引用的服务商 → 引用任务行联动重置（回未配置态）
-    writeApiDomain([{ id: 'smoke-del', name: '待删服务商', url: 'https://del.example.com/v1', key: 'k', models: ['m-del'], noPrefill: false }]);
-    seedTaskProfiles('smoke-del', 'm-del');
-    deleteEndpoint('smoke-del');
-    const profilesAfterDelete = readTaskProfiles();
-    check('服务商删除：被档案引用时引用任务行联动重置（回未配置态、条目出表）',
-        TASK_IDS.every(id => profilesAfterDelete[id].providerId === '' && profilesAfterDelete[id].model === '')
-        && readApiDomain().every(e => e.id !== 'smoke-del'));
-
-    // 1g. 退休键清理无条件（域在场也清）——再放回验证
-    ls.set('pw_custom_themes_v1', '残留');
-    const fourth = migratePersonaDomain();
-    check('迁移：域在场时退休键清理仍执行（pw_custom_themes_v1）',
-        fourth.skipped && fourth.retiredKeysCleaned.includes('pw_custom_themes_v1') && ls.get('pw_custom_themes_v1') === null);
-
-    // 清场还原默认域（后续分区读域不依赖本段合成数据）
-    for (const key of Object.values(LEGACY_KEYS)) ls.remove(key);
-    wipeApiScenarioDomains();
-    migratePersonaDomain();
 }
 
 // ---------------------------------------------------------------------------
@@ -3116,8 +2877,7 @@ function runShellHookChecks(): void {
 
 /** 冒烟入口（main.ts node 分支调用）。 */
 export async function runPersonaSmoke(): Promise<void> {
-    console.info('=== persona 迁移/统一端点收编/全任务引擎/纯函数/api 形状/端到端/复核回合＋目录漂移告警/互斥/写回渲染机判 ===');
-    runMigrationChecks();
+    console.info('=== persona 全任务引擎/纯函数/api 形状/端到端/复核回合＋目录漂移告警/互斥/写回渲染机判 ===');
     runPromptsChecks();
     runPersonaAssemblyChecks();
     await runPersonaAssemblyDumpChecks();
@@ -3136,5 +2896,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：迁移幂等（空启动写默认域/2 旧键搬入＋localConfig 退役快照保留/uiState 键退役不读＋域形状收缩＋存量域退役字段丢弃含 v1.3 endpointId 旧键/退休键清理/legacy 快照保留）、统一端点收编（choice 零丢失/persona 撞 id 重分配＋同端点去重/两域 v2 重写＋全局活动键提升 choice 优先/删活动端点联动清空/收编不抹端点能力记忆/二次启动零重写）、全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（全局键选端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十五断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份重输出落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶改写·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写后档案逐字在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了有重复却零改动即回滚/新增完全同值组拒·改写撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝191 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝192（声明叶 191＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
+    console.info('[persona-smoke] OK：全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（统一端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十五断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份重输出落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶改写·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写后档案逐字在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了有重复却零改动即回滚/新增完全同值组拒·改写撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝191 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝192（声明叶 191＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
 }

@@ -7,13 +7,11 @@
  * 存根），globalThis.__TT_SMOKE_STUBS__ 提供可变单例与函数桩；随后
  * import dist/index.js——其入口为唯一环境分支点，无 document 走冒烟
  * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
- * 另含：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
- * 预种 5 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（子进程整图
- * 重求值同一份产物，验标记短路 no-op 不炸——进程内函数重入与分块
- * 相斥的根因见文末二次启动段）。boot1 在本进程等生产侧 boot 收尾标记
- * `[node-smoke] BOOT DONE boot=<id>` 后取断言（等不到即硬失败，不靠
- * 正文行猜「跑完了没」）；boot2 断言＝子进程末态直查＋父进程对子进程
- * 输出按同一份期望常数全量机判。
+ * 另含 boot2 二次启动（子进程整图重求值同一份产物，验二次装载 no-op
+ * 不炸——进程内函数重入与分块相斥的根因见文末二次启动段）。boot1 在
+ * 本进程等生产侧 boot 收尾标记 `[node-smoke] BOOT DONE boot=<id>` 后取
+ * 断言（等不到即硬失败，不靠正文行猜「跑完了没」）；boot2 断言＝父进程
+ * 对子进程输出按同一份期望常数全量机判。
  * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
  *
  * 边界：node 冒烟验证「产物可加载、导入链可解析、storage 逻辑正确、
@@ -36,23 +34,10 @@ if (!existsSync(fileURLToPath(DIST_ENTRY))) {
 }
 
 // ---------------------------------------------------------------------------
-// localStorage 存根：node 无 localStorage。预种全部旧遗留键
-// （迁移源键，带内容）——legacy-wipe 启动链路供给（boot 迁移先消费、
-// boot 清理后删键）。persona 侧迁移键为 3 个（世界书勾选/钉选域已
-// 退役）；nav 侧 tt_msg_nav_auto_top 键已随自动回顶开关退役、不再迁移，
-// 仅作 wipe 删键计数供给。键名与 src/storage/legacy-wipe.ts
-// 的常量表同源；此处字面量属测试夹具（机判断言在 dist 侧用常量做）。
-// 种子形状含历史字段（如 pw_data_user_v1 的 hasResult）＝v1.0.0 时代的
-// 真实输入形状，normalize 丢弃面验证所需，勿按现域形状「修正」。
+// localStorage 存根：node 无 localStorage，空表起步——历史遗留键的
+// 迁移/一次性清理机器已随 tt-slim 批 B 退役，冒烟不再预种旧键。
 // ---------------------------------------------------------------------------
-const LEGACY_SEEDS = new Map([
-    ['tt_msg_nav_auto_top', '0'],
-    ['tt_nav_qr_activated', '1'],
-    ['pw_state_v20', JSON.stringify({ localConfig: { stream: false, timeoutSec: 600 } })],
-    ['pw_ui_state_v4_preset', JSON.stringify({ generationPreset: 'pure' })],
-    ['pw_data_user_v1', JSON.stringify({ request: '启动链路种子', result: '启动链路种子·结果', hasResult: true })],
-]);
-const localStorageData = new Map(LEGACY_SEEDS);
+const localStorageData = new Map();
 globalThis.localStorage = {
     getItem: key => (localStorageData.has(key) ? localStorageData.get(key) : null),
     setItem: (key, value) => localStorageData.set(key, String(value)),
@@ -352,12 +337,6 @@ globalThis.__TT_SMOKE_STUBS__ = {
     },
 };
 
-if (BOOT2_CHILD) {
-    // 子进程 boot2 前置态＝父进程 boot1 的末态：一次性标记已置位（遗留键
-    // 已由顶层种子表重种）——boot 清理须短路，二次启动签名机判依赖它
-    globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit.legacyWipeDone = true;
-}
-
 // ---------------------------------------------------------------------------
 // 驱动 dist：main.ts 检测无 document 走冒烟分支并打印全部输出。
 // 收集 stdout 行做机判断言（roundtrip PASS、nav __TT_TOOLKIT__.nav 在场）。
@@ -435,8 +414,8 @@ async function waitForBootDone(from, bootId) {
 // ---------------------------------------------------------------------------
 // boot2 子进程分支（须位于本处——waitForBootDone 与其 const 依赖已定义、
 // boot1 断言面尚未开跑；放在文末会让子进程在空数据上把整段 boot1 断言
-// 白跑一遍）。子进程的全部工作在此收口：装载裸入口、等收尾标记、末态
-// 直查、以退出码交裁决；process.exit 终止，下方父进程代码不在子进程执行。
+// 白跑一遍）。子进程的全部工作在此收口：装载裸入口、等收尾标记、以退出
+// 码交裁决；process.exit 终止，下方父进程代码不在子进程执行。
 // 设计全貌（进程内重入与分块相斥的根因、父进程机判面）见文末二次启动段。
 // ---------------------------------------------------------------------------
 if (BOOT2_CHILD) {
@@ -451,16 +430,10 @@ if (BOOT2_CHILD) {
         process.exit(1);
     }
     await waitForBootDone(0, 'boot1');
-    // 末态直查（父进程看不见子进程存根）：一次性标记置位＋遗留键全清
-    const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
-    const leftoverChildKeys = [...LEGACY_SEEDS.keys()].filter(k => localStorageData.has(k));
-    if (ttDomainEnd?.legacyWipeDone !== true || leftoverChildKeys.length > 0) {
-        console.error(`[smoke] boot2 FAIL: 末态异常（legacyWipeDone=${String(ttDomainEnd?.legacyWipeDone)}，遗留键 ${leftoverChildKeys.join('、') || '无'}）`);
-        process.exit(1);
-    }
-    console.log('[smoke-boot2] ENDSTATE ok（一次性标记置位＋遗留键全清）');
-    // exit 前冲刷 stdout：管道异步写（非 Windows 平台）下 ENDSTATE 行可能
-    // 被 exit 截断——父进程判据认这行，截断＝假红（安全侧，但没必要留）
+    // 全链跑完且收尾标记在场即交 0：二次启动的机判（FAIL 扫描＋计数锁）
+    // 全在父进程（期望常数单源），子进程只跑不判。
+    // exit 前冲刷 stdout：父进程的计数锁吃子进程输出全文，管道异步写下
+    // exit 截断末尾行＝计数假红（安全侧，但没必要留）
     await new Promise(resolve => process.stdout.write('', resolve));
     process.exit(0);
 }
@@ -547,13 +520,14 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 缺席默认档 1＋normalize 钳制/剔除 3）
 // ＝ v1.14.1 删权重死代码：E-S 加权分布/safeWeight/无停用条目 −3，等权均摊断言 +1
 // ＝ 模板重制＋退役桥清理：默认模板版本断言 1／见分晓拍与写法对照段 2／慢热闸 1／
-// 分段标签白名单 1／生成参数按值迁移 2 ＝ +7，退役记忆桥的合成源与缺席 trace −2。
+// 分段标签白名单 1 ＝ +5，退役记忆桥的合成源与缺席 trace −2。
 // ＝ aim 字段：模板两面 2（示例四条各带 aim、输出契约声明键而规则段不提）
 // ＋解析 3（主契约提取／缺键不带且回退路径同形／null 与空白归一为缺席）
 // ＋存档 3（无 aim 旧档读回仍缺席／aim 往返／aim 在场非字符串判坏档）
 // ＋发送面 1（applyOption 三分支的发送内容不含 aim）＝ +9。
-// ＝ 终审修复：迁移换代标记用例 2（迁移随读通道落盘／标记在场守旧值）
-// ＋模板段标签引用不悬空 1 ＝ +3。
+// ＝ 终审修复：模板段标签引用不悬空 1 ＝ +1。
+// ＝ tt-slim 批 B 退役历史机器：生成参数换代机判 4 条（按值换新/随读通道
+// 落盘/自设原样/标记在场守旧值）随 genDefaultsV 换代闸删除 ＝ −4。
 // ＝ 超时原语与文案单点：超时上限延时机判 1／到点按失败可见报出且不误报
 // 「已取消」1／外部取消仍归「已取消」1／取消与到点竞态仍按超时报 1／
 // 未配置任务模型文案带任务中文名 1 ＝ +5。
@@ -563,7 +537,7 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ＝ 池重制与直球可辨性：资产锁改值（130 条/9 分类集合全等）随数据跟随不计，
 // 新增锁 5——题材词表零命中 1／规则 7 直球位 1／输出契约标题与 aim 忠实性 1／
 // 规则 6 新元素边界 1／few_shot 直球示例换血 1 ＝ +5。
-const CHOICE_PASS_EXPECTED = 169;
+const CHOICE_PASS_EXPECTED = 165;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -621,14 +595,10 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 }
 
 // ---------------------------------------------------------------------------
-// persona 机判：迁移/纯函数/api 形状/互斥（[persona-smoke] 行收口）
+// persona 机判：纯函数/api 形状/互斥（[persona-smoke] 行收口）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同 CHOICE_PASS_EXPECTED 纪律：丢断言必须红）。
-// 期望构成＝迁移 14（空启动/3 键搬入/localConfig 退役快照保留/形状/退休键/
-// legacy 快照/二次零重写/域在场仍清/域形状收缩/存量域退役字段丢弃含旧
-// endpointId＋localConfig 旧键，收编 4 条：统一表形状/去重＋id 重映射/
-// choice 域 v2 重写＋全局活动键提升/persona 域 v2 清洗）＋端点删除联动清空
-// 1＋prompts 5（全任务键齐备含 choice 17 模块红线/旧数组整键重建默认＋warn/
+// 期望构成＝prompts 5（全任务键齐备含 choice 17 模块红线/旧数组整键重建默认＋warn/
 // 旧默认快照版本化重建按 module id 在场且不多余/curator 与 persona_gen
 // 两任务默认占位符）＋persona 组装
 // 7（curator 管线/persona_gen 管线占位符全填＋档案段正文零跨段引用「原则 N·要求
@@ -713,7 +683,10 @@ if (promptTaskKeys.length !== 3 || promptChoiceModules !== 17 || !personaKeyOk) 
 // 到点报人话超时且非取消/外部取消归 PersonaRunCancelled（用户侧提示「已取消生成」）/
 // 取消先到而到点随后仍按超时报——choice 那五条只测得到直连路径，测不到这里的
 // 嵌套面）。
-const PERSONA_PASS_EXPECTED = 170;
+// ＝ tt-slim 批 B 退役历史机器：迁移幂等＋统一端点收编＋退休键清理 17 条
+// 与端点删除联动清空 1 条随三步迁移机器删除 ＝ −18（联动重置行为由 apis
+// 套件「删服务商联动重置（boot2 幂等前提）」同款断言承接，覆盖不丢）。
+const PERSONA_PASS_EXPECTED = 152;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -739,30 +712,6 @@ const SEGMENT_SYMBOL_MAX = [
 const overusedSymbols = SEGMENT_SYMBOL_MAX.filter(([symbol, max]) => (defaultsBody.split(symbol).length - 1) > max);
 if (overusedSymbols.length > 0) {
     failures.push(`目录派生段只有一份：defaults.ts 里 ${overusedSymbols.map(([s, m]) => `${s} 出现 ${defaultsBody.split(s).length - 1} 次（上限 ${m}）`).join('、')}——同段被手抄了第二份`);
-}
-
-// ---------------------------------------------------------------------------
-// legacy-wipe 一次性清理机判 + 总结域退役清理（[wipe-smoke] 行收口；
-// wipe 在 persona smoke 前跑——见 src/main.ts runNodeSmoke 接线）
-// ---------------------------------------------------------------------------
-// PASS 行数精确断言（同上纪律）。run1＝一次启动签名共 10 条：boot 5（键
-// 全删/标记置位/persona userContext 种子存活/localConfig 种子存活（异于
-// 缺省 stream/timeout——世界书钉选断言随域退役改判别式）/nav qrActivated
-// 激活态存活——迁移先于清理的完整链路证明）＋场景A 4（重置重种后清理删 5
-// 键＋置标＋persona/nav 域逐字节不变×2）＋场景B 1（标记短路键存活）。
-// ＋退役清理 4（两域 summary 键种入后删除到缺席×2／二跑幂等不删不炸／
-// 域对象冻住致 delete 抛错时只 warn 不中断启动）。boot2 同口径＝二次启动
-// 签名 1＋场景A 4＋场景B 1＋退役 4。
-const WIPE_PASS_EXPECTED_RUN1 = 14;
-const wipePassLines = boot1Lines.filter(l => l.startsWith('[wipe-smoke] PASS'));
-const wipeFailLines = boot1Lines.filter(MODULE_FAIL_LINE('wipe'));
-if (wipePassLines.length !== WIPE_PASS_EXPECTED_RUN1 || wipeFailLines.length > 0) {
-    failures.push(`wipe 机判异常：期望恰好 ${WIPE_PASS_EXPECTED_RUN1} 条 PASS，实际 ${wipePassLines.length} 条 / FAIL ${wipeFailLines.length} 条${wipeFailLines.length ? `（首条：${wipeFailLines[0]}）` : ''}`);
-}
-// boot 位清理确实执行（非跳过）：首个 [legacy-wipe] 行＝删除 5/5 键
-const firstWipeLog = boot1Lines.find(l => l.startsWith('[legacy-wipe]'));
-if (!firstWipeLog || !firstWipeLog.includes('删除 5/5')) {
-    failures.push(`boot 位一次性清理未执行或删键数异常（首行：${firstWipeLog ?? '无'}）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -799,7 +748,7 @@ if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateR
 // 文件漏回入口静态图时其余判据照绿，形状闸就此失明；BOOT DONE 标记在全部
 // dist/*.js 中恰一处＝冒烟面收进唯一 chunk（与入口零标记互为镜像判据）。
 // ---------------------------------------------------------------------------
-const SMOKE_MARKERS = ['[node-smoke] BOOT DONE', '[choice-smoke]', '[persona-smoke]', '[wipe-smoke]', '[apis-smoke]'];
+const SMOKE_MARKERS = ['[node-smoke] BOOT DONE', '[choice-smoke]', '[persona-smoke]', '[apis-smoke]'];
 for (const marker of SMOKE_MARKERS) {
     if (distSource.includes(marker)) {
         failures.push(`dist/index.js 含冒烟标记「${marker}」——冒烟面被静态拉回入口加载图，分块失效`);
@@ -822,13 +771,11 @@ if (bootDoneFiles.length !== 1) {
 // apis 夹具自持无事件订阅故干净，恰为根因反证）。boot2 改子进程整图重求
 // 值：全新 V8 实例加载同一份产物（语义＝分块前的 boot2），产物形态零改动。
 //
-// 子进程面（SMOKE_BOOT2_CHILD=1 重入本脚本）：存根自顶层装配（种子表＋
-// 预置一次性标记＝父进程 boot1 末态，等价旧进程内 boot2 前的重种＋监听表
-// 清空），装载裸入口（chunk 回引入口的相对路径与 query 相斥，见块内注）、
-// 等收尾标记、直查末态（legacyWipeDone 置位＋遗留键全清——只有子进程看得
-// 见自己的存根态），末态机判就地收口后以退出码交裁决。
+// 子进程面（SMOKE_BOOT2_CHILD=1 重入本脚本）：存根自顶层装配（空种子表，
+// 历史机器退役后无预置态），装载裸入口（chunk 回引入口的相对路径与 query
+// 相斥，见块内注）、等收尾标记，全链跑完即以退出码交裁决。
 // 父进程面：spawn 自身、原样转发子进程输出（PASS 流给人看），用同一份期
-// 望常数对捕获输出做全量机判——fail 标签/计数锁/清理短路首行/末态标记行。
+// 望常数对捕获输出做全量机判——fail 标签/计数锁。
 // 行序以子进程 stdout 内的输出序为准（同流保序）；stdout/stderr 两流交错
 // 不影响本段判据（判据全部按行前缀与行计数收口，无跨流顺序依赖）。
 // ---------------------------------------------------------------------------
@@ -860,18 +807,10 @@ const seg2 = childLines;
 if (childExit !== 0) {
     failures.push(`boot2 子进程异常退出（code=${childExit}）——装载失败或末态红，见上方 boot2 输出`);
 }
-const seg2FailTags = ['choice', 'persona', 'wipe', 'apis']
+const seg2FailTags = ['choice', 'persona', 'apis']
     .filter(tag => seg2.filter(MODULE_FAIL_LINE(tag)).length > 0);
 if (seg2FailTags.length > 0) {
     failures.push(`boot2：模块机判出现 FAIL（${seg2FailTags.map(tag => `${tag} ${seg2.filter(MODULE_FAIL_LINE(tag)).length} 条`).join('、')}）`);
-}
-const wipe2PassCount = seg2.filter(l => l.startsWith('[wipe-smoke] PASS')).length;
-if (wipe2PassCount !== 10) {
-    failures.push(`boot2 wipe 机判异常：期望 10 条 PASS（二次启动签名 1＋场景A 4＋场景B 1＋退役清理 4），实际 ${wipe2PassCount} 条`);
-}
-const firstWipe2Log = seg2.find(l => l.startsWith('[legacy-wipe]'));
-if (!firstWipe2Log || !firstWipe2Log.includes('跳过')) {
-    failures.push(`boot2 boot 位清理未短路（首行：${firstWipe2Log ?? '无'}）`);
 }
 const seg2ChoicePass = seg2.filter(l => l.startsWith('[choice-smoke] PASS')).length;
 const seg2PersonaPass = seg2.filter(l => l.startsWith('[persona-smoke] PASS')).length;
@@ -879,13 +818,10 @@ const seg2ApisPass = seg2.filter(l => l.startsWith('[apis-smoke] PASS')).length;
 if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2ApisPass !== APIS_PASS_EXPECTED) {
     failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
 }
-if (!seg2.some(l => l.startsWith('[smoke-boot2] ENDSTATE ok'))) {
-    failures.push('boot2 子进程未报末态 ok（legacyWipeDone 置位＋遗留键全清）');
-}
 
 if (failures.length > 0) {
     for (const f of failures) console.error(`[smoke] FAIL: ${f}`);
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS＋末态标记置位与遗留键全清）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

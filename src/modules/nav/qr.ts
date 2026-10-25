@@ -99,18 +99,6 @@ export async function ensureNavQrSet(): Promise<void> {
         if (!api.getSetByName(QR_SET_NAME)) {
             await api.createSet(QR_SET_NAME);
         }
-        // 历史版本建过的「自动回顶」QR 键清理（该开关命令已随自动回顶
-        // 固化恒开退役，label 是历史键名非现役命令）：一次性标记短路
-        // （legacyQrCleaned），不做每启动探测——deleteQuickReply 对缺席键
-        // 抛错，先探测后删
-        if (!getNavState().legacyQrCleaned) {
-            const LEGACY_AUTO_TOP_QR_LABEL = '自动回顶';
-            if (api.getQrByLabel(QR_SET_NAME, LEGACY_AUTO_TOP_QR_LABEL)) {
-                api.deleteQuickReply(QR_SET_NAME, LEGACY_AUTO_TOP_QR_LABEL);
-                ttlog.info(`legacy QR "${LEGACY_AUTO_TOP_QR_LABEL}" removed`);
-            }
-            setNavState({ legacyQrCleaned: true });
-        }
         for (const action of NAV_ACTIONS) {
             const qr = api.getQrByLabel(QR_SET_NAME, action.label);
             if (!qr) {

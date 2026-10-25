@@ -16,8 +16,7 @@ import type { PoolGenParams } from './pool/types';
 import { DEFAULT_POOL_GEN_PARAMS, normalizePoolData, normalizePoolGenParams, type PoolDomainData } from './pool/normalize';
 
 /**
- * choice 域键（extension_settings.ttToolkit 下；migration 侧引用此常量，
- * 字面量单一事实源）。
+ * choice 域键（extension_settings.ttToolkit 下；字面量单一事实源）。
  */
 export const GLOBAL_CHOICE_KEY = 'choice';
 
@@ -45,11 +44,6 @@ export interface ChoiceDomain {
     gen: ChoiceGenParams;
     /** 条目池数据（两层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
-    /**
-     * gen 产出参数默认值的换代表记：缺席＝写于旧默认（10/60）时代的
-     * 存量档。只做一次性迁移闸用（见 readDomain），别处不消费。
-     */
-    genDefaultsV?: 1;
 }
 
 /** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
@@ -68,17 +62,6 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
     debugForceRaw: false,
     ...DEFAULT_POOL_GEN_PARAMS,
 };
-
-/** gen 默认值换代版本（1＝30/120 时代）——标记缺席的存量档才做按值迁移。 */
-const GEN_DEFAULTS_V = 1;
-
-/**
- * 上一版（10/60 时代）的三个产出参数默认值。迁移按值判（三值全等旧默认
- * ＝存量旧默认档）且只对标记缺席的档做一次：按值判本身区分不了「旧默认
- * 存量」与「用户显式写旧值」，换代标记把两个时代分开——标记落盘后用户
- * 再写回 4/10/60 也原样守得住。
- */
-const LEGACY_DEFAULT_GEN_PARAMS = { count: 4, minChars: 10, maxChars: 60 } as const;
 
 /**
  * gen 域逐字段重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
@@ -102,28 +85,12 @@ function readDomain(): ChoiceDomain {
     // 读回的是存档原值：类型是 ChoiceDomain，字段可缺可坏——缺省合并与逐
     // 字段重建在下面做（normalize 面吃不可信形状，收紧只在 API 面）。
     const raw: Partial<ChoiceDomain> | undefined = getGlobal(GLOBAL_CHOICE_KEY);
-    let genRaw: Partial<ChoiceGenParams> = raw?.gen ?? {};
-    if (raw !== undefined && raw.genDefaultsV !== GEN_DEFAULTS_V) {
-        // 存量档一次性换代（回写形态对齐 prompt 域整键重建）：三值全等
-        // 旧默认＝旧默认档换新默认，其余＝用户自设原样；标记随本读通道
-        // 落盘，此后用户显式写回旧值不再被迁移吞掉
-        const legacyShaped = genRaw.count === LEGACY_DEFAULT_GEN_PARAMS.count
-            && genRaw.minChars === LEGACY_DEFAULT_GEN_PARAMS.minChars
-            && genRaw.maxChars === LEGACY_DEFAULT_GEN_PARAMS.maxChars;
-        if (legacyShaped) {
-            genRaw = { ...genRaw, minChars: DEFAULT_GEN_PARAMS.minChars, maxChars: DEFAULT_GEN_PARAMS.maxChars };
-        }
-        // 迁移回写刻意落「只换了三值」的未归一 gen（其余历史字段原样保留，
-        // 归一仍在读侧做）——域登记门管键不管值形状，此处显式断言写出形状。
-        setGlobal(GLOBAL_CHOICE_KEY, { ...raw, gen: genRaw, genDefaultsV: GEN_DEFAULTS_V } as unknown as ChoiceDomain);
-    }
     return {
         // 缺省合并＋逐字段重建＋池参数值域钳制（raw 里的历史值不可信：
         // oversample 越界/overflow 拼错都钳回合法域，旧存档无字段不崩）；
         // 旧档 task 键等未知字段随字段清单纪律丢弃（任务参数固化拍板）
-        gen: normalizeGenParams(genRaw),
+        gen: normalizeGenParams(raw?.gen ?? {}),
         pool: normalizePoolData(raw?.pool),
-        genDefaultsV: GEN_DEFAULTS_V,
     };
 }
 

@@ -57,7 +57,7 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 新键义务：域键常量与域类型都在**归属模块**定义（字面量仅此一份），并在该模块用 `declare module '@/storage/service'` 声明合并登记进 `GlobalDomain`／`ChatDomain`（键与值类型一并登记）——漏登记或形状写错 vue-tsc 即报错（编译期登记门）。登记放在归属模块是为了让服务层不反向 import 功能模块（那会让 storage↔modules 成环）；内联在 service.ts 的例外只有两种：类型定义就在该文件的 nav，以及定义在零依赖叶子模块的 storyDirection。读面仍须经归属模块的 normalize 才可安全展开——类型收紧只在 API 面，坏档容忍不因此消失。排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
 
-旧扩展自身域（`extension_settings.choice` 等）只读迁移，迁移完成后不回写。localStorage 旧键已由 `src/storage/legacy-wipe.ts` 在 v1.0.0 首启一次性清理（persona 3 键 + nav 2 键），勿再引用——该段的 persona 键名是清理侧冻结副本（与迁移侧常量表刻意不共享，见该文件注）。
+旧扩展自身域（`extension_settings.choice` 等）与历史 localStorage 旧键的迁移、收编、一次性清理机器均已随 tt-slim 批 B 退役删除——旧键名（`pw_state_v20` 等）不再被任何代码引用，存量残留为无害孤儿，勿再新建引用。
 
 ## 提交与发布
 

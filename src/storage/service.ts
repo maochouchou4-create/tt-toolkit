@@ -3,7 +3,7 @@
  *
  * 域划分：
  *   - 全局域 extension_settings.ttToolkit：提示词配置集、条目池、API 配置、
- *     UI 偏好、nav 迁移数据。各内容子域自带版本机制
+ *     UI 偏好、nav 域标记。各内容子域自带版本机制
  *     （如 choice 域 assetVersion），顶层不再持 schema version 概念。
  *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置。
  *     写入纪律：同步变更当前 chat_metadata + 立即 getContext().saveMetadata
@@ -13,8 +13,8 @@
  *     源码核实，严禁 saveCharacterDebounced）。
  *
  * 组件与模块一律通过本服务读写，不直接碰 extension_settings/chat_metadata。
- * 唯一例外：无服务原语的历史遗留操作（如退役域键的 delete——写口是整键
- * 替换做不了删除）走 host 层直访，见 retire-summary.ts 的通道说明。
+ * 唯一例外：写口（整键替换）做不了 delete 的清场操作（如调试探针键的
+ * 删除）走 host 层直访，见 storage/debug.ts 的探针清理。
  */
 
 import { currentChatMetadata, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
@@ -26,18 +26,9 @@ export const GLOBAL_KEY = 'ttToolkit';
 /** 聊天域存储键（chat_metadata 下本扩展命名空间）。 */
 export const CHAT_KEY = 'ttToolkit';
 
-/**
- * 旧 nav localStorage 键（迁移源；键名单一真相源在此，legacy-wipe 的
- * 清理清单从这里导出——禁在别处另写第二份字面量）。
- */
-export const LEGACY_NAV_AUTO_TOP_KEY = 'tt_msg_nav_auto_top';
-export const LEGACY_NAV_QR_ACTIVATED_KEY = 'tt_nav_qr_activated';
-
 export interface NavStorageState {
     /** QR 集「首次激活」标记（激活一次制，见 nav 模块） */
     qrActivated: boolean;
-    /** 历史版本「自动回顶」QR 键的一次性清理标记（见 nav 模块 qr 接线） */
-    legacyQrCleaned?: boolean;
 }
 
 /**
@@ -47,7 +38,7 @@ export interface NavStorageState {
  * 成环，而域读写是全仓最底层的公共面）。
  *
  * 本接口内联的键只有两类，判据是「类型定义处是否依赖 storage」：类型就在本
- * 文件（nav：启动期迁移由本层执行）或定义在零依赖叶子模块（storyDirection：
+ * 文件（nav：启动期退役字段剥离由本层执行）或定义在零依赖叶子模块（storyDirection：
  * prompts/types）。其余子域一律走声明合并。
  *
  * 新增键漏登记的代价在编译期：getGlobal/setGlobal 的键收窄到 keyof，子域
@@ -55,11 +46,6 @@ export interface NavStorageState {
  */
 export interface GlobalDomain {
     nav: NavStorageState;
-    /**
-     * 旧 localStorage 遗留键一次性清理标记（v1.0.0 起，见 legacy-wipe）：
-     * true＝清理已执行过，启动整段跳过。缺省（旧档）视为 false。
-     */
-    legacyWipeDone?: boolean;
 }
 
 /** 聊天域显式键登记（登记义务同 GlobalDomain）。 */
@@ -95,35 +81,20 @@ function deepSnapshot<T>(value: T): T {
 }
 
 /**
- * 初始化全局域：确保命名空间与结构在场、迁移旧 nav localStorage 键、
- * 丢弃 nav 域存量退役字段（autoTop 开关已固化恒开——delete 缺席键幂等，
- * 与 persona 域收缩同款「退役字段丢弃」纪律）。幂等——每次启动跑一遍。
+ * 初始化全局域：确保命名空间与结构在场、丢弃 nav 域存量退役字段
+ * （autoTop 开关已固化恒开——delete 缺席键幂等，与 persona 域收缩同款
+ * 「退役字段丢弃」纪律）。幂等——每次启动跑一遍。
  */
 export function initStorage(): void {
     writeExtensionSettings(settings => {
         const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as unknown as GlobalDomain;
 
-        // nav 域迁移：storage 值缺省时从旧 localStorage 键搬（旧键保留）
         const nav = (isRecord(domain.nav) ? domain.nav : {}) as Partial<NavStorageState> & Record<string, unknown>;
-        if (typeof nav.qrActivated !== 'boolean') {
-            nav.qrActivated = readLegacyBoolean(LEGACY_NAV_QR_ACTIVATED_KEY, false);
-        }
         delete nav.autoTop;
         delete nav.legacyAutoTopSnapshot;
         domain.nav = nav as NavStorageState;
         settings[GLOBAL_KEY] = domain;
     });
-}
-
-function readLegacyBoolean(key: string, fallback: boolean): boolean {
-    try {
-        const v = localStorage.getItem(key);
-        if (v === '1') return true;
-        if (v === '0') return false;
-    } catch {
-        // localStorage 不可用（隐私模式等）：视为旧键缺席
-    }
-    return fallback;
 }
 
 /**

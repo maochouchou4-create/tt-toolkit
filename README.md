@@ -57,9 +57,7 @@ git clone https://github.com/maochouchou4-create/tt-toolkit
 
 ## 数据说明
 
-- **历史端点自动收编**：启动时自动把历史域形状的 API 端点（choice v1 域内端点、persona 旧快照端点字段、v1.8 及更早的「端点带模型＋全局活动键」形态）收编进统一服务商表并初始化任务档案（旧选中端点的模型进全部任务档案行），幂等设计，可安全重复升级。
-- **人设幂等增量迁移**：旧版 persona 扩展的 localStorage 数据在首次启动时自动搬入新存储域，增量同步、可安全重复升级。
-- **v1.0.0 起首启清理遗留 localStorage 键**：迁移完成后，五个旧遗留键（persona 3 个＋导航 2 个）会在启动管线末位被一次性删除并打上完成标记，此后不再触碰；已迁移进 settings 的数据不受影响。
+- **历史机器已退役（tt-slim 批 B）**：旧版数据的三步迁移（persona 域搬入、统一端点收编、任务档案化）与旧 localStorage 遗留键的一次性清理机器已整体删除。从 v1.9.x 及更早版本一路升级上来的存量档不受影响（数据早已迁完）；带着从未迁移过的远古存档直上新版时不再自动收编——端点需在「API」页手动重配，导航 QR 激活态会重走一次激活，旧 localStorage 键残留为无害孤儿。
 - 所有新数据统一存放在 `extension_settings.ttToolkit`（全局域）与 `chat_metadata.ttToolkit`（聊天域），随 TT 自身的 settings 持久化，不另立存储。
 
 ## 回滚
@@ -109,7 +107,7 @@ node scripts/dev-harness/serve.mjs    # http://127.0.0.1:4173/scripts/dev-harnes
 │   ├── modules/           # 业务模块：choice（选项/池）、apis（统一端点）、persona、nav
 │   ├── prompts/           # 提示词引擎：多任务模板、组装、外部注入
 │   ├── shell/             # 工具箱壳：Vue 挂载、tab 框架、四个设置页
-│   └── storage/           # 统一持久化服务＋迁移与遗留键清理
+│   └── storage/           # 统一持久化服务
 └── scripts/               # 质量门脚本与 dev-harness
 ```
 

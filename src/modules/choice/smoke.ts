@@ -13,7 +13,7 @@ import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTas
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
-import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceDomain, type ChoiceGenParams } from './api';
+import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
 import { DEFAULT_POOL_GEN_PARAMS } from './pool/normalize';
 import { applyOption, cancelGeneration, generateOptions, zeroOptionsMessage } from './generator';
 import { readFloorOptions, writeFloorOptions } from './persist';
@@ -1479,56 +1479,6 @@ function runTaskRouteChecks(): void {
     }
 }
 
-/**
- * 生成参数换代迁移机判：按值判只对换代标记（genDefaultsV）缺席的存量档
- * 生效一次，标记随首个读通道落盘——用户此后显式写回旧默认值也守得住
- * （按值判本身区分不了「旧默认存量」与「用户写旧值」，标记把时代分开）。
- */
-function runGenParamMigrationChecks(): void {
-    const saved = getGlobal(GLOBAL_CHOICE_KEY);
-    // 夹具直写未归一形状（迁移机判的前提就是「存档里就是这种半截形状」）——
-    // 域登记门管键不管值形状，写出形状在此显式断言
-    const writeRawDomain = (value: unknown): void => {
-        setGlobal(GLOBAL_CHOICE_KEY, value as unknown as ChoiceDomain);
-    };
-    const writeRawGen = (gen: Partial<ChoiceGenParams>): void => {
-        writeRawDomain({ gen });
-    };
-    try {
-        writeRawGen({ count: 4, minChars: 10, maxChars: 60 });
-        const migrated = choiceStorage.readDomain().gen;
-        check(
-            '生成参数迁移：存量档三值＝旧默认（4/10/60）→ 读侧换成新默认（30/120）',
-            migrated.count === 4 && migrated.minChars === 30 && migrated.maxChars === 120,
-            `count=${migrated.count} min=${migrated.minChars} max=${migrated.maxChars}`,
-        );
-        const persisted = getGlobal(GLOBAL_CHOICE_KEY);
-        check(
-            '生成参数迁移：存量档迁移随读通道落盘（值换新＋换代标记写入）',
-            persisted?.genDefaultsV === 1 && persisted?.gen?.minChars === 30,
-            `v=${String(persisted?.genDefaultsV)} min=${String(persisted?.gen?.minChars)}`,
-        );
-        writeRawGen({ count: 6, minChars: 10, maxChars: 60 });
-        const kept = choiceStorage.readDomain().gen;
-        check(
-            '生成参数迁移：存量档任一值自设（count=6）→ 三值原样保留',
-            kept.count === 6 && kept.minChars === 10 && kept.maxChars === 60,
-            `count=${kept.count} min=${kept.minChars} max=${kept.maxChars}`,
-        );
-        writeRawDomain({ gen: { count: 4, minChars: 10, maxChars: 60 }, genDefaultsV: 1 });
-        const held = choiceStorage.readDomain().gen;
-        check(
-            '生成参数迁移：换代标记在场 → 用户显式写旧默认（4/10/60）也原样守住',
-            held.count === 4 && held.minChars === 10 && held.maxChars === 60,
-            `count=${held.count} min=${held.minChars} max=${held.maxChars}`,
-        );
-    } finally {
-        // 还原存回原值（不存 readDomain 的归一投影：那会把夹具没写过的
-        // 默认字段补进存储，与「本区不留残」的纪律相悖）
-        setGlobal(GLOBAL_CHOICE_KEY, saved);
-    }
-}
-
 /** 冒烟入口（main.ts node 分支调用；返回失败清单长度供收口）。 */
 export async function runChoiceSmoke(): Promise<void> {
     console.info('=== choice 组装/解析机判 ===');
@@ -1551,7 +1501,6 @@ export async function runChoiceSmoke(): Promise<void> {
     await runAutoGenerateChecks();
     await runFloorPersistChecks();
     await runApplyOptionChecks();
-    runGenParamMigrationChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;

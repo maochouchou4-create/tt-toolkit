@@ -2,13 +2,10 @@
  * node 冒烟编排（无 DOM，scripts/smoke.mjs 驱动）串行链：
  * initStorage() → host 探测清单 + storage roundtrip → nav 最小初始化 →
  * nav dump → initChoiceMinimal()（默认配置落盘，不挂 DOM）→
- * installPromptsPort() → runChoiceSmoke() → initApis() →
- * initPersonaMinimal() → wipeLegacyKeysOnce() ＋ runLegacyWipeSmoke()
- * （机判须先于 runPersonaSmoke——后者会中途回收旧键并重置 persona 域）
- * → runPersonaSmoke() → retireSummaryKeys() ＋ runRetireSummarySmoke()
- * （退役域键删除机判：两域键缺席/二跑幂等/失败仅 warn）→ runApisSmoke()
- * （apis 域机判收尾：十断言，批量设置行两行齐换，夹具自持清场）→ boot
- * 收尾标记（消费侧等待面）。
+ * installPromptsPort() → runChoiceSmoke() → initApis()（域装载）→
+ * initPersonaMinimal() → runPersonaSmoke()（提示词引擎/纯函数/api 形状/
+ * 端到端/复核回合）→ runApisSmoke()（apis 域机判收尾：十断言，批量设置行
+ * 两行齐换，夹具自持清场）→ boot 收尾标记（消费侧等待面）。
  *
  * 独立成件（批 A 发布件分块）：经入口动态 import 按需加载——浏览器分支
  * 永不触达该分支，冒烟机判与全部夹具因此不进浏览器加载面；node 侧加载
@@ -23,10 +20,6 @@ import { formatProbeResults, probeHost } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
 import { dumpStorage, runStorageRoundtrip } from '@/storage/debug';
 import { initStorage } from '@/storage';
-import { wipeLegacyKeysOnce } from '@/storage/legacy-wipe';
-import { runLegacyWipeSmoke } from '@/storage/legacy-wipe-smoke';
-import { retireSummaryKeys } from '@/storage/retire-summary';
-import { runRetireSummarySmoke } from '@/storage/retire-summary-smoke';
 import { initChoiceMinimal } from '@/modules/choice';
 import { runChoiceSmoke } from '@/modules/choice/smoke';
 import { initNavMinimal } from '@/modules/nav';
@@ -62,18 +55,11 @@ export async function runNodeSmoke(bootId: string): Promise<void> {
     installPromptsPort();
     // 组装纯函数路径＋解析回退确定性触发（断言在 smoke.mjs 收口）
     await runChoiceSmoke();
-    // 统一端点表迁移收编（persona 域先成型再收编；报告断言在 smoke.mjs）
+    // 统一端点域装载（apis 域读写走 storage 懒归一，无启动期写面）
     initApis();
-    // persona 迁移幂等＋纯函数＋store 互斥（断言在 smoke.mjs 收口）
+    // 纯函数＋store 互斥＋端到端（断言在 smoke.mjs 收口）
     initPersonaMinimal();
-    // 遗留键一次性清理（全部幂等迁移之后；persona smoke 会回收
-    // 旧键并重置 persona 域，boot 态断言必须在其前——断言在 smoke.mjs 收口）
-    wipeLegacyKeysOnce();
-    runLegacyWipeSmoke();
     await runPersonaSmoke();
-    // 总结域退役清理（两域键删除＋幂等不炸；断言在 smoke.mjs 清理段收口）
-    retireSummaryKeys();
-    runRetireSummarySmoke();
     // apis 域机判收尾（十断言，批量写两行齐换；夹具自持清场，置于末位不扰动前序域）
     runApisSmoke();
     // boot 收尾标记（唯一出口信号）：「这一轮跑完了没有」只能由生产侧回答。
