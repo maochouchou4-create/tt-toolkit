@@ -5,6 +5,14 @@
  * 皮肤层与 .panelControlBar 的标题栏惯例。
  */
 
+/* 弹层层级单源：挂 body 的浮层（TTCombobox／choice 托盘）共用一档——
+   须越宿主 #movingDivs>div 的 4000 层上下文、压壳自身 30000 一头。
+   定义在 :root 而非 .tt-shell：挂 body 的浮层不是壳的后代，继承不到
+   壳级令牌（dist 单文件 CSS，本规则与消费侧永远同载，无需兜底值） */
+:root {
+    --tt-z-popup: 30001;
+}
+
 .tt-shell {
     /* 固定定位走 #floatingPrompt 先例（style.css:5918 特化同源），
        覆盖 .drawer-content 的居中窄条布局 */

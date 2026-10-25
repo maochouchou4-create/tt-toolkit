@@ -463,7 +463,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     for (let i = 0; i < 100 && store.phase === 'running'; i++) {
         await new Promise(r => setTimeout(r, 20));
     }
-    check('自动生成：stub 端点回固定 JSON → 解析 4 条（json 主路径）', store.phase === 'idle' && store.options.length === 4 && store.lastParsePath === 'json', `phase=${store.phase} count=${store.options.length} path=${store.lastParsePath} error=${store.error}`);
+    check('自动生成：stub 端点回固定 JSON → 解析 4 条', store.phase === 'idle' && store.options.length === 4, `phase=${store.phase} count=${store.options.length} error=${store.error}`);
     // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（pinned 条目必发；
     // 条目渲染无规则后缀）
     check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('转场推进：用一两句精炼的叙述完成时间跳跃或地点切换，快速进入下一段剧情') && !store.lastDump.includes('[规则:'));
@@ -513,29 +513,29 @@ async function runFloorPersistChecks(): Promise<void> {
     context.chat = chat1;
     const optsA = [{ title: '甲', content: '做甲事' }];
     const callsBefore = stubs.saveChatCalls;
-    check('楼层落盘：writeFloorOptions 写入并返回 true', writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === true);
+    check('楼层落盘：writeFloorOptions 写入并返回 true', writeFloorOptions({ index: 1, payload: { options: optsA }, expectMessage: null }) === true);
     check('楼层落盘：写入触发 getContext().saveChat 落盘通道（计数 +1）', stubs.saveChatCalls === callsBefore + 1, `calls=${stubs.saveChatCalls}`);
     const readBack = readFloorOptions(1);
     check(
-        '楼层落盘：roundtrip 读回一致（options 逐字段＋parsePath）',
-        !!readBack && readBack.parsePath === 'json' && readBack.options.length === 1 && readBack.options[0]?.title === '甲' && readBack.options[0]?.content === '做甲事',
+        '楼层落盘：roundtrip 读回一致（options 逐字段）',
+        !!readBack && readBack.options.length === 1 && readBack.options[0]?.title === '甲' && readBack.options[0]?.content === '做甲事',
         `read=${JSON.stringify(readBack)}`,
     );
 
     // ③ 刷新后选项还在：清空 store 状态 → 同一 chat 按楼层重新 restore
     store.$reset();
     store.restore(1);
-    check('楼层落盘：刷新模拟（清 store 后按楼层 restore）选项与解析路径恢复', store.options.length === 1 && store.options[0]?.title === '甲' && store.lastParsePath === 'json', `count=${store.options.length} path=${store.lastParsePath}`);
+    check('楼层落盘：刷新模拟（清 store 后按楼层 restore）选项恢复', store.options.length === 1 && store.options[0]?.title === '甲', `count=${store.options.length}`);
 
     // ④ 切聊天显示该聊天自己的选项；无存档＝空态
     const chat2: FakeMessage[] = [msg('（另一聊天开场白）'), msg('另一聊天的回复')];
     context.chat = chat2;
-    writeFloorOptions({ index: 1, payload: { options: [{ title: '乙', content: '做乙事' }], parsePath: 'bracket_fallback' }, expectMessage: null });
+    writeFloorOptions({ index: 1, payload: { options: [{ title: '乙', content: '做乙事' }] }, expectMessage: null });
     emit('chat_id_changed');
-    check('楼层落盘：切聊天后装载新聊天自己的选项（emit CHAT_CHANGED）', store.options.length === 1 && store.options[0]?.title === '乙' && store.lastParsePath === 'bracket_fallback' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
+    check('楼层落盘：切聊天后装载新聊天自己的选项（emit CHAT_CHANGED）', store.options.length === 1 && store.options[0]?.title === '乙' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
     context.chat = [msg('（无存档聊天开场白）'), msg('无存档楼层')];
     emit('chat_id_changed');
-    check('楼层落盘：切到无存档聊天＝空态', store.options.length === 0 && store.lastParsePath === '');
+    check('楼层落盘：切到无存档聊天＝空态', store.options.length === 0);
 
     // ⑤ 重 roll／重新生成后旧选项作废（核心行为）
     context.chat = chat1;
@@ -552,11 +552,11 @@ async function runFloorPersistChecks(): Promise<void> {
     const afterRegen = readFloorOptions(1);
     check(
         '楼层落盘：重 roll 重新生成后旧选项作废（旧档被清、新档＝本轮生成结果、UI 跟随）',
-        !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲') && store.options.length === 4 && store.lastParsePath === 'bracket_fallback',
+        !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲') && store.options.length === 4,
         `oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} ui=${store.options.length}`,
     );
     // 失败路径：请求未发出（任务模型未配置）——生成开始已清档，该楼保持无选项态
-    writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null });
+    writeFloorOptions({ index: 1, payload: { options: optsA }, expectMessage: null });
     setChoiceProfile('', '');
     try {
         await generateOptions();
@@ -593,12 +593,12 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：删到仅剩开场白＝按开场白楼装载空态（不再回退无归属）', store.options.length === 0 && store.floorIndex === 0, `idx=${store.floorIndex}`);
 
     // ⑦ 写侧守门：越界与写前对象校验
-    check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions({ index: 99, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === false && writeFloorOptions({ index: -1, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === false);
+    check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions({ index: 99, payload: { options: optsA }, expectMessage: null }) === false && writeFloorOptions({ index: -1, payload: { options: optsA }, expectMessage: null }) === false);
     const foreign = msg('别的消息对象');
     const mismatchCalls = stubs.saveChatCalls;
     check(
         '楼层落盘：写前对象校验（索引处已换成别的消息对象）拒绝写入且不触发落盘',
-        writeFloorOptions({ index: 0, payload: { options: optsA, parsePath: 'json' }, expectMessage: foreign }) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
+        writeFloorOptions({ index: 0, payload: { options: optsA }, expectMessage: foreign }) === false && readFloorOptions(0) === null && stubs.saveChatCalls === mismatchCalls,
         `calls=${stubs.saveChatCalls}`,
     );
     // expectMessage: null ＝显式声明「无凭据故不校验」——与旧的可选参数缺席
@@ -607,7 +607,7 @@ async function runFloorPersistChecks(): Promise<void> {
     const nullGuardCalls = stubs.saveChatCalls;
     check(
         '楼层落盘：expectMessage=null 显式不校验仍正常写入（类型门拦漏传，语义与旧省略一致）',
-        writeFloorOptions({ index: 0, payload: { options: optsA, parsePath: 'json' }, expectMessage: null }) === true && stubs.saveChatCalls === nullGuardCalls + 1,
+        writeFloorOptions({ index: 0, payload: { options: optsA }, expectMessage: null }) === true && stubs.saveChatCalls === nullGuardCalls + 1,
         `calls=${stubs.saveChatCalls}`,
     );
 
@@ -616,16 +616,17 @@ async function runFloorPersistChecks(): Promise<void> {
     check('楼层落盘：坏档（options 非数组）回退 null', readFloorOptions(0) === null);
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: 1, content: 'x' }], parsePath: 'json' } } })];
     check('楼层落盘：坏档（options 元素形状不符）回退 null', readFloorOptions(0) === null);
-    context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [], parsePath: 'nope' } } })];
-    check('楼层落盘：坏档（parsePath 非法枚举）回退 null', readFloorOptions(0) === null);
+    context.chat = [msg('旧档楼', { ttToolkit: { choice: { options: [], parsePath: 'nope' } } })];
+    const junkFieldBack = readFloorOptions(0);
+    check('楼层落盘：旧档的 parsePath 字段按未知字段忽略（不判坏档，空 options 照常读回）', junkFieldBack !== null && junkFieldBack.options.length === 0);
 
-    // partial 路径存档 roundtrip：白名单放行（漏登记＝该路径存档被当坏档丢弃）
+    // 带丢弃计数的存档 roundtrip：dropped 在场不判坏档
     context.chat = [msg('（开场白）'), msg('partial 楼')];
-    const partialWritten = writeFloorOptions({ index: 1, payload: { options: optsA, parsePath: 'partial', dropped: 2 }, expectMessage: null });
+    const partialWritten = writeFloorOptions({ index: 1, payload: { options: optsA, dropped: 2 }, expectMessage: null });
     const partialBack = readFloorOptions(1);
     check(
-        '楼层落盘：partial 路径存档 roundtrip 读回（白名单放行，不判坏档）',
-        partialWritten === true && !!partialBack && partialBack.parsePath === 'partial' && partialBack.options.length === 1,
+        '楼层落盘：带丢弃计数的存档写入读回（options 不因 dropped 在场判坏档）',
+        partialWritten === true && !!partialBack && partialBack.options.length === 1,
         `written=${String(partialWritten)} read=${JSON.stringify(partialBack)}`,
     );
     check(
@@ -643,7 +644,7 @@ async function runFloorPersistChecks(): Promise<void> {
     const legacyBack = readFloorOptions(0);
     check(
         '楼层落盘：无计数字段的旧档形状读回成功（升级不判坏档清空）',
-        legacyBack !== null && legacyBack.parsePath === 'json' && legacyBack.options[0]?.title === '旧',
+        legacyBack !== null && legacyBack.options[0]?.title === '旧',
         `read=${JSON.stringify(legacyBack)}`,
     );
     check(
@@ -655,7 +656,7 @@ async function runFloorPersistChecks(): Promise<void> {
     // aim 往返：存档是考古线索——回看楼层要能看到当时这条想撬动什么
     context.chat = [msg('（开场白）'), msg('aim 楼')];
     const aimOption = { title: '甲', content: '做甲事', aim: '撬一格关系' };
-    const aimWritten = writeFloorOptions({ index: 1, payload: { options: [aimOption], parsePath: 'json' }, expectMessage: null });
+    const aimWritten = writeFloorOptions({ index: 1, payload: { options: [aimOption] }, expectMessage: null });
     const aimBack = readFloorOptions(1);
     check(
         '楼层落盘：aim 随选项往返写入读回（写侧不静默丢字段）',
@@ -1102,7 +1103,9 @@ async function runDebugForceRawChecks(): Promise<void> {
         await generateOptions();
         const store = useChoiceStore();
         check('debugForceRaw 走生成管线不报错（无 API 调用）', store.phase !== 'error' && store.options.length === 4, `phase=${store.phase} count=${store.options.length} error=${store.error}`);
-        check('debugForceRaw 解析路径＝回退（bracket_fallback）', store.lastParsePath === 'bracket_fallback', `path=${store.lastParsePath}`);
+        const runlog = useRunlogStore();
+        const record = runlog.records[runlog.records.length - 1];
+        check('debugForceRaw 解析路径＝回退（bracket_fallback，runlog enrich）', record?.parsePath === 'bracket_fallback', `path=${record?.parsePath ?? '无'}`);
         check('debugForceRaw dump 已更新（组装与发送同管线）', store.lastDump.includes('=== 消息组装 dump'), `dumpHead=${store.lastDump.slice(0, 40)}`);
     } finally {
         choiceStorage.updateGenParams({ debugForceRaw: false });
@@ -1295,7 +1298,7 @@ async function runRunlogChecks(): Promise<void> {
             check(
                 'runlog：partial 生成 enrich 带解析路径与丢弃计数（4 条恢复＋1 条丢弃）',
                 !!record && record.ok && record.parsePath === 'partial' && record.optionCount === 4 && record.dropped === 1
-                && store.options.length === 4 && store.lastParsePath === 'partial',
+                && store.options.length === 4,
                 `ok=${String(record?.ok)} path=${record?.parsePath ?? '无'} count=${String(record?.optionCount)} dropped=${String(record?.dropped)}`,
             );
         } finally {

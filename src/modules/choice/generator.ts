@@ -176,7 +176,6 @@ export async function generateOptions(): Promise<void> {
         }
         store.succeed({
             options: report.options,
-            parsePath: report.path,
             dropped: report.dropped,
             dump: assembly.dumpText,
             floorIndex: anchorIndex,

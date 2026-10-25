@@ -8,7 +8,7 @@
  */
 import { defineStore } from 'pinia';
 import { getChatMessages, type ChatMessage } from '@/host';
-import type { ParseReport, ParsedOption } from './parse';
+import type { ParsedOption } from './parse';
 import { clearFloorOptions, readFloorOptions, writeFloorOptions, type StoredFloorOptions } from './persist';
 
 export type GeneratePhase = 'idle' | 'running' | 'error';
@@ -27,8 +27,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         options: [] as ParsedOption[],
         /** 生成失败信息（phase=error 时展示） */
         error: '',
-        /** 最近一次解析路径（json / bracket_fallback / empty——排障展示） */
-        lastParsePath: '' as ParseReport['path'] | '',
         /** 最近一次组装 dump 文本（全局口 __TT_TOOLKIT__.prompts.dump 同源文本） */
         lastDump: '',
         /** 选项归属楼层（展示标识；读档索引永远实时取末楼——无双真相源） */
@@ -40,7 +38,7 @@ export const useChoiceStore = defineStore('tt-choice', {
             this.error = '';
         },
         /**
-         * 生成成功入态。存档三件套（options/parsePath/dropped）复用
+         * 生成成功入态。存档两件套（options/dropped）复用
          * StoredFloorOptions（与落盘形态同一真相源，禁同形双类型）；
          * 渲染态三件套（dump/floorIndex/floorMessage）是本 store 的
          * 展示面字段，不进存档。
@@ -48,7 +46,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         succeed(payload: StoredFloorOptions & { dump: string; floorIndex: number | null; floorMessage: ChatMessage | null }) {
             this.phase = 'idle';
             this.options = payload.options;
-            this.lastParsePath = payload.parsePath;
             this.lastDump = payload.dump;
             this.floorIndex = payload.floorIndex;
             anchoredFloorMessage = payload.floorMessage;
@@ -62,8 +59,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         fail(message: string) {
             this.phase = 'error';
             this.error = message;
-            // 错误态下残留上一轮徽标是误导（错误显示正确性）：fail 即清路径徽标
-            this.lastParsePath = '';
         },
         /**
          * 按楼层装载存档（切楼层/切聊天/事件重载的统一入口）；
@@ -72,7 +67,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         restore(index: number) {
             const saved = readFloorOptions(index);
             this.options = saved?.options ?? [];
-            this.lastParsePath = saved?.parsePath ?? '';
             this.floorIndex = index;
             anchoredFloorMessage = getChatMessages()[index] ?? null;
         },
@@ -80,7 +74,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         syncToFloor(index: number | null) {
             if (index === null) {
                 this.options = [];
-                this.lastParsePath = '';
                 this.floorIndex = null;
                 anchoredFloorMessage = null;
                 return;
@@ -89,7 +82,6 @@ export const useChoiceStore = defineStore('tt-choice', {
         },
         clearOptions() {
             this.options = [];
-            this.lastParsePath = '';
             // 清当前楼层存档（带对象校验防误清别楼——锚定引用与 floorIndex
             // 是同一次生成/装载锚定的配对）；清后归属作废
             if (this.floorIndex !== null) {

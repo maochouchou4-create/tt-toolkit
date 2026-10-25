@@ -12,18 +12,19 @@
  */
 import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
 import { isRecord } from '@/storage/shape';
-import type { ParsedOption, ParseReport } from './parse';
+import type { ParsedOption } from './parse';
 
 /** 命名空间内的选项键（命名空间层与单楼派生数据一一对应，不混键）。 */
 const EXTRA_CHOICE_KEY = 'choice';
 
-/** 存档白名单与 ParseReport['path'] 同源（漏登记＝该路径存档被当坏档丢弃）。 */
-const PARSE_PATHS: readonly ParseReport['path'][] = ['json', 'partial', 'bracket_fallback', 'json_reject', 'empty'];
-
-/** 楼层存档的读取形态（write 侧写入同构）。 */
+/**
+ * 楼层存档的读取形态（write 侧写入同构）。v1.26 及更早的存档还带
+ * parsePath（解析路径徽标用，1.27 起徽标删除、新档不再写入）——读侧
+ * 逐字段重建，旧档的该字段按未知字段忽略，无需迁移；解析路径的活
+ * 数据在 runlog（每次生成 enrich 落记录）。
+ */
 export interface StoredFloorOptions {
     options: ParsedOption[];
-    parsePath: ParseReport['path'];
     /**
      * partial 路径的残缺丢弃数；其余路径缺席。刻意 optional：v1.5.17
      * 存量档无此字段，守门若要求在场＝升级后旧楼选项全被判坏档清空。
@@ -55,10 +56,9 @@ function toStoredOption(option: ParsedOption): ParsedOption {
     return stored;
 }
 
-/** 存档形状守门：options 为 {title,content} 字符串数组（aim 缺席合法、在场须为字符串）、parsePath 属合法枚举、dropped 缺席合法／在场须为数字。 */
+/** 存档形状守门：options 为 {title,content} 字符串数组（aim 缺席合法、在场须为字符串）、dropped 缺席合法／在场须为数字。 */
 function isStoredFloorOptions(value: unknown): value is StoredFloorOptions {
-    if (!isRecord(value) || !Array.isArray(value.options) || typeof value.parsePath !== 'string') return false;
-    if (!PARSE_PATHS.includes(value.parsePath as ParseReport['path'])) return false;
+    if (!isRecord(value) || !Array.isArray(value.options)) return false;
     if (value.dropped !== undefined && typeof value.dropped !== 'number') return false;
     return value.options.every(o => isRecord(o)
         && typeof o.title === 'string'
@@ -78,7 +78,6 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
     // 逐条重建：与消息单例解耦，调用方改返回值不污染 extra
     return {
         options: stored.options.map(toStoredOption),
-        parsePath: stored.parsePath,
         dropped: stored.dropped,
     };
 }
@@ -105,7 +104,7 @@ export function writeFloorOptions(args: { index: number; payload: StoredFloorOpt
     extra[EXTRA_NAMESPACE_KEY] = namespace;
     // 纯数据重建（见文件头 structuredClone 约束）；dropped 仅在有值时
     // 写入——undefined 属性在守门 typeof 判定下会误判坏档
-    const stored: StoredFloorOptions = { options: payload.options.map(toStoredOption), parsePath: payload.parsePath };
+    const stored: StoredFloorOptions = { options: payload.options.map(toStoredOption) };
     if (payload.dropped !== undefined) stored.dropped = payload.dropped;
     namespace[EXTRA_CHOICE_KEY] = stored;
     saveCurrentChat();

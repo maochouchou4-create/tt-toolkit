@@ -30,9 +30,16 @@
                  harness 常开便于点开壳） -->
             <div id="extensionsMenu"></div>
             <form id="send_form">
-                <textarea id="send_textarea" placeholder="假装这里是宿主输入框"></textarea>
-                <div id="send_but" title="发送">➤</div>
-                <div id="mes_stop" title="暂停">■</div>
+                <!-- 镜像宿主输入区骨架（TauriTavern/src/index.html:8389-8425）：
+                     托盘触发钮的 Teleport 目标 #leftSendForm 必须与宿主同位同名 -->
+                <div id="nonQRFormItems">
+                    <div id="leftSendForm"></div>
+                    <textarea id="send_textarea" placeholder="假装这里是宿主输入框"></textarea>
+                    <div id="rightSendForm">
+                        <div id="send_but" title="发送">➤</div>
+                        <div id="mes_stop" title="暂停" class="mes_stop">■</div>
+                    </div>
+                </div>
             </form>
         </div>
     </main>

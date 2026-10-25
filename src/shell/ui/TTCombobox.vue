@@ -333,9 +333,10 @@ function setGlobalListeners(on: boolean): void {
 
 .tt-combobox-popup {
     position: fixed;
-    /* 挂 body 须越过宿主 #movingDivs>div 的 4000 层叠上下文（工具箱壳
-       深处其中），取 30001 与壳自身的 30000 同量级再压一头 */
-    z-index: 30001;
+    /* 层级走全局单源 --tt-z-popup（shell.css :root，choice 托盘同源）：
+       挂 body 须越过宿主 #movingDivs>div 的 4000 层叠上下文（工具箱壳
+       深处其中），压壳自身的 30000 一头 */
+    z-index: var(--tt-z-popup);
     max-height: 240px;
     overflow-y: auto;
     /* 滚动到边界不再链传页面：链传会被 onDocScroll 判成宿主滚动而收起浮层 */

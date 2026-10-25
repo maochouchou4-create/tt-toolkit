@@ -1,9 +1,12 @@
 /**
- * choice 模块入口：聊天选项条挂载。
+ * choice 模块入口：行动选项托盘挂载。
  *
- * 选项条停靠：#send_form 之前（输入框上方、不随聊天滚动——#form_sheld
- * 是静态骨架 DOM，宿主先于扩展脚本在场；仍保留轮询兜底防宿主加载流程
- * 变更）。每次组装前现取宿主数据（不缓存）。
+ * 挂载形态：组件壳挂 body 下隐藏容器，可见输出全由组件 Teleport——
+ * 触发钮进宿主输入区图标槽 #leftSendForm（宿主 #leftSendForm>div 规则
+ * 自动取皮），托盘浮层挂 body：#send_form 的 backdrop-filter 会劫持
+ * 原位 fixed 的包含块（TTCombobox.vue 同款实证），挂 body 免疫。探测锚
+ * #leftSendForm 是宿主静态骨架 DOM，先于扩展脚本在场；仍保留轮询兜底
+ * 防宿主加载流程变更。每次组装前现取宿主数据（不缓存）。
  *
  * 排障口不在本模块安装：__TT_TOOLKIT__.prompts 的 dump 按任务键分派，
  * 任务键全集跨模块（persona 两任务由 persona 模块实现），分派权归同时
@@ -20,7 +23,7 @@ import { syncAssetPool } from './pool/asset';
 import { useChoiceStore } from './store';
 import OptionsBar from './OptionsBar.vue';
 
-const BAR_MOUNT_ID = 'tt-choice-bar-mount';
+const TRAY_MOUNT_ID = 'tt-choice-tray-mount';
 const POLL_INTERVAL_MS = 500;
 const POLL_MAX_TRIES = 20;
 
@@ -47,11 +50,13 @@ function installFloorSync(): void {
 
 function tryMountBar(): boolean {
     if (barMounted) return true;
-    const form = document.querySelector('#send_form');
-    if (!form?.parentElement) return false;
+    const slot = document.querySelector('#leftSendForm');
+    if (!slot) return false;
     const container = document.createElement('div');
-    container.id = BAR_MOUNT_ID;
-    form.parentElement.insertBefore(container, form);
+    container.id = TRAY_MOUNT_ID;
+    // 壳容器隐藏：组件自身零常驻可见输出（触发钮与托盘都 Teleport 出去）
+    container.style.display = 'none';
+    document.body.appendChild(container);
     const app = createApp(OptionsBar);
     app.use(pinia);
     app.mount(container);
@@ -60,7 +65,7 @@ function tryMountBar(): boolean {
 }
 
 /**
- * 选项条挂载三段等待（host 单点：立查 → APP_READY 重放复测 → 轮询兜底）。
+ * 托盘挂载三段等待（host 单点：立查 → APP_READY 重放复测 → 轮询兜底）。
  * tryMountBar 幂等可重入（barMounted 旗标守门）；超时＝宿主骨架缺席，
  * 留痕供排障（fail fast 不静默）。
  */
@@ -70,7 +75,7 @@ async function mountBarWithRetry(): Promise<void> {
         maxTries: POLL_MAX_TRIES,
     });
     if (!mounted) {
-        console.warn(`[tt-toolkit][choice] #send_form 等待超时（${version}），聊天选项条未挂载`);
+        console.warn(`[tt-toolkit][choice] #leftSendForm 等待超时（${version}），选项托盘未挂载`);
     }
 }
 

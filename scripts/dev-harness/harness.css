@@ -8,6 +8,12 @@
 
 :root {
     --topBarBlockSize: 48px;
+    /* 宿主字号基准＋输入区图标槽尺寸链（照抄 TauriTavern/src/style.css:96,107-109
+       的 calc 公式——不定义则 #leftSendForm>div 图标槽零尺寸） */
+    --mainFontSize: 15px;
+    --bottomFormBlockPadding: calc(var(--mainFontSize) / 2.5);
+    --bottomFormIconSize: calc(var(--mainFontSize) * 1.9);
+    --bottomFormBlockSize: calc(var(--bottomFormIconSize) + var(--bottomFormBlockPadding));
     --SmartThemeBodyColor: #242424;
     --SmartThemeBorderColor: #8b8b8b;
     --SmartThemeChatTintColor: rgba(128, 128, 128, 0.12);
@@ -137,10 +143,46 @@ body {
     position: relative;
 }
 
+/* 输入区骨架与图标槽皮肤镜像宿主（TauriTavern/src/style.css:968-1016 最小面）：
+   托盘触发钮进 #leftSendForm 吃宿主同款取皮——harness 不复刻则本地验不到真机外观 */
 #send_form {
     display: flex;
-    gap: 8px;
-    align-items: flex-end;
+}
+
+#nonQRFormItems {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    column-gap: 5px;
+    width: 100%;
+    font-size: var(--bottomFormIconSize);
+}
+
+#leftSendForm,
+#rightSendForm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* 宿主取皮规则照抄（含 :not(.mes_stop) 排除——暂停钮不得被撑成可见） */
+#leftSendForm>div,
+#rightSendForm>div:not(.mes_stop) {
+    width: var(--bottomFormBlockSize);
+    height: var(--bottomFormBlockSize);
+    margin: 0;
+    border: none;
+    cursor: pointer;
+    opacity: 0.7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#leftSendForm>div:hover,
+#rightSendForm>div:not(.mes_stop):hover {
+    opacity: 1;
+    filter: brightness(1.2);
 }
 
 #send_textarea {
@@ -153,23 +195,9 @@ body {
     background: var(--SmartThemeBlurTintColor);
     color: var(--SmartThemeBodyColor);
     padding: 8px 10px;
-    font: inherit;
-}
-
-#send_but,
-#mes_stop {
-    width: 44px;
-    height: 44px;
-    flex-shrink: 0;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 8px;
-    background: var(--SmartThemeChatTintColor);
-    color: var(--SmartThemeBodyColor);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    cursor: pointer;
+    /* 宿主全局 textarea 规则以 --mainFontSize 兜字号（style.css:1627）：
+       不显式声明会继承 #nonQRFormItems 的图标字号，输入文字放大走样 */
+    font-size: var(--mainFontSize);
 }
 
 #mes_stop {
