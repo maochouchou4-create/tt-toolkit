@@ -76,6 +76,7 @@ let uid = 0;
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { matchesOption } from './filter';
 
 const props = defineProps<{
     modelValue: string;
@@ -105,10 +106,7 @@ const popupStyle = ref<Record<string, string>>({});
 /** 过滤针：只认本次浮层会话内用户实际键入的文本——开浮层≠过滤（openPopup 重置）。 */
 const query = ref('');
 
-const filtered = computed(() => {
-    const needle = query.value.toLowerCase();
-    return props.options.filter(option => option.toLowerCase().includes(needle));
-});
+const filtered = computed(() => props.options.filter(option => matchesOption(option, query.value)));
 
 /** 激活项落位：当前值在候选表内则续览当前值，否则回首项；空表无激活。 */
 function resetActive(): void {

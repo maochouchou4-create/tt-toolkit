@@ -18,7 +18,6 @@
           <TTStatus v-if="p.noPrefill" tone="warn" :title="NO_PREFILL_BADGE_TITLE">不支持 prefill</TTStatus>
           <span class="tt-api-url" :title="p.url">{{ p.url || '（未填地址）' }}</span>
           <span class="tt-api-model">{{ p.models.length > 0 ? `${p.models.length} 个模型` : '未拉取清单' }}</span>
-          <span class="tt-api-key" :title="p.key ? '密钥已保存（打码显示）' : '未填密钥'">{{ maskKey(p.key) }}</span>
         </div>
         <div class="tt-btn-row tt-btn-row--fixed tt-api-row-actions">
           <button v-if="p.noPrefill" type="button" class="tt-btn" @click="resetPrefill(p)">复位</button>
@@ -28,6 +27,53 @@
       </div>
 
       <button type="button" class="tt-btn" @click="apis.startDraft()">新增服务商</button>
+    </TTCard>
+
+    <TTCard v-if="apis.draft" :title="isEdit ? '编辑服务商' : '新服务商'">
+      <TTField label="名称">
+        <input v-model.trim="apis.draft.name" class="tt-ctrl" type="text" placeholder="如：DeepSeek 官方 / 某中转站">
+      </TTField>
+      <TTField label="地址">
+        <input v-model.trim="apis.draft.url" class="tt-ctrl" type="text" placeholder="https://api.example.com/v1">
+      </TTField>
+      <TTField label="密钥">
+        <input v-model.trim="apis.draft.key" class="tt-ctrl" type="text" autocomplete="off" placeholder="sk-…">
+      </TTField>
+
+      <div class="tt-api-model-edit">
+        <span class="tt-field-label">模型清单</span>
+        <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `${apis.draft.models.length} 个模型` : '未拉取' }}</span>
+        <button type="button" class="tt-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
+      </div>
+      <div class="tt-api-hint">勾选想保留的模型后点「只保留勾选」收窄清单；过滤框只帮定位，不影响勾选。</div>
+      <div class="tt-api-model-filter">
+        <input v-model="modelFilter" class="tt-ctrl" type="text" placeholder="按关键字过滤（辅助定位）" aria-label="模型过滤">
+      </div>
+      <!-- 列表区常驻渲染（有 draft 即渲染，内容有无不改变结构，空态文案兜底） -->
+      <div class="tt-api-model-list">
+        <div v-if="apis.draft.models.length === 0" class="tt-api-model-empty">暂无模型</div>
+        <template v-else-if="filteredDraftModels.length > 0">
+          <label v-for="m in filteredDraftModels" :key="m" class="tt-check-row tt-api-model-item">
+            <input v-model="checkedModels" type="checkbox" :value="m">
+            <span :title="m">{{ m }}</span>
+          </label>
+        </template>
+        <div v-else class="tt-api-model-empty">无匹配项</div>
+      </div>
+      <div class="tt-btn-row tt-api-actions">
+        <button type="button" class="tt-btn" :disabled="!keepReady" @click="keepChecked">只保留勾选</button>
+      </div>
+
+      <div class="tt-btn-row tt-api-actions">
+        <button type="button" class="tt-btn" @click="onSave">保存</button>
+        <button type="button" class="tt-btn" @click="apis.cancelDraft()">取消</button>
+      </div>
+      <div v-if="draftError" class="tt-api-notice">
+        <TTStatus tone="err">{{ draftError }}</TTStatus>
+      </div>
+      <div v-else-if="apis.fetchStatus" class="tt-api-notice">
+        <TTStatus :tone="apis.fetchStatus.ok ? 'ok' : 'err'">{{ apis.fetchStatus.message }}</TTStatus>
+      </div>
     </TTCard>
 
     <TTCard title="任务模型" :sub="TASKS_SUB">
@@ -132,35 +178,6 @@
       </div>
       <template #details>{{ JB_DETAILS }}</template>
     </TTCard>
-
-    <TTCard v-if="apis.draft" :title="isEdit ? '编辑服务商' : '新服务商'">
-      <TTField label="名称">
-        <input v-model.trim="apis.draft.name" class="tt-ctrl" type="text" placeholder="如：DeepSeek 官方 / 某中转站">
-      </TTField>
-      <TTField label="地址">
-        <input v-model.trim="apis.draft.url" class="tt-ctrl" type="text" placeholder="https://api.example.com/v1">
-      </TTField>
-      <TTField label="密钥">
-        <input v-model.trim="apis.draft.key" class="tt-ctrl" type="text" autocomplete="off" placeholder="sk-…">
-      </TTField>
-
-      <div class="tt-api-model-edit">
-        <span class="tt-field-label">模型清单</span>
-        <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `已缓存 ${apis.draft.models.length} 个模型` : '未拉取' }}</span>
-        <button type="button" class="tt-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
-      </div>
-
-      <div class="tt-btn-row tt-api-actions">
-        <button type="button" class="tt-btn" @click="onSave">保存</button>
-        <button type="button" class="tt-btn" @click="apis.cancelDraft()">取消</button>
-      </div>
-      <div v-if="draftError" class="tt-api-notice">
-        <TTStatus tone="err">{{ draftError }}</TTStatus>
-      </div>
-      <div v-else-if="apis.fetchStatus" class="tt-api-notice">
-        <TTStatus :tone="apis.fetchStatus.ok ? 'ok' : 'err'">{{ apis.fetchStatus.message }}</TTStatus>
-      </div>
-    </TTCard>
   </div>
 </template>
 
@@ -169,7 +186,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { REASONING_EFFORTS, TASK_PARAMS, useApisStore, type ApiProvider, type ReasoningEffort } from '@/modules/apis';
 import { TASKS, type TaskId } from '@/tasks';
 import { showToast } from '@/host';
-import { TTCard, TTCombobox, TTField, TTStatus } from '@/shell/ui';
+import { TTCard, TTCombobox, TTField, TTStatus, matchesOption } from '@/shell/ui';
 
 const apis = useApisStore();
 
@@ -184,7 +201,7 @@ watch(() => apis.draft, () => {
 
 // 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写
 const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。 密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
-const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。 模型下拉来自所选服务商的清单缓存，也可直接手填模型 ID。';
+const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。 模型下拉来自所选服务商的模型清单（可在编辑服务商时勾选保留），也可直接手填模型 ID。';
 const JB_SUB = '选中宿主预设的「启用文本条目」会插到创作类任务每次请求的最前，人设链每一轮都带（含复核那一轮）；预设不存在或无启用条目时生成不带注入（运行日志有记录）。';
 const JB_DETAILS = '按原角色插入（assistant 开场就还是 assistant）。预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）。';
 
@@ -209,10 +226,33 @@ function onJbPresetChange(event: Event): void {
 
 const isEdit = computed(() => apis.endpoints.some(p => p.id === apis.draft?.id));
 
-function maskKey(key: string): string {
-    if (!key) return '（未填密钥）';
-    if (key.length <= 6) return '····';
-    return `${key.slice(0, 6)}····`;
+// 模型清单勾选筛选：勾选集与过滤词都是组件瞬态（不落盘，保存落档的是
+// 应用后的 draft.models）。清空时机＝编辑会话边界（draft id 变化：新建/
+// 换编辑对象/保存取消后归 null）与重拉取。不挂 watch(() => apis.draft)——
+// updateDraft 每次整体替换 draft 对象，挂它会把每次「只保留勾选」应用/
+// 拉取都误清；draftError 的 watch 语义不同（对象替换即清报错），互不干扰。
+const checkedModels = ref(new Set<string>());
+const modelFilter = ref('');
+watch(() => apis.draft?.id, () => {
+    checkedModels.value = new Set();
+    modelFilter.value = '';
+});
+
+const keepReady = computed(() => checkedModels.value.size > 0);
+
+/** 过滤只帮定位不影响勾选：空词＝全表；谓词与 TTCombobox 同源（matchesOption）。 */
+const filteredDraftModels = computed(() => {
+    const draft = apis.draft;
+    if (!draft) return [];
+    return draft.models.filter(m => matchesOption(m, modelFilter.value));
+});
+
+function keepChecked(): void {
+    const draft = apis.draft;
+    if (!draft || checkedModels.value.size === 0) return;
+    // 按列表当前序取勾选子集（过滤不重排，收窄序即原表序）；勾选态保留，
+    // 再取消一个再点＝继续收窄（幂等自洽）
+    apis.updateDraft({ models: draft.models.filter(m => checkedModels.value.has(m)) });
 }
 
 function confirmRemove(provider: ApiProvider): void {
@@ -307,8 +347,11 @@ async function onFetchModels(): Promise<void> {
         // 结果走返回值：store 的 updateDraft 会整体替换 draft 对象，
         // 本函数开头捕获的引用在 await 后已过期
         const models = await apis.fetchModelList();
+        // 重拉＝重新挑：清单已整体替换，旧勾选与过滤词不跨拉取残留
+        checkedModels.value = new Set();
+        modelFilter.value = '';
         apis.fetchStatus = models.length > 0
-            ? { ok: true, message: `已拉取 ${models.length} 个模型（保存后各任务模型行可直接选）` }
+            ? { ok: true, message: `已拉取 ${models.length} 个模型——可勾选想保留的再点「只保留勾选」` }
             : { ok: false, message: '清单为空——请检查地址与密钥（部分站点不开放模型清单接口）' };
     } catch (err) {
         apis.fetchStatus = { ok: false, message: `拉取失败：${err instanceof Error ? err.message : String(err)}` };
@@ -375,11 +418,6 @@ function onSave(): void {
 .tt-api-model {
     opacity: 0.85;
     font-size: var(--tt-fs-aux);
-}
-
-.tt-api-key {
-    opacity: 0.5;
-    font-size: var(--tt-fs-hint);
 }
 
 /* 服务商行右侧按钮：不许折行（折行会把这一行撑成两行高）＋不许被左侧信息块压扁 */
@@ -465,9 +503,43 @@ function onSave(): void {
     padding: var(--tt-sp-1) 0;
 }
 
-/* 保存/取消行：按钮行排布走 .tt-btn-row，此处只留这行特有的贴顶间距 */
+/* 动作行（只保留勾选/保存/取消）：按钮行排布走 .tt-btn-row，此处只留
+   这行特有的贴顶间距 */
 .tt-api-actions {
     padding-top: var(--tt-sp-2);
+}
+
+/* 模型清单勾选筛选面：过滤行/滚动列表/空态。列表区常驻渲染，
+   max-height 与 TTCombobox 弹层同值先例（240px） */
+.tt-api-model-filter {
+    padding: var(--tt-sp-1) 0;
+}
+
+.tt-api-model-filter > .tt-ctrl {
+    width: 100%;
+    margin: 0;
+}
+
+.tt-api-model-list {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 5px;
+    padding: var(--tt-sp-1) var(--tt-sp-2);
+}
+
+/* 超长模型 ID 截断为省略号（防横向撑破滚动区），悬停 title 显全名 */
+.tt-api-model-item > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tt-api-model-empty {
+    font-size: var(--tt-fs-hint);
+    opacity: 0.65;
+    padding: var(--tt-sp-1) 0;
 }
 
 .tt-api-notice {

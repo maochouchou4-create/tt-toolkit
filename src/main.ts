@@ -17,7 +17,7 @@
  * runLegacyWipeSmoke()（机判须先于 runPersonaSmoke——后者会中途回收旧键
  * 并重置 persona 域）→ runPersonaSmoke() → retireSummaryKeys() ＋
  * runRetireSummarySmoke()（退役域键删除机判：两域键缺席/二跑幂等/失败仅 warn）
- * → runApisSmoke()（apis 域机判收尾：九断言，批量设置行两行齐换，夹具自持清场）
+ * → runApisSmoke()（apis 域机判收尾：十断言，批量设置行两行齐换，夹具自持清场）
  * → boot 收尾标记（消费侧等待面）。
  * 时序约束：storage 必须先于一切读方初始化（旧 localStorage 键迁移
  * 先于 store 首读），故初始化主权集中在此、不在各模块。
@@ -137,7 +137,7 @@ async function runNodeSmoke(): Promise<void> {
     // 总结域退役清理（两域键删除＋幂等不炸；断言在 smoke.mjs 清理段收口）
     retireSummaryKeys();
     runRetireSummarySmoke();
-    // apis 域机判收尾（九断言，批量写两行齐换；夹具自持清场，置于末位不扰动前序域）
+    // apis 域机判收尾（十断言，批量写两行齐换；夹具自持清场，置于末位不扰动前序域）
     runApisSmoke();
     // boot 收尾标记（唯一出口信号）：「这一轮跑完了没有」只能由生产侧回答。
     // 消费侧若拿 OK：/N 项 FAIL： 之类正文行去猜，任一模块提前出红就会把
