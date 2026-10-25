@@ -47,8 +47,8 @@ export const TEXT = {
      * （模型原始报错进不来），逻辑层的失败原因类型直接从它派生——类型即白名单。
      */
     REVIEW_BRIEF: {
-        /** 已改写：两处同一个数（重复对数＝改写叶数），叶名按模型给出的顺序逐个列出。 */
-        REWRITTEN: (count: number, keys: string) => `模型复核：发现 ${count} 处重复，已改写 ${count} 个字段 —— ${keys}`,
+        /** 已改写：count＝归一后真变叶数（未涉重叶不进），键按档案扫描顺序列出（块·叶）。 */
+        REWRITTEN: (count: number, keys: string) => `模型复核：已改写 ${count} 个字段 —— ${keys}`,
         NONE: '模型复核：未发现重复',
         FAILED: (reason: string) => `模型复核：没能跑完，已保留上一版结果 —— ${reason}`,
         /** 未进复核（结果框为空／还没生成过）——与「跑了没发现」必须分得开。 */

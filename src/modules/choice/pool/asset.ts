@@ -2,6 +2,10 @@
  * 内置池资产：default-pool.json 是条目池的唯一真相源，
  * 内容随插件仓库发布（编辑走 git 更新链，用户在 UI 里只读浏览）。
  *
+ * 收录纪律（作者侧）：一条＝一个可辨走法——两条近重条目同轮抽中会把选项推向
+ * 同一方向，与 choice 生成规则 7「各走各的方向」相悖；语义重复机判不了，
+ * 近重条目在收录时砍并，收录判定在作者侧。
+ *
  * 同步策略：启动时（initChoice / initChoiceMinimal）以 asset 覆盖存储里的
  * 内容域——masterPool 全量重建；用户域只剩运行时开关（gen 的
  * autoGenerate/categoriesEnabled 等），syncAssetPool 不碰（唯一例外见

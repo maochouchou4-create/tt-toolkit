@@ -117,7 +117,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         leaves: [
             { name: '核心矛盾', definition: '身上同时存在、互相拉扯的两股力量，各写一条行为向标签。不装：单纯的缺点或单纯的优点。', skeleton: true },
             { name: '情绪反应', definition: '情绪被触发时的可见反应，按触发源分条写。不装：某一次的具体场面叙述。', skeleton: true },
-            { name: '说话风格', definition: '说话的整体调子与节奏（慢条斯理／爱插科打诨）。不装：口头禅与句式细节（言谈习惯）、听说读写能力（言谈习惯·听说读写水平）。', skeleton: true },
+            { name: '说话风格', definition: '说话的整体调子与节奏（字斟句酌／爱插科打诨）。不装：音量与语速（声音气息·音量语速）、口头禅与句式细节（言谈习惯）、听说读写能力（言谈习惯·听说读写水平）。', skeleton: true },
             { name: '待人差异', definition: '对生人、熟人、亲近者三种对象分别呈现的不同面貌，各一条。不装：对所有人一致的稳定特质（那是核心矛盾）。', skeleton: true },
         ],
         optionalLeaf: { name: '类型学速记叶', definition: '用户在素材或需求里明确给出的类型学测试结果（MBTI／九型／大五等）照写，附一句他对这套标签的私下看法；不装：素材没给过的结果一律不推断，也不写类型学常识科普与测试原理。' },
@@ -182,8 +182,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         name: '底线雷区',
         tier: 'common',
         leaves: [
-            { name: '绝不做的事', definition: '他自己绝不去做的行为，底线型人设的核心（「我不会做，但别人会逼我做」）。不装：别人不许对他做的事（行为禁区）、不许提的话题（禁触话题）。', skeleton: true },
-            { name: '道德底线', definition: '他认定的、不因压力而变的原则性底线。不装：具体某一次的行为拒绝（绝不做的事）。', skeleton: true },
+            { name: '绝不做的事', definition: '他自己绝不去做的行为，含其背后的原则底线，底线型人设的核心（「我不会做，但别人会逼我做」）。不装：别人不许对他做的事（行为禁区）、不许提的话题（禁触话题）。', skeleton: true },
             { name: '行为禁区', definition: '别人对他做不得的事，会触怒他或引发冲突的行为。不装：他自己不做的事（绝不做的事）、话题层面的禁区（禁触话题）。' },
             { name: '禁触话题', definition: '提了就气氛变差的具体话题（含过往、关系、某些人）。不装：行为层面的禁区（行为禁区）、他自己不做的事（绝不做的事）。' },
         ],
@@ -194,7 +193,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         when: '两难抉择指向时',
         hint: '阵营归此',
         leaves: [
-            { name: '道德观', definition: '他对对错的实际判断依据（写他怎么取舍，不写教条）。不装：具体底线（底线雷区·道德底线）。' },
+            { name: '道德观', definition: '他对对错的实际判断依据（写他怎么取舍，不写教条）。不装：具体底线（底线雷区·绝不做的事）。' },
             { name: '信仰立场', definition: '他信什么、不信什么，信到什么程度。不装：宗教或种族禁忌（饮食禁忌·宗教种族禁忌）。' },
             { name: '金钱与人命排序', definition: '被逼二选一时他先保什么。不装：日常金钱观（职业经济·金钱观）。' },
         ],
@@ -227,7 +226,6 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         when: '群像或初见戏指向时',
         leaves: [
             { name: '社交能量', definition: '与人相处的电量消耗速度（耗尽型／充电型）。不装：对具体某个人的态度。' },
-            { name: '对陌生人默认态度', definition: '面对没见过的对象，他的默认姿态。不装：对熟人的真实态度（性格·待人差异）。' },
             { name: '幽默类型', definition: '他讲笑话的路子（冷面吐槽／一本正经胡说）。不装：笑话本身。' },
             { name: '群体角色', definition: '他在一个群体里默认占什么位（发言人／边缘人／和事佬）。不装：具体某段群体关系。' },
         ],
@@ -259,7 +257,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         leaves: [
             { name: '肢体接触接受度', definition: '哪些接触可以接受、哪些不行。不装：恋爱中的亲近（恋爱·亲近后相处）。' },
             { name: '交友门槛', definition: '什么样的人能进他的圈。不装：与人的历史（既有关系）。' },
-            { name: '社交距离感', definition: '默认与他人保持多远的距离。不装：情绪上的距离。' },
+            { name: '社交距离感', definition: '对不同亲疏对象的默认距离与姿态。不装：情绪上的距离。' },
         ],
     },
     {
@@ -321,7 +319,6 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         when: '旧识登场或背景调查指向时',
         leaves: [
             { name: '挚友', definition: '一个真实的、长期的朋友。不装：与「用户」的关系（既有关系）。' },
-            { name: '宿敌', definition: '与他长期对立、至今未了的那个人。不装：报复动机（恩怨执念·复仇对象）。' },
             { name: '恩人仇家', definition: '欠过谁、谁欠过他，各一条。不装：具体账目（人情债）。' },
             { name: '人情债', definition: '一笔具体待还或已还的账。不装：恩人仇家的名单。' },
         ],
@@ -452,7 +449,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         name: '喜恶',
         tier: 'almost',
         leaves: [
-            { name: '喜欢', definition: '他主动喜欢的东西、愿意为之花时间的事。不装：能让他心动的人（恋爱·心动反应）。', skeleton: true },
+            { name: '喜欢', definition: '他主动喜欢的东西、愿意为之花时间的事。不装：能让他心动的人（恋爱·心动反应）、可持续的单项爱好（兴趣嗜好·爱好）。', skeleton: true },
             { name: '讨厌', definition: '他主动厌恶、避之不及的东西。不装：底线（底线雷区）、别人的行为禁区。', skeleton: true },
         ],
     },
@@ -461,7 +458,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         tier: 'conditional',
         when: '日常戏或约会选题时',
         leaves: [
-            { name: '爱好', definition: '单项的、可持续的爱好。不装：放松时的具体做法（消遣方式）。' },
+            { name: '爱好', definition: '单项的、可持续的爱好。不装：泛泛的喜欢（喜恶·喜欢）、放松时的具体做法（消遣方式）。' },
             { name: '消遣方式', definition: '放松时具体做什么（钓鱼、喝酒、打游戏）。不装：爱好。' },
         ],
     },
@@ -510,8 +507,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         tier: 'conditional',
         when: '网恋掉马或人肉搜索题材时',
         leaves: [
-            { name: '账号矩阵', definition: '名下有哪几个账号、各是什么身份。不装：为躲人开的那个号（匿名马甲）。' },
-            { name: '匿名马甲', definition: '为隐藏真实身份而开的号。不装：账号全貌。' },
+            { name: '账号矩阵', definition: '名下有哪几个账号、各是什么身份。不装：为躲人开的那个号（秘密马甲·隐藏身份）。' },
             { name: '数字足迹', definition: '网上留下的痕迹（发过的帖、玩过的游戏）。不装：如何规避（反追踪习惯）。' },
             { name: '反追踪习惯', definition: '日常规避被找到的做法。不装：身份被揭穿的后果。' },
         ],
@@ -521,10 +517,9 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         tier: 'conditional',
         when: 'NPC 初见预设立场重要时',
         leaves: [
-            { name: '圈内名声', definition: '在熟悉他的那个圈子里，他是个什么名声。不装：公众怎么看（公众认知与真实的落差）。' },
             { name: '绰号传说', definition: '外号与围绕它的那段传闻。不装：本人喜不喜欢这个绰号（喜恶）。' },
             { name: '公众认知与真实的落差', definition: '外人以为的他是怎样的、实际是怎样的，差在哪儿。不装：他自己怎么评价（自我认知·自我评价）。' },
-            { name: '圈层差异', definition: '不同圈子怎么看他、为什么不一样。不装：圈内名声的全貌。' },
+            { name: '圈层差异', definition: '不同圈子怎么看他、为什么不一样。不装：公众怎么看（公众认知与真实的落差）。' },
         ],
     },
     {
@@ -546,7 +541,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         leaves: [
             { name: '前科', definition: '过去留下的案底或污点事件。不装：还没被发现的秘密（秘密马甲）。' },
             { name: '黑白人脉', definition: '与哪些道上人有来往。不装：具体欠了什么（关系网·人情债）。' },
-            { name: '灰色手段', definition: '他用的、见不得光但有效的做法。不装：道德底线（底线雷区·道德底线）。' },
+            { name: '灰色手段', definition: '他用的、见不得光但有效的做法。不装：道德底线（底线雷区·绝不做的事）。' },
         ],
     },
     {
@@ -609,7 +604,7 @@ export const PERSONA_BLOCK_CATALOG: ReadonlyArray<CatalogBlock> = [
         leaves: [
             { name: '童年关键', definition: '童年发生的、塑形的那一件事。不装：长大的环境（家庭出身·童年环境）。' },
             { name: '人生转折', definition: '成年阶段改变他走向的那一件事。不装：现在态（成长弧·现在态）。' },
-            { name: '光辉事迹', definition: '他拿得出手的往事（一次救人、一次夺冠）。不装：别人传他的版本（声誉形象·圈内名声）。' },
+            { name: '光辉事迹', definition: '他拿得出手的往事（一次救人、一次夺冠）。不装：别人传他的版本（声誉形象·圈层差异）。' },
             { name: '黑历史', definition: '他不愿被翻出来的往事。不装：法律上的案底（法律边缘·前科）。' },
             { name: '未解锁身世线索', definition: '身世里他自己还不知道的那一截。不装：已经确认的身世。' },
         ],

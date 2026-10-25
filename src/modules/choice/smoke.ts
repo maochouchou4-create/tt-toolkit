@@ -261,7 +261,7 @@ function runPoolKnobChecks(): void {
 function runAssetPoolChecks(): void {
     // ---- 静态形状（纯函数，不依赖存储态）----
     const { masterPool } = buildAssetPool();
-    check('asset：内置池 130 条（纯走法制版）', masterPool.length === 130, `实际 ${masterPool.length}`);
+    check('asset：内置池 124 条（纯走法制版）', masterPool.length === 124, `实际 ${masterPool.length}`);
     const cats = new Set(masterPool.map(e => e.category));
     check(
         'asset：9 个分类（纯走法制版）',
@@ -287,7 +287,7 @@ function runAssetPoolChecks(): void {
     choiceStorage.updateGenParams({ categoriesEnabled: false });
     syncAssetPool();
     let domain = choiceStorage.readDomain();
-    check('asset 首次同步：空池覆盖为 130 条并标记 assetVersion', domain.pool.masterPool.length === 130 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
+    check('asset 首次同步：空池覆盖为 124 条并标记 assetVersion', domain.pool.masterPool.length === 124 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
     check('asset 首次同步：categoriesEnabled 旧 false 翻转为 true', domain.gen.categoriesEnabled === true, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
     // 用户手动关：后续同步不得回翻（gen 纯用户域）
     choiceStorage.updateGenParams({ categoriesEnabled: false });
@@ -303,7 +303,7 @@ function runAssetPoolChecks(): void {
     domain = choiceStorage.readDomain();
     check(
         'asset 版本变更：污染池全量恢复（垃圾清除、gen 不动）',
-        domain.pool.masterPool.length === 130 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
+        domain.pool.masterPool.length === 124 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
         `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
     );
 }
@@ -1554,5 +1554,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（130 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（124 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }
