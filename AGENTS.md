@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-TauriTavern（SillyTavern 的 Tauri 分支）的自维护扩展「TT 工具箱」：选项生成／条目池／提示词引擎／多端点 API／快速回复导航／人设管理。Vue 3 + TS + Pinia，Vite 构建，产物为单文件 `dist/index.js` + `dist/index.css`（manifest.json 只引用这两个，根目录再无其他入口）。
+TauriTavern（SillyTavern 的 Tauri 分支）的自维护扩展「TT 工具箱」：选项生成／条目池／提示词引擎／多端点 API／快速回复导航／人设管理。Vue 3 + TS + Pinia，Vite 构建，产物为 `dist/index.js` + `dist/index.css`（node 冒烟面拆按需 chunk，随仓发布但浏览器不加载；manifest.json 只引用入口两个文件，根目录再无其他入口）。
 
 ## 硬规矩（违反＝返工）
 
@@ -32,7 +32,7 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 ## dev-harness（无 TT 宿主时的本机 DOM 验证）
 
-- dist 重建后**必须**重跑 `node scripts/dev-harness/build.mjs`（app.js 是实体文件不是映射，忘了跑＝验证的是旧代码）。
+- dist 重建后**必须**重跑 `node scripts/dev-harness/build.mjs`（dist-harness/ 下是实体文件不是映射，忘了跑＝验证的是旧代码）。
 - `node scripts/dev-harness/serve.mjs` → http://127.0.0.1:4173/scripts/dev-harness/
 - 开壳正解：`document.getElementById('tt-toolkit-wand-entry').click()`。
 - 陷阱：`.extensionsMenuExtensionButton` 是条目内图标 div（无文本），按它找按钮永远 undefined；`display:none` 的壳里 `querySelectorAll` 照样列出隐藏 tab（假阳性），以 `innerText` 判可见性。

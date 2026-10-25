@@ -14,5 +14,7 @@ export {
 } from './service';
 export type { ChatDomain, GlobalDomain, NavStorageState } from './service';
 export { newId } from './id';
-export { LEGACY_WIPE_KEYS, runLegacyWipeSmoke, wipeLegacyKeysOnce } from './legacy-wipe';
+// legacy-wipe 的 smoke 半不经桶（见 legacy-wipe.ts 头注：smoke 名经桶即
+// 回流入口静态图，发布件分块失效）
+export { LEGACY_WIPE_KEYS, wipeLegacyKeysOnce } from './legacy-wipe';
 export type { LegacyWipeReport } from './legacy-wipe';

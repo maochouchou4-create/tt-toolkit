@@ -6,9 +6,10 @@
 
 ```powershell
 pnpm run build          # 先重建 dist（改 src 后每次都要跑）
-pnpm run harness        # 生成 scripts/dev-harness/app.js（dist 重写产物）
-# 然后浏览器直接打开（file:// 即可，无服务端）：
-#   D:\code\repos\tt-toolkit\scripts\dev-harness\index.html
+pnpm run harness        # 生成 scripts/dev-harness/dist-harness/（产物 ESM 模块，逐文件）
+node scripts/dev-harness/serve.mjs
+# 然后浏览器访问 http://127.0.0.1:4173/scripts/dev-harness/
+# （产物是 ESM 模块，file:// 下相对路径被 CORS 拦截，file:// 直开已废止）
 ```
 
 顶栏按钮：**切换主题**（SmartTheme 明暗两套变量模拟）、**重置数据**（清 localStorage 并刷新）。
@@ -21,8 +22,8 @@ pnpm run harness        # 生成 scripts/dev-harness/app.js（dist 重写产物�
 | `index.html` | 宿主 DOM 骨架（顶栏/#chat/#send_form/#extensionsMenu/#movingDivs）＋加载顺序锚 |
 | `harness.css` | 宿主骨架与皮肤模拟：SmartTheme 变量双主题、.drawer-content/.mes 等 |
 | `stubs.js` | 宿主 stub：`window.__TT_HARNESS__` 各键（与 dist 的全部外部 import 一一对应，**每键都是命名空间对象**——键内再按导出名解构）＋窗口级全局（`window.$`/`SillyTavern.getContext`/`quickReplyApi`/`toastr`）＋假聊天数据 |
-| `app.js` | **生成物**（build.mjs 产出，勿手改） |
-| `build.mjs` | 把 `dist/index.js` 的外部 import 重写为 `const {...} = globalThis.__TT_HARNESS__.<key>` 解构（经典脚本形态，绕开 file:// 下 ESM 相对路径的 CORS 限制） |
+| `dist-harness/` | **生成物**（build.mjs 产出，勿手改）——dist 全部 .js 逐文件重写后的 ESM 模块（chunk 间相对 import 原样保留；node 冒烟 chunk 不入内） |
+| `build.mjs` | 把 `dist/*.js` 的外部 import 重写为 `const {...} = globalThis.__TT_HARNESS__.<key>` 解构，逐文件产出 `dist-harness/`；fail-fast 锁产物形状（BOOT DONE 标记恰一 chunk、入口零标记、外部 import 计数 >0） |
 | `serve.mjs` | 仓根静态 HTTP 服务（默认 4173，路径穿越守门）——自动化浏览器（Playwright 等）需走 HTTP，file:// 会被封 |
 | `screenshots/` | 布局自查基线截图（明/暗/窄视口三轮，见下） |
 

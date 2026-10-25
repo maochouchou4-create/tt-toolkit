@@ -51,8 +51,10 @@ export default defineConfig(() => ({
         entryFileNames: 'index.js',
         // 单入口（CSS 是唯一 asset）固定名对齐 manifest 声明
         assetFileNames: 'index.css',
-        // 单入口整体打包：第三方扩展产物按 manifest 固定拉取 dist/index.js，
-        // 不允许多 chunk（TT 更新流只认 manifest 声明的入口文件）
+        // 动态 import 自动分块（node 冒烟面拆独立 chunk，本配置不开任何分块
+        // 开关）：执行面只认 manifest 声明的入口 js（TauriTavern 扩展加载器
+        // 只执行 manifest 列出的文件），更新流按提交点整树落盘——附属 chunk
+        // 随仓到达用户安装但永不执行，浏览器加载面由入口静态图决定
         chunkFileNames: '[name].chunk.js',
         preserveModules: false,
       },

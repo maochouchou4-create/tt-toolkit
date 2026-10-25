@@ -8,21 +8,27 @@
  * import dist/index.js——其入口为唯一环境分支点，无 document 走冒烟
  * 分支：initStorage → 探测清单/roundtrip → nav 最小初始化 → nav dump。
  * 另含：启动管线末位 legacy-wipe 一次性清理（[wipe-smoke] 机判，
- * 预种 7 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（cache-buster
- * URL 整图重求值 dist，验标记短路 no-op 不炸）。两轮各自等生产侧的 boot
- * 收尾标记 `[node-smoke] BOOT DONE boot=<id>` 才开始取断言（等不到即硬
- * 失败），不靠正文行猜「跑完了没」。
+ * 预种 5 个旧遗留键验「迁移先于清理」）＋ boot2 二次启动（子进程整图
+ * 重求值同一份产物，验标记短路 no-op 不炸——进程内函数重入与分块
+ * 相斥的根因见文末二次启动段）。boot1 在本进程等生产侧 boot 收尾标记
+ * `[node-smoke] BOOT DONE boot=<id>` 后取断言（等不到即硬失败，不靠
+ * 正文行猜「跑完了没」）；boot2 断言＝子进程末态直查＋父进程对子进程
+ * 输出按同一份期望常数全量机判。
  * 退出码：探测/roundtrip/回归断言全 PASS 为 0，任一 FAIL 为 1。
  *
  * 边界：node 冒烟验证「产物可加载、导入链可解析、storage 逻辑正确、
  * 探测机制工作、初始化时序正确」；宿主真实在场性归浏览器验收（用户侧）。
  */
 
+import { spawn } from 'node:child_process';
 import { register } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const DIST_ENTRY = new URL('../dist/index.js', import.meta.url);
+// 子进程模式开关（boot2 隔离面，见文末二次启动段）：本脚本以 SMOKE_BOOT2_CHILD=1
+// 重入自身，只跑 boot2 装载与末态直查，机判断言（期望常数单源）全在父进程。
+const BOOT2_CHILD = process.env.SMOKE_BOOT2_CHILD === '1';
 
 if (!existsSync(fileURLToPath(DIST_ENTRY))) {
     console.error('[smoke] dist/index.js 不存在——先跑 pnpm build');
@@ -346,6 +352,12 @@ globalThis.__TT_SMOKE_STUBS__ = {
     },
 };
 
+if (BOOT2_CHILD) {
+    // 子进程 boot2 前置态＝父进程 boot1 的末态：一次性标记已置位（遗留键
+    // 已由顶层种子表重种）——boot 清理须短路，二次启动签名机判依赖它
+    globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit.legacyWipeDone = true;
+}
+
 // ---------------------------------------------------------------------------
 // 驱动 dist：main.ts 检测无 document 走冒烟分支并打印全部输出。
 // 收集 stdout 行做机判断言（roundtrip PASS、nav __TT_TOOLKIT__.nav 在场）。
@@ -418,6 +430,39 @@ async function waitForBootDone(from, bootId) {
         process.exit(1);
     }
     return end;
+}
+
+// ---------------------------------------------------------------------------
+// boot2 子进程分支（须位于本处——waitForBootDone 与其 const 依赖已定义、
+// boot1 断言面尚未开跑；放在文末会让子进程在空数据上把整段 boot1 断言
+// 白跑一遍）。子进程的全部工作在此收口：装载裸入口、等收尾标记、末态
+// 直查、以退出码交裁决；process.exit 终止，下方父进程代码不在子进程执行。
+// 设计全貌（进程内重入与分块相斥的根因、父进程机判面）见文末二次启动段。
+// ---------------------------------------------------------------------------
+if (BOOT2_CHILD) {
+    // 裸 URL 装载（不带 cache-buster query）：分块后冒烟 chunk 以
+    // './index.js' 相对 import 回引入口——带 query 的入口 URL 会让该相对
+    // 路径解析到另一条模块记录，入口被二次求值、两条 boot 链并发共用存根
+    // （实测计数翻倍翻红）。全新进程本身就是「二次启动」，无需 cache-buster。
+    try {
+        await import(DIST_ENTRY);
+    } catch (e) {
+        console.error('[smoke] boot2 dist/index.js 加载失败', e);
+        process.exit(1);
+    }
+    await waitForBootDone(0, 'boot1');
+    // 末态直查（父进程看不见子进程存根）：一次性标记置位＋遗留键全清
+    const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
+    const leftoverChildKeys = [...LEGACY_SEEDS.keys()].filter(k => localStorageData.has(k));
+    if (ttDomainEnd?.legacyWipeDone !== true || leftoverChildKeys.length > 0) {
+        console.error(`[smoke] boot2 FAIL: 末态异常（legacyWipeDone=${String(ttDomainEnd?.legacyWipeDone)}，遗留键 ${leftoverChildKeys.join('、') || '无'}）`);
+        process.exit(1);
+    }
+    console.log('[smoke-boot2] ENDSTATE ok（一次性标记置位＋遗留键全清）');
+    // exit 前冲刷 stdout：管道异步写（非 Windows 平台）下 ENDSTATE 行可能
+    // 被 exit 截断——父进程判据认这行，截断＝假红（安全侧，但没必要留）
+    await new Promise(resolve => process.stdout.write('', resolve));
+    process.exit(0);
 }
 
 const boot1End = await waitForBootDone(0, 'boot1');
@@ -749,26 +794,72 @@ const generateRawCount = (distSource.match(/generateRaw/g) ?? []).length;
 if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateRaw（计数 ${generateRawCount}，期望 0）`);
 
 // ---------------------------------------------------------------------------
-// 二次启动（boot2）：cache-buster URL 对 dist 整图重求值（vite 单
-// chunk 无代码分割）——同浏览器二次启动语义：extension_settings 存根与
-// localStorage 跨 import 持久。标记已置位＋遗留键重种 → boot 清理须短路
-// （首个 [legacy-wipe] 行＝跳过）→ run2 机判走二次启动签名 1＋场景组。
-// 行段两端都是 boot 收尾标记：起点在 boot1 断言全部跑完之后——boot2 与
-// 未收尾的 boot1 并发跑会共用同一份宿主存根（宿主 context 是可换装单例，
-// boot1 在途的 persona 段会覆写 boot2 的 chat 楼层），终点取 boot2 自己的
-// 标记，免得 boot1 的尾巴混进本段计数。
+// 产物形状断言（批 A 发布件分块）：入口静态图必须与冒烟面分块。五个冒烟
+// 标记逐一在入口清零——漏列任一标记＝桶 re-export 或静态导入把对应 smoke
+// 文件漏回入口静态图时其余判据照绿，形状闸就此失明；BOOT DONE 标记在全部
+// dist/*.js 中恰一处＝冒烟面收进唯一 chunk（与入口零标记互为镜像判据）。
 // ---------------------------------------------------------------------------
-const segmentStart = outputLines.length;
-eventHandlers.clear(); // run1 监听器不跨图串扰（emit 派发表进程级共享）
-for (const [k, v] of LEGACY_SEEDS) localStorageData.set(k, v);
-try {
-    await import(new URL('../dist/index.js?boot2', import.meta.url));
-} catch (e) {
-    console.error('[smoke] boot2 dist/index.js 加载失败', e);
-    process.exit(1);
+const SMOKE_MARKERS = ['[node-smoke] BOOT DONE', '[choice-smoke]', '[persona-smoke]', '[wipe-smoke]', '[apis-smoke]'];
+for (const marker of SMOKE_MARKERS) {
+    if (distSource.includes(marker)) {
+        failures.push(`dist/index.js 含冒烟标记「${marker}」——冒烟面被静态拉回入口加载图，分块失效`);
+    }
 }
-const boot2End = await waitForBootDone(segmentStart, 'boot2');
-const seg2 = outputLines.slice(segmentStart, boot2End);
+const distDirUrl = new URL('../dist/', import.meta.url);
+const distJsFiles = readdirSync(distDirUrl).filter(f => f.endsWith('.js'));
+const bootDoneFiles = distJsFiles.filter(f => readFileSync(new URL(f, distDirUrl), 'utf8').includes('[node-smoke] BOOT DONE'));
+if (bootDoneFiles.length !== 1) {
+    failures.push(`含 BOOT DONE 标记的产物应恰 1 个，实得 ${bootDoneFiles.length}（${bootDoneFiles.join('、') || '无'}）——冒烟 chunk 缺席或分成了多块`);
+}
+
+// ---------------------------------------------------------------------------
+// 二次启动（boot2）：子进程隔离（方案批 A 落点 7 预留退路，分块实测后启用）。
+// 分块后 ?boot2 只重求值入口 chunk、冒烟 chunk 缓存命中，重入发生在首载的
+// 模块实例上：存根监听表跨 boot 清零后，模块级幂等旗标（事件订阅已装/
+// floorSyncInstalled 等）不会重装，store 内基线态也不随种子重置——「存根
+// 重置」与「模块实例跨 boot 持久」两类进程内语义相撞，计数锁大面积假红
+// （choice 自动生成/楼层事件链 13＋persona CHAT_CHANGED 接线/写回基线 2；
+// apis 夹具自持无事件订阅故干净，恰为根因反证）。boot2 改子进程整图重求
+// 值：全新 V8 实例加载同一份产物（语义＝分块前的 boot2），产物形态零改动。
+//
+// 子进程面（SMOKE_BOOT2_CHILD=1 重入本脚本）：存根自顶层装配（种子表＋
+// 预置一次性标记＝父进程 boot1 末态，等价旧进程内 boot2 前的重种＋监听表
+// 清空），装载裸入口（chunk 回引入口的相对路径与 query 相斥，见块内注）、
+// 等收尾标记、直查末态（legacyWipeDone 置位＋遗留键全清——只有子进程看得
+// 见自己的存根态），末态机判就地收口后以退出码交裁决。
+// 父进程面：spawn 自身、原样转发子进程输出（PASS 流给人看），用同一份期
+// 望常数对捕获输出做全量机判——fail 标签/计数锁/清理短路首行/末态标记行。
+// 行序以子进程 stdout 内的输出序为准（同流保序）；stdout/stderr 两流交错
+// 不影响本段判据（判据全部按行前缀与行计数收口，无跨流顺序依赖）。
+// ---------------------------------------------------------------------------
+// 按行缓冲收集子进程输出（data 块不按行切，直接 split 会腰斩半行）
+function makeChildLineCollector(stream, sink) {
+    let buffer = '';
+    stream.on('data', chunk => {
+        process.stdout.write(chunk);
+        buffer += String(chunk);
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) sink.push(line);
+    });
+}
+const childLines = [];
+const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: { ...process.env, SMOKE_BOOT2_CHILD: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+});
+makeChildLineCollector(child.stdout, childLines);
+makeChildLineCollector(child.stderr, childLines);
+const childExit = await new Promise(resolve => {
+    child.on('close', code => resolve(code));
+    child.on('error', () => resolve(-1));
+});
+
+// 父侧全量机判（期望常数单源在本文件——子进程只跑不判计数）
+const seg2 = childLines;
+if (childExit !== 0) {
+    failures.push(`boot2 子进程异常退出（code=${childExit}）——装载失败或末态红，见上方 boot2 输出`);
+}
 const seg2FailTags = ['choice', 'persona', 'wipe', 'apis']
     .filter(tag => seg2.filter(MODULE_FAIL_LINE(tag)).length > 0);
 if (seg2FailTags.length > 0) {
@@ -788,14 +879,8 @@ const seg2ApisPass = seg2.filter(l => l.startsWith('[apis-smoke] PASS')).length;
 if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_EXPECTED || seg2ApisPass !== APIS_PASS_EXPECTED) {
     failures.push(`boot2 冒烟重跑计数异常：choice ${seg2ChoicePass}/${CHOICE_PASS_EXPECTED}、persona ${seg2PersonaPass}/${PERSONA_PASS_EXPECTED}、apis ${seg2ApisPass}/${APIS_PASS_EXPECTED}`);
 }
-// 末态：一次性标记置位＋遗留键全清（直查存根 Map，不依赖日志）
-const ttDomainEnd = globalThis.__TT_SMOKE_STUBS__.extension_settings.ttToolkit;
-if (ttDomainEnd?.legacyWipeDone !== true) {
-    failures.push(`boot2 末态标记未置位（legacyWipeDone=${String(ttDomainEnd?.legacyWipeDone)}）`);
-}
-const leftoverKeys = [...LEGACY_SEEDS.keys()].filter(k => localStorageData.has(k));
-if (leftoverKeys.length > 0) {
-    failures.push(`boot2 末态遗留键未清（${leftoverKeys.join('、')}）`);
+if (!seg2.some(l => l.startsWith('[smoke-boot2] ENDSTATE ok'))) {
+    failures.push('boot2 子进程未报末态 ok（legacyWipeDone 置位＋遗留键全清）');
 }
 
 if (failures.length > 0) {
@@ -803,4 +888,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动 no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（迁移收编幂等/域形状收缩与 v1.1.0 存量域退役字段丢弃/全任务键/统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；wipe 机判 ${wipePassLines.length} 条全 PASS（boot 删 5 键＋标记置位＋迁移数据存活证明/域零触碰/标记短路/退役清理两域键删除＋二跑幂等＋失败仅 warn）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（清理短路＋冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS＋末态标记置位与遗留键全清）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）。`);

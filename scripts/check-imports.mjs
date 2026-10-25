@@ -10,7 +10,8 @@
  *      → exit 1（适配层隔离约束）；host 内每条按「无后缀 + resolver
  *      补 .js」规则折算为期望的 dist 相对说明符。导入形态覆盖三种：
  *      from '…'（含 re-export）、动态 import('…')、裸副作用 import '…'；
- *   3. 扫 dist/index.js 提取实际外置说明符（同样三形态）及各自 ../
+ *   3. 扫 dist/*.js 全部产物提取实际外置说明符（同样三形态；多 chunk 形态
+ *      下冒烟 chunk 与入口同受级数与清单约束）及各自 ../
  *      级数；
  *   4. 逐条对照（双向差集 + 逐条级数断言，不按总数——总数断言锁不住
  *      单条错配）。任一失败 → exit 1。
@@ -46,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC_DIR = join(ROOT, 'src');
-const DIST_ENTRY = join(ROOT, 'dist', 'index.js');
+const DIST_DIR = join(ROOT, 'dist');
 const VITE_CONFIG = join(ROOT, 'vite.config.ts');
 
 // ---- 1. 机读上溯级数 ----------------------------------------------------
@@ -157,14 +158,23 @@ for (const { file, specifier } of sourceImports) {
     hostImportCount++;
 }
 
-let distEntryText;
+let distTexts;
 try {
-    distEntryText = readFileSync(DIST_ENTRY, 'utf8');
+    const distFiles = readdirSync(DIST_DIR).filter(f => f.endsWith('.js'));
+    if (distFiles.length === 0) throw new Error('dist 无 js 产物');
+    distTexts = distFiles.map(name => readFileSync(join(DIST_DIR, name), 'utf8'));
 } catch {
-    fail(`dist/index.js 不存在——先跑 pnpm build`);
+    fail(`dist/ 无 .js 产物——先跑 pnpm build`);
 }
 
-const actual = collectDistSpecifiers(distEntryText);
+// 多 chunk 形态：全部产物的说明符并集与源级清单对照（任一文件混入未知
+// 说明符即翻红，与单文件时代同语义）
+const actual = new Set();
+for (const text of distTexts) {
+    for (const spec of collectDistSpecifiers(text)) {
+        actual.add(spec);
+    }
+}
 
 // 逐条级数断言（在 expected 精确串对照之外独立数级数，防 prefix 规则
 // 本身拼错导致「集合相等但级数错误」的假阴性之外的路径形态问题）
@@ -178,12 +188,12 @@ for (const spec of actual) {
 // 双向差集
 for (const spec of expected) {
     if (!actual.has(spec)) {
-        problems.push(`清单漂移：src/host 期望的外置说明符 ${spec} 未出现在 dist/index.js`);
+        problems.push(`清单漂移：src/host 期望的外置说明符 ${spec} 未出现在 dist 产物`);
     }
 }
 for (const spec of actual) {
     if (!expected.has(spec)) {
-        problems.push(`多余说明符：dist/index.js 的 ${spec} 没有对应 src/host 导入`);
+        problems.push(`多余说明符：dist 产物的 ${spec} 没有对应 src/host 导入`);
     }
 }
 
@@ -432,4 +442,4 @@ if (problems.length > 0) {
     process.exit(1);
 }
 
-console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中；源级导入环：含环 SCC ${cycleReport.total} 处，其中登记豁免 ${cycleReport.exempted} 处、新增 0 处。`);
+console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物（${distTexts.length} 个 js）逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中；源级导入环：含环 SCC ${cycleReport.total} 处，其中登记豁免 ${cycleReport.exempted} 处、新增 0 处。`);

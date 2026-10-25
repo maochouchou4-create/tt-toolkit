@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>tt-toolkit dev-harness（宿主 stub 调试台）</title>
-    <!-- 顺序：先宿主 stub（stubs.js），再重写后的产物（app.js，由 build.mjs 生成）；
-         样式＝宿主危险规则模拟（host-sim.css，先于产物＝复刻真实宿主加载序）
-         + tt-toolkit 产物样式 + 宿主骨架模拟样式 -->
+    <!-- 顺序：先宿主 stub（stubs.js 经典脚本），再产物模块（dist-harness/，
+         由 build.mjs 生成；type=module 延迟执行——经典脚本先装配完，装配序
+         不变）；样式＝宿主危险规则模拟（host-sim.css，先于产物＝复刻真实宿主
+         加载序）+ tt-toolkit 产物样式 + 宿主骨架模拟样式 -->
     <link rel="stylesheet" href="host-sim.css">
     <link rel="stylesheet" href="../../dist/index.css">
     <link rel="stylesheet" href="harness.css">
@@ -48,10 +49,12 @@
     <div id="movingDivs"></div>
 
     <script src="stubs.js"></script>
-    <script src="app.js"></script>
-    <script>
-        // app.js 执行完（mountShell 已注册 APP_READY once）后放行就绪信号，
-        // 魔棒条目/选项条挂载链路走完整三段等待的真实第二段
+    <script type="module" src="dist-harness/index.js"></script>
+    <script type="module">
+        // 产物模块执行完（mountShell 已注册 APP_READY once）后放行就绪信号，
+        // 魔棒条目/选项条挂载链路走完整三段等待的真实第二段。本段必须是
+        // 模块脚本：模块按文档序延迟执行，晚于产物模块；改回经典内联脚本
+        // 会抢在延迟的产物模块之前跑，就绪信号早于监听注册＝事件丢失
         __TT_HARNESS_UI__.emitAppReady();
     </script>
 </body>

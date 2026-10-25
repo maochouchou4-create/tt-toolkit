@@ -74,7 +74,7 @@ git checkout pre-rewrite
 
 ## 开发
 
-工具链：Node.js＋pnpm；构建 Vite（单入口 `src/main.ts` → `dist/index.js` ＋ `dist/index.css`），类型 Vue＋TS，规范 ESLint。
+工具链：Node.js＋pnpm；构建 Vite（入口 `src/main.ts` → `dist/index.js` ＋ `dist/index.css`，node 冒烟面拆按需 chunk），类型 Vue＋TS，规范 ESLint。
 
 提交前七道质量门（全部通过再合入）：
 
@@ -92,7 +92,7 @@ pnpm smoke                            # node 驱动 dist 的全链路冒烟（�
 
 ```bash
 pnpm build
-pnpm harness                          # 生成 scripts/dev-harness/app.js
+pnpm harness                          # 生成 scripts/dev-harness/dist-harness/（产物模块）
 node scripts/dev-harness/serve.mjs    # http://127.0.0.1:4173/scripts/dev-harness/
 ```
 
@@ -102,7 +102,7 @@ node scripts/dev-harness/serve.mjs    # http://127.0.0.1:4173/scripts/dev-harnes
 
 ```
 ├── manifest.json          # TT 扩展清单（指向 dist 产物）
-├── dist/                  # 构建产物（index.js / index.css），随仓发布
+├── dist/                  # 构建产物（index.js / index.css ＋冒烟 chunk），随仓发布
 ├── src/
 │   ├── main.ts            # 入口：浏览器宿主流 / node 冒烟流
 │   ├── host/              # 宿主适配层——@sillytavern/* 导入的唯一合法区

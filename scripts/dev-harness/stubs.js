@@ -1,9 +1,10 @@
 /*
- * dev-harness 宿主 stub（经典脚本，在 app.js 之前加载）。
+ * dev-harness 宿主 stub（经典脚本，在产物模块之前加载——模块脚本延迟
+ * 执行，stub 装配先于产物求值，装配序不变）。
  * 只实现 tt-toolkit 实际消费的最小面（消费面清单见 README.md），
  * 全部内存态——刷新即重置，可反复折腾布局而不污染真实酒馆。
  *
- * __TT_HARNESS__ 的键与 dist/index.js 的全部外部 import（12 条）
+ * __TT_HARNESS__ 的键与 dist 产物的全部外部 import（12 条）
  * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
  * SillyTavern.getContext / quickReplyApi / toastr）按
  * 宿主挂载形态放到 globalThis 上。
@@ -435,7 +436,7 @@
         world_info: { getWorldInfoPrompt, loadWorldInfo },
         // 桩表与 src/host/personas.ts 的导入面一一对应（smoke 侧的同一约束
         // 由 scripts/stub-loader.mjs 的 STUB_EXPORTS 承担）：少一个名字，
-        // app.js 重建后的解构拿到 undefined，人设写回在浏览器里被 catch
+        // 产物模块重建后的解构拿到 undefined，人设写回在浏览器里被 catch
         // 吞成「保存失败」——浏览器验收路径静默退化且无报错可查
         personas: { getUserAvatars, initPersona, setPersonaDescription, setUserAvatar, user_avatar: userAvatar },
         utils: { findPersona },
