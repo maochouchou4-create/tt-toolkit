@@ -1,6 +1,6 @@
 /**
  * 选项生成管线：组装（引擎）→ 请求（统一端点表＋共享客户端）
- * → 解析（response_format 主路径＋客户端兜底）→ 渲染（store 会话态）。
+ * → 解析（response_format 主路径＋客户端兜底）→ 落档（该楼消息 extra）。
  *
  * 组装结果（消息数组＋trace）每次生成后进 dump 设施——用户靠它核对
  * 各注入模块逐项可见。
@@ -26,16 +26,35 @@ import { clearFloorOptions, latestAssistantFloorIndex } from './persist';
 import { drawPoolInjection } from './pool/storage';
 import { useChoiceStore } from './store';
 
-/** 外部取消信号（选项条「取消」按钮）。 */
+/** 外部取消信号（导航「生成」键在生成中再执行＝取消）。锁由轮次持有：
+ *  cancel 只 abort，释放唯一归 finally —— 同步清锁会让旧轮收尾覆盖新轮
+ *  相位（取消后立刻再起＝并发互斥破防）。 */
 let activeAbort: AbortController | null = null;
 
 export function cancelGeneration(): void {
     activeAbort?.abort();
-    activeAbort = null;
 }
 
 export function isGenerating(): boolean {
     return activeAbort !== null;
+}
+
+/**
+ * 导航「生成」键与 /tt-choice-gen 斜令的统一 toggle：生成中再执行＝取消；
+ * 无锚楼＝提示后不动（生成恒锚起点末条 assistant 楼，语义不变）；空闲＝
+ * 启动生成。返回是否已进入生成（命令侧不消费返回值，冒烟据此判两段式）。
+ */
+export function toggleChoiceGeneration(): boolean {
+    if (isGenerating()) {
+        cancelGeneration();
+        return false;
+    }
+    if (latestAssistantFloorIndex() === null) {
+        showToast('当前聊天没有可挂选项的回复楼层', 'warning');
+        return false;
+    }
+    void generateOptions();
+    return true;
 }
 
 /**
@@ -117,11 +136,11 @@ export async function generateOptions(): Promise<void> {
     const controller = new AbortController();
     activeAbort = controller;
 
-    store.beginGenerate();
-    // 生成开始即清锚楼旧存档（重 roll/重新生成后旧选项作废）并按新锚楼
-    // 复位展示态——不得走 clearOptions（会把上一楼层仍合法的存档一并清掉）
+    // 生成开始即清锚楼旧存档（重 roll/重新生成后旧选项作废），并按同一
+    // 锚定把「状态行归属」写进 store——状态只画在生成起点锚楼，不随末楼
+    // 漂移（不再有展示副本需要同步装载）
     const { anchorIndex, anchorMessage } = beginGenerationCycle();
-    store.syncToFloor(anchorIndex);
+    store.beginGenerate({ floorIndex: anchorIndex, floorMessage: anchorMessage });
     // runlog 接线：runId＝enrich/markFailed 目标；handedToClient＝调用 client
     // 前置 true——client 一经调用，本轮失败记录权归传输层（防同次失败双记：
     // client 抛错时 generator 拿不到 runId，null 判据会误判成「未发出」）
@@ -172,13 +191,19 @@ export async function generateOptions(): Promise<void> {
         if (runId !== null) {
             runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length, dropped: report.dropped });
         }
-        store.succeed({
+        const stored = store.succeed({
             options: report.options,
             dropped: report.dropped,
             dump: assembly.dumpText,
             floorIndex: anchorIndex,
             floorMessage: anchorMessage,
         });
+        // 落档失败＝该楼在生成期间被删/被换（索引处已不是生成起点消息）：
+        // 不能静默留在「成功」相位——界面没有任何块可画，用户会以为选项丢了
+        if (!stored) {
+            store.fail('选项未能落到该楼层（楼层已变化）');
+            showToast('选项未能落到该楼层（楼层已变化）', 'error');
+        }
         // dump 落 console 一份：控制台即排障口（与 __TT_TOOLKIT__.prompts.dump 同源）
         console.info(`[tt-toolkit][choice] 生成完成：${report.options.length} 条（解析路径=${report.path}，输出契约=${outputContract}）`);
     } catch (e) {
@@ -204,17 +229,22 @@ export async function generateOptions(): Promise<void> {
         // 与 runlog 记录都由它带），而 signal.aborted 对「用户按了取消」与
         // 「端点没响应」同真——只认它会把超时静默报成「已取消」，用户看着像
         // 自己手滑按了取消，而这次失败没给他任何可追的线索。
+        // 所有权判等：只有仍持有锁的本轮才能写相位——旧轮收尾不得覆盖新轮。
+        const ownsLock = activeAbort === controller;
         if (controller.signal.aborted && !(e instanceof RequestTimeoutError)) {
-            store.fail('已取消');
+            if (ownsLock) store.fail('已取消');
         } else {
             const message = e instanceof Error ? e.message : String(e);
-            store.fail(message);
-            // 失败表面化（persona/nav 同款纪律）：选项条错误态＋toast＋console 各司其职
-            showToast(`选项生成失败：${message}`, 'error');
+            if (ownsLock) {
+                store.fail(message);
+                // 失败表面化（persona/nav 同款纪律）：锚楼错误行＋toast＋console 各司其职
+                showToast(`选项生成失败：${message}`, 'error');
+            }
             console.error('[tt-toolkit][choice] 生成失败', e);
         }
     } finally {
-        activeAbort = null;
+        // 锁释放唯一出口：只有锁仍归本轮时才置空（cancel 不再同步清锁）
+        if (activeAbort === controller) activeAbort = null;
     }
 }
 

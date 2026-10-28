@@ -61,7 +61,7 @@ export function probeHost(): ProbeResult[] {
             const present = hasDocument() && document.querySelector('#chat') !== null;
             return { present, detail: present ? '在场' : '未挂载' };
         }),
-        probe('#send_form（选项条停靠容器）', () => {
+        probe('#send_form（输入区容器）', () => {
             const present = hasDocument() && document.querySelector('#send_form') !== null;
             return { present, detail: present ? '在场' : '未挂载' };
         }),

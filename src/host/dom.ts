@@ -55,6 +55,19 @@ interface HostWindow {
 export const hostWindow = globalThis as unknown as HostWindow;
 
 /**
+ * 宿主聊天 DOM 契约单源（nav 楼层定位与 choice 楼层渲染共用，禁第二处
+ * 字面量）。锚点：TauriTavern/src/index.html:8382 `<div id="chat">`、
+ * :7699 `<div class="mes_block">`（.mes[mesid] 的 mesid 由宿主脚本写入，
+ * 模板上无静态片段可锚）。宿主模板漂移由 scripts/check-host-anchors.mjs
+ * 的 DOM 锚段机判。
+ */
+export const HOST_DOM = Object.freeze({
+    chatRoot: '#chat',
+    floor: '.mes[mesid]',
+    floorBlock: '.mes_block',
+});
+
+/**
  * 调 dragElement 给浮层接宿主拖动（ESM 导入直调，非 jQuery 方法——
  * 在 $.fn 上找它永远找不到，曾经的实锤）。把手必须已存在于 DOM
  * （id 约定 `<浮层id>header` 且带 .drag-grabber 类）。jQuery 缺席时

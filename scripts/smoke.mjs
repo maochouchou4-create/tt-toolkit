@@ -494,6 +494,12 @@ if (!('tt-toolbox' in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands)
     failures.push('模块求值期未注册 /tt-toolbox（QR「工具箱」按钮依赖此命令）');
 }
 
+// 生成命令在最小初始化（initChoiceMinimal）即注册：QR「生成」按钮的
+// message 指向 /tt-choice-gen，命令缺席时按钮会静默指向不存在的命令
+if (!('tt-choice-gen' in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.commands)) {
+    failures.push('最小初始化未注册 /tt-choice-gen（QR「生成」按钮依赖此命令）');
+}
+
 // chat 域写入走立即保存通道（writeChatMetadata → getContext().saveMetadata）
 if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
     failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
@@ -542,7 +548,11 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // 随版本化重建机器退役删除 ＝ −1。
 // ＝ tt-slim 批 D 单源与门禁小件：分类名单断言改从 POOL_CATEGORIES 常量派生、
 // applyOption 断言改名（点击行为三分支快照）——用例零增删 ＝ ±0。
-const CHOICE_PASS_EXPECTED = 164;
+// ＝ v1.29.0 选项楼层化：楼层装载断言 −8（刷新恢复 restore／切聊天两条／
+// ⑤前置切回／swipe 跟随／删楼三条——展示副本删除后由 floor-view 按存档
+// 对账承接，浏览器 harness 目检面），toggle 机判（启动→取消、双击竞态、
+// 成功落档锚楼）＋3 ＝ 159。
+const CHOICE_PASS_EXPECTED = 159;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -714,6 +724,26 @@ const distSource = readFileSync(DIST_ENTRY, 'utf8');
 const generateRawCount = (distSource.match(/generateRaw/g) ?? []).length;
 if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateRaw（计数 ${generateRawCount}，期望 0）`);
 
+// 楼层选项块容器必须进产物样式：渲染器挂的类名在 dist/index.css 缺席＝
+// 块裸奔（无间距/无两列）。类名从渲染器源码抽取（单源，改名自动跟随），
+// 断言绑三面：裸容器规则存在（规则边界定界——宿主态隐藏的复合选择器也
+// 以 .tt-choice-floor{ 结尾，子串或后缀匹配都会被它们误命中）、产物 js
+// 真用该类名（渲染器与样式产物不漂移）。
+const floorClass = readFileSync(new URL('../src/modules/choice/floor-view.ts', import.meta.url), 'utf8')
+    .match(/const FLOOR_CLASS = '([^']+)'/)?.[1];
+if (floorClass === undefined) {
+    failures.push('floor-view.ts 未找到 FLOOR_CLASS 常量（产物样式门无法取渲染器类名）');
+} else {
+    const distCss = readFileSync(new URL('../dist/index.css', import.meta.url), 'utf8');
+    const bareContainerRule = new RegExp('(?:^|})\\s*\\.' + floorClass.replaceAll('.', '\\.') + '\\s*\\{');
+    if (!bareContainerRule.test(distCss)) {
+        failures.push(`dist/index.css 缺少 .${floorClass} 裸容器规则（楼层选项块样式未随产物发布）`);
+    }
+    if (!distSource.includes(floorClass)) {
+        failures.push(`dist/index.js 未出现渲染器类名 ${floorClass}（渲染器与样式产物漂移）`);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 产物形状断言（批 A 发布件分块）：入口静态图必须与冒烟面分块。五个冒烟
 // 标记逐一在入口清零——漏列任一标记＝桶 re-export 或静态导入把对应 smoke
@@ -796,7 +826,7 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 // package.json）一致且＝收官版本。版本 bump＝三处＋本节 EXPECTED_VERSION
 // 同步改——漏改任何一处这里红。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '1.28.0';
+const EXPECTED_VERSION = '1.29.0';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿

@@ -4,8 +4,8 @@
     单 tab 纵向卡片流：人设编织单卡；生成参考收 <details>
     折叠块。流式/超时按任务固化（TASK_PARAMS），模型与温度/思考强度的
     唯一入口＝「API」页「任务模型」卡（未配置由 generate 的
-    fail-fast toast 引导）。生成按钮双态：进行中点击＝取消（choice
-    选项条同款长请求逃生姿势）。
+    fail-fast toast 引导）。生成按钮双态：进行中点击＝取消（长请求逃生
+    姿势与导航「生成」键同款）。
     页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn。
   -->
   <div class="tt-persona-tab">
@@ -89,7 +89,7 @@ function onOverwritePersona(): void {
     void overwritePersonaGuarded(store, () => confirm(TEXT.CONFIRM_OVERWRITE_HOST));
 }
 
-/** 生成按钮双态：空闲＝发起生成；进行中＝取消（长请求逃生，choice 选项条同款）。 */
+/** 生成按钮双态：空闲＝发起生成；进行中＝取消（长请求逃生，导航「生成」键同款）。 */
 function onGenerateClick(): void {
     if (store.isProcessing) store.cancelGeneration();
     else void store.generate();

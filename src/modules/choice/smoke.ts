@@ -15,8 +15,8 @@ import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/st
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
 import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
 import { DEFAULT_POOL_GEN_PARAMS } from './pool/normalize';
-import { applyOption, cancelGeneration, generateOptions, zeroOptionsMessage } from './generator';
-import { readFloorOptions, writeFloorOptions } from './persist';
+import { applyOption, cancelGeneration, generateOptions, toggleChoiceGeneration, zeroOptionsMessage } from './generator';
+import { clearFloorOptions, latestAssistantFloorIndex, readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { useChoiceSettingsStore } from './settings';
 import { drawAmount, resolvePool } from './pool/resolver';
@@ -407,9 +407,12 @@ async function runAutoGenerateChecks(): Promise<void> {
         writeApiDomain([smokeEndpoint]);
     }
     setChoiceProfile(smokeEndpoint.id, smokeEndpoint.models[0] ?? 'smoke-model');
-    // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「零选项、
-    // phase 停在 idle」（跳过守卫不得触发任何生成）
-    store.clearOptions();
+    // 清掉 debugForceRaw 遗留的会话态——跳过类断言的基准是「phase 停在
+    // idle」（跳过守卫不得触发任何生成）。展示副本已随楼层化删除，楼层
+    // 存档面由下面的 chat 数组重建兜底
+    const staleAnchor = latestAssistantFloorIndex();
+    if (staleAnchor !== null) clearFloorOptions(staleAnchor, null);
+    store.$reset();
     const emitReceived = (...args: unknown[]): unknown => stubs.eventSource.emit('message_received', ...args);
 
     // chat 供守卫链读楼层正文：idx0 开场白、idx1 空正文、idx2 真回复
@@ -422,26 +425,26 @@ async function runAutoGenerateChecks(): Promise<void> {
     );
 
     emitReceived(2, 'quiet');
-    check('自动生成：quiet 跳过', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：quiet 跳过', store.phase === 'idle');
     emitReceived(1, 'normal');
-    check('自动生成：空文本跳过', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：空文本跳过', store.phase === 'idle');
     // 错误正文跳过：宿主伪装成正常回复的失败正文（前缀判别）
     chat.push(
         { mes: '[API 错误]\n连接目标服务失败：当前网络、VPN、代理或接口地址可能暂时不可用。', is_user: false },
         { mes: '[API Error]\nCould not connect to the target service.', is_user: false },
     );
     emitReceived(3, 'normal');
-    check('自动生成：错误正文跳过（zh-cn 同源标签命中）', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：错误正文跳过（zh-cn 同源标签命中）', store.phase === 'idle');
     emitReceived(4, 'normal');
-    check('自动生成：错误正文跳过（英文硬编码兜底命中）', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：错误正文跳过（英文硬编码兜底命中）', store.phase === 'idle');
     emitReceived(0, 'normal');
-    check('自动生成：首楼（messageId===0）跳过', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：首楼（messageId===0）跳过', store.phase === 'idle');
     // 双复核 P3 回归：分组消息 (chat_id, type) 形态的纯数字串不当楼层索引
     emitReceived('2', 'normal');
-    check('自动生成：非数字 messageId 跳过（分组 chat_id 形态不误判）', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：非数字 messageId 跳过（分组 chat_id 形态不误判）', store.phase === 'idle');
     choiceStorage.updateGenParams({ autoGenerate: false });
     emitReceived(2, 'normal');
-    check('自动生成：autoGenerate=false 跳过', store.phase === 'idle' && store.options.length === 0);
+    check('自动生成：autoGenerate=false 跳过', store.phase === 'idle');
     choiceStorage.updateGenParams({ autoGenerate: true });
 
     // 任务模型未配置：choice 行悬空 → resolveTaskRoute null → console.warn（不弹 UI）
@@ -467,7 +470,7 @@ async function runAutoGenerateChecks(): Promise<void> {
     for (let i = 0; i < 100 && store.phase === 'running'; i++) {
         await new Promise(r => setTimeout(r, 20));
     }
-    check('自动生成：stub 端点回固定 JSON → 解析 4 条', store.phase === 'idle' && store.options.length === 4, `phase=${store.phase} count=${store.options.length} error=${store.error}`);
+    check('自动生成：stub 端点回固定 JSON → 4 条选项落到锚楼存档', store.phase === 'idle' && readFloorOptions(latestAssistantFloorIndex() ?? -1)?.options.length === 4, `phase=${store.phase} count=${readFloorOptions(latestAssistantFloorIndex() ?? -1)?.options.length ?? 0} error=${store.error}`);
     // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（pinned 条目必发；
     // 条目渲染无规则后缀）
     check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('转场推进：用一两句精炼的叙述完成时间跳跃或地点切换，快速进入下一段剧情') && !store.lastDump.includes('[规则:'));
@@ -488,10 +491,11 @@ async function runAutoGenerateChecks(): Promise<void> {
 }
 
 /**
- * 楼层落盘机判（消息级持久化 §用户可见行为 ①–⑧）：
- * roundtrip/落盘通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼
- * 重载/写侧守门/坏档回退。事件驱动走 stub eventSource（与浏览器
- * eventBus 同一条订阅链路）。
+ * 楼层落盘机判（消息级持久化 §用户可见行为）：
+ * roundtrip/落盘通道/重 roll 作废/写侧守门/坏档回退。楼层化后展示面＝
+ * 存档本身（无 store 展示副本可断言），刷新恢复/切聊天/swipe 跟随/删楼
+ * 重载四条随「按楼现场读档」的展示模型退役，由 floor-view 的 DOM 对账承接
+ * （浏览器 harness 目检面）。
  */
 async function runFloorPersistChecks(): Promise<void> {
     const stubs = smokeStubs();
@@ -502,15 +506,11 @@ async function runFloorPersistChecks(): Promise<void> {
     }
     check('楼层落盘：冒烟 stub 在场', true);
     const context = stubs.getContext();
-    const emit = (type: string, ...args: unknown[]): unknown => stubs.eventSource.emit(type, ...args);
     const savedProfilesJson = JSON.stringify(readTaskProfiles());
 
     // 索引签名对齐 ChatMessage（宿主消息含任意附加键，extra/swipes 等）
     interface FakeMessage { mes?: string; is_user?: boolean; is_system?: boolean; extra?: Record<string, unknown>; [key: string]: unknown; }
     const msg = (mes: string, extra?: Record<string, unknown>): FakeMessage => ({ mes, is_user: false, extra });
-    const choiceExtra = (options: Array<{ title: string; content: string }>, parsePath = 'json'): Record<string, unknown> => ({
-        ttToolkit: { choice: { options, parsePath } },
-    });
 
     // ① 楼层级 roundtrip（机制底座）＋② 落盘通道确实被调用
     const chat1: FakeMessage[] = [msg('（角色卡开场白楼层）'), msg('AI 的真实回复正文。')];
@@ -526,25 +526,9 @@ async function runFloorPersistChecks(): Promise<void> {
         `read=${JSON.stringify(readBack)}`,
     );
 
-    // ③ 刷新后选项还在：清空 store 状态 → 同一 chat 按楼层重新 restore
-    store.$reset();
-    store.restore(1);
-    check('楼层落盘：刷新模拟（清 store 后按楼层 restore）选项恢复', store.options.length === 1 && store.options[0]?.title === '甲', `count=${store.options.length}`);
-
-    // ④ 切聊天显示该聊天自己的选项；无存档＝空态
-    const chat2: FakeMessage[] = [msg('（另一聊天开场白）'), msg('另一聊天的回复')];
-    context.chat = chat2;
-    writeFloorOptions({ index: 1, payload: { options: [{ title: '乙', content: '做乙事' }] }, expectMessage: null });
-    emit('chat_id_changed');
-    check('楼层落盘：切聊天后装载新聊天自己的选项（emit CHAT_CHANGED）', store.options.length === 1 && store.options[0]?.title === '乙' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
-    context.chat = [msg('（无存档聊天开场白）'), msg('无存档楼层')];
-    emit('chat_id_changed');
-    check('楼层落盘：切到无存档聊天＝空态', store.options.length === 0);
-
-    // ⑤ 重 roll／重新生成后旧选项作废（核心行为）
+    // ⑤ 重 roll／重新生成后旧选项作废（核心行为）：数据面直接看楼层存档
+    // （展示副本已删——每楼的块由 floor-view 按存档现场渲染）
     context.chat = chat1;
-    emit('chat_id_changed');
-    check('楼层落盘：切回原聊天恢复原存档（⑤前置）', store.options.length === 1 && store.options[0]?.title === '甲');
     // 成功路径：完整生成管线（debugForceRaw 无网络依赖）——生成开始清旧档、
     // 成功后新档＝本轮解析结果
     choiceStorage.updateGenParams({ debugForceRaw: true });
@@ -553,11 +537,12 @@ async function runFloorPersistChecks(): Promise<void> {
     } finally {
         choiceStorage.updateGenParams({ debugForceRaw: false });
     }
-    const afterRegen = readFloorOptions(1);
+    const regenAnchor = latestAssistantFloorIndex();
+    const afterRegen = regenAnchor === null ? null : readFloorOptions(regenAnchor);
     check(
-        '楼层落盘：重 roll 重新生成后旧选项作废（旧档被清、新档＝本轮生成结果、UI 跟随）',
-        !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲') && store.options.length === 4,
-        `oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} ui=${store.options.length}`,
+        '楼层落盘：重 roll 重新生成后旧选项作废（旧档被清、新档＝本轮生成结果）',
+        store.phase === 'idle' && !!afterRegen && afterRegen.options.length === 4 && !afterRegen.options.some(o => o.title === '甲'),
+        `phase=${store.phase} oldGone=${String(!afterRegen?.options.some(o => o.title === '甲'))} count=${afterRegen?.options.length ?? 0}`,
     );
     // 失败路径：请求未发出（任务模型未配置）——生成开始已清档，该楼保持无选项态
     writeFloorOptions({ index: 1, payload: { options: optsA }, expectMessage: null });
@@ -568,33 +553,11 @@ async function runFloorPersistChecks(): Promise<void> {
         writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
     }
     check(
-        '楼层落盘：生成失败路径旧档已清且不写新档（UI 空态、无残留）',
-        readFloorOptions(1) === null && store.options.length === 0 && store.phase === 'error',
+        '楼层落盘：生成失败路径旧档已清且不写新档（错误相位、无残留）',
+        readFloorOptions(1) === null && store.phase === 'error',
         `stored=${JSON.stringify(readFloorOptions(1))} phase=${store.phase}`,
     );
     store.$reset();
-
-    // ⑤′ swipe 后选项跟随：宿主 syncSwipeToMes 用 swipe 槽 extra 整体替换
-    chat1[1] = { mes: 'swipe 后正文', is_user: false, extra: choiceExtra([{ title: '丙', content: '做丙事' }]) };
-    emit('message_swiped');
-    check(
-        '楼层落盘：swipe 换槽后选项跟随新 swipe 槽的 extra（emit MESSAGE_SWIPED）',
-        store.options.length === 1 && store.options[0]?.title === '丙' && store.floorIndex === 1,
-        `title=${store.options[0]?.title} idx=${store.floorIndex}`,
-    );
-
-    // ⑥ 删楼后重载（索引左移正确性）
-    const delChat: FakeMessage[] = [msg('（开场白）'), msg('甲楼', choiceExtra([{ title: '丁', content: '做丁事' }])), msg('乙楼')];
-    context.chat = delChat;
-    emit('message_deleted');
-    check('楼层落盘：删楼事件重载（无存档末楼＝空态）', store.options.length === 0 && store.floorIndex === 2);
-    delChat.pop();
-    emit('message_deleted');
-    check('楼层落盘：删末楼后按新末楼装载（索引左移不错位）', store.options.length === 1 && store.options[0]?.title === '丁' && store.floorIndex === 1, `title=${store.options[0]?.title} idx=${store.floorIndex}`);
-    delChat.splice(1);
-    emit('message_deleted');
-    // 开场白楼也是 assistant 楼（is_user=false）——剩开场白＝按 0 楼装载空态
-    check('楼层落盘：删到仅剩开场白＝按开场白楼装载空态（不再回退无归属）', store.options.length === 0 && store.floorIndex === 0, `idx=${store.floorIndex}`);
 
     // ⑦ 写侧守门：越界与写前对象校验
     check('楼层落盘：写越界楼层返回 false 且不抛', writeFloorOptions({ index: 99, payload: { options: optsA }, expectMessage: null }) === false && writeFloorOptions({ index: -1, payload: { options: optsA }, expectMessage: null }) === false);
@@ -607,7 +570,7 @@ async function runFloorPersistChecks(): Promise<void> {
     );
     // expectMessage: null ＝显式声明「无凭据故不校验」——与旧的可选参数缺席
     // 同义，但改必填后由类型门拦住漏传（漏传即静默失去防漂移保护）。
-    // 注意此刻 chat 仅剩 0 号开场白楼（上文 splice 后），故索引用 0。
+    // 此刻 chat＝chat1（2 楼），0 号是开场白楼。
     const nullGuardCalls = stubs.saveChatCalls;
     check(
         '楼层落盘：expectMessage=null 显式不校验仍正常写入（类型门拦漏传，语义与旧省略一致）',
@@ -669,6 +632,117 @@ async function runFloorPersistChecks(): Promise<void> {
     );
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: '甲', content: '做甲事', aim: { 想: 1 } }], parsePath: 'json' } } })];
     check('楼层落盘：坏档（aim 在场非字符串）回退 null', readFloorOptions(0) === null);
+}
+
+/**
+ * 生成 toggle 机判（导航「生成」键/斜杠命令＝同一 toggle）：①挂起
+ * fetch 桩下直调 toggle＝启动（true、相位 running），生成中再调＝取消
+ * （false、收尾后错误相位「已取消」）——锁由轮次持有的回归面（cancel 只
+ * abort，不允许旧轮收尾覆盖新轮）；②固定成功桩：4 条落到生成起点锚楼
+ * （toggle 不只是开关，成功路径仍走完整管线＋落档）；③双击竞态：取消
+ * 后同帧再点＝仍是取消（旧轮收尾前锁不释放，双击不得半途误起新轮），
+ * 收尾后「已取消」由旧轮自落、锁已释放（再点＝新轮）。
+ * 台账：CHOICE_PASS_EXPECTED 164−8+3 里的 +3。
+ */
+async function runToggleChecks(): Promise<void> {
+    const stubs = smokeStubs();
+    const store = useChoiceStore();
+    if (!stubs) {
+        check('生成 toggle：冒烟 stub 在场', false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
+        return;
+    }
+    const savedEndpoints = readApiDomain();
+    const savedProfilesJson = JSON.stringify(readTaskProfiles());
+    const endpoint = savedEndpoints[0] ?? createEndpoint('toggle 冒烟端点');
+    if (savedEndpoints.length === 0) writeApiDomain([endpoint]);
+    setChoiceProfile(endpoint.id, endpoint.models[0] ?? 'toggle-model');
+    const context = stubs.getContext();
+    context.chat = [
+        { mes: '（角色卡开场白）', is_user: false },
+        { mes: 'AI 的真实回复正文。', is_user: false },
+    ];
+    const originalFetch = globalThis.fetch;
+    try {
+        // ① 挂起 fetch：启动后取消（桩照真实 fetch 中止语义，先例 runTimeoutChecks）
+        let fetchEntered = false;
+        globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+            fetchEntered = true;
+            return new Promise((_resolve, reject) => {
+                const fail = (): void => {
+                    const aborted = new Error('The operation was aborted.');
+                    aborted.name = 'AbortError';
+                    reject(aborted);
+                };
+                if (init?.signal?.aborted) fail();
+                else init?.signal?.addEventListener('abort', fail);
+            });
+        }) as unknown as typeof fetch;
+        store.$reset();
+        const started = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && !fetchEntered; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        const running = store.phase === 'running';
+        const cancelled = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && store.phase === 'running'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        check(
+            '生成 toggle：空闲直调＝启动（true、相位 running），生成中再调＝取消（false、收尾后「已取消」）',
+            started === true && running && cancelled === false && store.phase === 'error' && store.error === '已取消',
+            `started=${String(started)} running=${String(running)} cancelled=${String(cancelled)} phase=${store.phase} error=${store.error}`,
+        );
+
+        // ③ 双击竞态：取消后同帧再点生成键＝仍是取消。锁由轮次持有
+        // （cancel 只 abort、释放归 finally）：旧轮收尾前 isGenerating 恒
+        // 真，双击被吸收成重复取消；若退回「cancel 同步清锁」语义，双击
+        // 就会在旧轮收尾途中误起新轮（旧轮收尾随即覆盖新轮相位）。收尾
+        // 后锁已释放，再点＝新轮（起后再取消，收干净给 ②）。
+        let fetchHeld3 = false;
+        globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+            fetchHeld3 = true;
+            return new Promise((_resolve, reject) => {
+                const fail = (): void => {
+                    const aborted = new Error('The operation was aborted.');
+                    aborted.name = 'AbortError';
+                    reject(aborted);
+                };
+                if (init?.signal?.aborted) fail();
+                else init?.signal?.addEventListener('abort', fail);
+            });
+        }) as unknown as typeof fetch;
+        store.$reset();
+        const raceStart = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && !fetchHeld3; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        const raceCancel = toggleChoiceGeneration();
+        const raceImmediateTap = toggleChoiceGeneration(); // 不 await：同帧双击
+        for (let i = 0; i < 100 && store.phase === 'running'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        const raceReopen = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && store.phase !== 'running'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        const raceReopenCancel = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && store.phase === 'running'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+        check(
+            '生成 toggle：取消后同帧再点仍是取消（锁由轮次持有），收尾后「已取消」自落、再点＝新轮',
+            raceStart === true && raceCancel === false && raceImmediateTap === false
+                && store.phase === 'error' && store.error === '已取消'
+                && raceReopen === true && raceReopenCancel === false,
+            `start=${String(raceStart)} cancel=${String(raceCancel)} immediateTap=${String(raceImmediateTap)} `
+                + `phase=${store.phase} error=${store.error} reopen=${String(raceReopen)} reopenCancel=${String(raceReopenCancel)}`,
+        );
+
+        // ② 成功路径：默认桩回固定 4 条（SSE），toggle 启动后落档锚楼
+        globalThis.fetch = originalFetch;
+        store.$reset();
+        const restarted = toggleChoiceGeneration();
+        for (let i = 0; i < 100 && store.phase === 'running'; i++) await new Promise(resolve => setTimeout(resolve, 20));
+        const stored = readFloorOptions(latestAssistantFloorIndex() ?? -1);
+        check(
+            '生成 toggle：成功路径 4 条选项落到生成起点锚楼（末条 assistant 楼）',
+            restarted === true && store.phase === 'idle' && stored !== null && stored.options.length === 4,
+            `restarted=${String(restarted)} phase=${store.phase} count=${stored?.options.length ?? 0}`,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+        writeTaskProfiles(JSON.parse(savedProfilesJson) as TaskProfilesDomain);
+        if (savedEndpoints.length === 0) writeApiDomain([]);
+        store.$reset();
+    }
 }
 
 /** 断言名（守卫分支与实测分支同名，FAIL 定位同窗）。 */
@@ -1104,11 +1178,21 @@ function runConstantRequestChecks(): void {
  * 走回退解析且会话态正确——开关不接生成管线的回归在此翻红。
  */
 async function runDebugForceRawChecks(): Promise<void> {
+    // 生成恒锚起点末条 assistant 楼：node 冒烟起始聊天为空，成功路径没有
+    // 可挂锚就无处落档——先造两楼（后续 runRunlog 的 partial 用例沿用）
+    const stubs = smokeStubs();
+    if (stubs) {
+        stubs.getContext().chat = [
+            { mes: '（角色卡开场白）', is_user: false },
+            { mes: 'AI 的真实回复正文。', is_user: false },
+        ];
+    }
     choiceStorage.updateGenParams({ debugForceRaw: true });
     try {
         await generateOptions();
         const store = useChoiceStore();
-        check('debugForceRaw 走生成管线不报错（无 API 调用）', store.phase !== 'error' && store.options.length === 4, `phase=${store.phase} count=${store.options.length} error=${store.error}`);
+        const stored = readFloorOptions(latestAssistantFloorIndex() ?? -1);
+        check('debugForceRaw 走生成管线不报错（无 API 调用）', store.phase !== 'error' && stored?.options.length === 4, `phase=${store.phase} count=${stored?.options.length ?? 0} error=${store.error}`);
         const runlog = useRunlogStore();
         const record = runlog.records[runlog.records.length - 1];
         check('debugForceRaw 解析路径＝回退（bracket_fallback，runlog enrich）', record?.parsePath === 'bracket_fallback', `path=${record?.parsePath ?? '无'}`);
@@ -1300,11 +1384,11 @@ async function runRunlogChecks(): Promise<void> {
             runlog.clear();
             await generateOptions();
             const record = runlog.records[runlog.records.length - 1];
-            const store = useChoiceStore();
+            const stored = readFloorOptions(latestAssistantFloorIndex() ?? -1);
             check(
                 'runlog：partial 生成 enrich 带解析路径与丢弃计数（4 条恢复＋1 条丢弃）',
                 !!record && record.ok && record.parsePath === 'partial' && record.optionCount === 4 && record.dropped === 1
-                && store.options.length === 4,
+                && stored?.options.length === 4,
                 `ok=${String(record?.ok)} path=${record?.parsePath ?? '无'} count=${String(record?.optionCount)} dropped=${String(record?.dropped)}`,
             );
         } finally {
@@ -1506,11 +1590,12 @@ export async function runChoiceSmoke(): Promise<void> {
     runInjectionChecks();
     await runAutoGenerateChecks();
     await runFloorPersistChecks();
+    await runToggleChecks();
     await runApplyOptionChecks();
     if (failures.length > 0) {
         console.error(`[choice-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（124 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/刷新恢复/切聊天/重 roll 作废/swipe 跟随/删楼重载/写侧守门/坏档回退）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（124 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/重 roll 作废/写侧守门/坏档回退）与生成 toggle 两段式（启动→取消、成功落档锚楼）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }

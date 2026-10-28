@@ -467,6 +467,37 @@
         emitChatChanged() {
             void eventSource.emit(event_types.CHAT_CHANGED);
         },
+        /**
+         * 生成/取消调试钮：调 SlashCommandParser 桩里真注册的 /tt-choice-gen
+         * callback（走真命令表与真 toggle 通道，不是另造一条测试捷径）。
+         */
+        toggleChoiceGenerate() {
+            const command = SlashCommandParser.commands['tt-choice-gen'];
+            if (!command || typeof command.callback !== 'function') {
+                console.warn('[harness] /tt-choice-gen 不在命令表（扩展未加载？）');
+                return;
+            }
+            void Promise.resolve(command.callback()).catch(e => console.error('[harness] 生成命令异常', e));
+        },
+        /**
+         * 造档口：往指定楼层 extra 写测试选项，并按宿主重印语义重挂该楼
+         * （观察器在真实宿主里由重渲染触发；harness 手工重插以走同一条
+         * 对账路径——也是「节点被换掉后补挂」的目检手段）。
+         */
+        seedChoiceOptions(floorIndex, options = [
+            { title: '试探', content: '把铜符推回她面前，等她自己开口。', aim: '逼她先表态' },
+            { title: '退一步', content: '装作没看见，换个话题。' },
+        ]) {
+            const message = chat[floorIndex];
+            if (!message) {
+                console.warn('[harness] seedChoiceOptions: 楼层不存在', floorIndex);
+                return false;
+            }
+            message.extra = { ttToolkit: { choice: { options } } };
+            const old = chatRoot?.querySelector(`.mes[mesid="${floorIndex}"]`);
+            if (old) old.replaceWith(buildMesElement(floorIndex, message.mes, message.is_user, message.is_system));
+            return true;
+        },
     };
 
     function buildMesElement(mesid, text, isUser, isSystem) {
@@ -476,10 +507,15 @@
         const name = document.createElement('div');
         name.className = 'mes_name';
         name.textContent = isSystem ? '系统' : isUser ? USER_NAME : CHAR_NAME;
+        // 宿主模板结构（index.html:7699）：正文容器在 .mes_block 内——choice
+        // 楼层块挂 .mes_block 尾部，harness 不包这层就永远挂不上
+        const block = document.createElement('div');
+        block.className = 'mes_block';
         const body = document.createElement('div');
         body.className = 'mes_text';
         body.textContent = text;
-        div.append(name, body);
+        block.append(name, body);
+        div.append(block);
         return div;
     }
     const chatRoot = document.querySelector('#chat');

@@ -19,13 +19,15 @@ import { missingTaskModelMessage, resolveTaskRoute } from '@/modules/apis/task-p
 import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
 
-/** 幂等安装标记（浏览器/node 两路 init 都可能调用）。 */
-let installed = false;
+// 幂等旗标走窗口级（nav 先例）：模块级旗标在扩展重载（模块重新求值、
+// 窗口不换）下归零而旧监听器仍挂着——双监听＝守卫链双跑。
+const AUTO_FLAG = '__TT_CHOICE_AUTO__';
 
 /** 安装自动生成监听（幂等）。 */
 export function installAutoGenerate(): void {
-    if (installed) return;
-    installed = true;
+    const flagWindow = globalThis as Record<string, unknown>;
+    if (flagWindow[AUTO_FLAG]) return;
+    flagWindow[AUTO_FLAG] = true;
     eventBus.on(event_types.MESSAGE_RECEIVED, (...args: unknown[]) => {
         // 返回值透传：宿主 emit 侧忽略它，冒烟经 stub emit 断言同步返回语义
         return handleMessageReceived(args[0], args[1]);

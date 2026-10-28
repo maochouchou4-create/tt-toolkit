@@ -9,3 +9,10 @@
  * 漂移静默断链。
  */
 export const TOOLBOX_COMMAND = 'tt-toolbox';
+
+/**
+ * 选项生成斜令名——单一事实源：choice 负责注册命令，nav QR「生成」按钮
+ * 的 message 指向它。字面量只允许出现这一处（check-imports 机判），防
+ * 两侧各自硬编码漂移静默断链。
+ */
+export const CHOICE_GEN_COMMAND = 'tt-choice-gen';

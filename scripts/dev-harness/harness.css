@@ -9,7 +9,7 @@
 :root {
     --topBarBlockSize: 48px;
     /* 宿主字号基准＋输入区图标槽尺寸链（照抄 TauriTavern/src/style.css:96,107-109
-       的 calc 公式——不定义则 #leftSendForm>div 图标槽零尺寸） */
+       的 calc 公式——不定义则 #rightSendForm>div 图标槽零尺寸） */
     --mainFontSize: 15px;
     --bottomFormBlockPadding: calc(var(--mainFontSize) / 2.5);
     --bottomFormIconSize: calc(var(--mainFontSize) * 1.9);
@@ -144,7 +144,7 @@ body {
 }
 
 /* 输入区骨架与图标槽皮肤镜像宿主（TauriTavern/src/style.css:968-1016 最小面）：
-   托盘触发钮进 #leftSendForm 吃宿主同款取皮——harness 不复刻则本地验不到真机外观 */
+   本扩展已不在输入区挂常驻件，保留取皮只为校验「无本扩展节点混入」外观线 */
 #send_form {
     display: flex;
 }
@@ -166,7 +166,6 @@ body {
 }
 
 /* 宿主取皮规则照抄（含 :not(.mes_stop) 排除——暂停钮不得被撑成可见） */
-#leftSendForm>div,
 #rightSendForm>div:not(.mes_stop) {
     width: var(--bottomFormBlockSize);
     height: var(--bottomFormBlockSize);
@@ -179,7 +178,6 @@ body {
     justify-content: center;
 }
 
-#leftSendForm>div:hover,
 #rightSendForm>div:not(.mes_stop):hover {
     opacity: 1;
     filter: brightness(1.2);

@@ -1,91 +1,36 @@
 /*
- * 行动选项托盘样式：皮肤走宿主 SmartTheme 变量（明暗主题自动跟随）。
- * 触发钮不自写尺寸/皮肤——宿主 #leftSendForm>div 图标槽规则全权负责
- * （TauriTavern/src/style.css:998-1016），这里只补 running/error 两个
- * 功能状态面；托盘挂 body（#send_form 的 backdrop-filter 会劫持原位
- * fixed 的包含块），不居任何宿主 nowrap 继承链下。
+ * 行动选项楼层块样式：皮肤走宿主 SmartTheme 变量（明暗主题自动跟随）。
+ * 块是 .mes_block 尾部的普通内容流节点（非浮层），跟正文一起滚、随楼层
+ * 生灭——定位/层级/收起一类浮层补偿件全部不存在。楼层内不造二层滚动：
+ * 选项网格与错误行都不设 max-height/overflow。
  */
 
-/* 生成中脉动：0%/100% 锚宿主槽位静态 opacity 0.7（style.css:1005）；
-   波谷 0.25/周期 1.2s＝harness 目检调定（可辨、不闪），无宿主先例 */
-.tt-choice-trigger.is-running {
-    animation: tt-choice-trigger-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes tt-choice-trigger-pulse {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 0.25; }
-}
-
-/* 错误色沿用错误行的 Quote 色语义：触发钮信号灯与托盘错误行同源同色 */
-.tt-choice-trigger.is-error {
-    color: var(--SmartThemeQuoteColor, #c58a36);
-}
-
-.tt-choice-tray {
-    position: fixed;
-    /* 层级走全局单源 --tt-z-popup（shell.css :root，TTCombobox 同源）：
-       挂 body 须越过宿主 #movingDivs 的 4000 层上下文、压工具箱壳的
-       30000 一头 */
-    z-index: var(--tt-z-popup);
+/* 楼层块容器：与正文拉开一点距离；无边框无底色（选项卡片自带背景） */
+.tt-choice-floor {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    max-height: 60dvh;
-    padding: 6px 8px;
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 8px;
-    background: var(--SmartThemeBlurTintColor, var(--SmartThemeChatTintColor, rgba(30, 30, 30, 0.9)));
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    margin-top: 10px;
 }
 
-.tt-choice-tray-error {
-    color: var(--SmartThemeQuoteColor, #c58a36);
-    font-size: 0.8em;
-    padding: 4px 0;
-    word-break: break-all;
-    max-height: 3.6em;
-    overflow-y: auto;
-}
-
-.tt-choice-tray-empty {
-    font-size: 0.8em;
-    opacity: 0.6;
-    padding: 6px 0;
-}
-
-/* 主体：整托盘一个高度上限（max-height 60dvh），滚动发生在网格自身 */
+/* 主体：两列网格，行高由卡片内容决定 */
 .tt-choice-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 4px;
-    min-height: 0;
-    overflow-y: auto;
-    /* 滚到边界不再链传页面（长列表滚轮浏览不出托盘） */
-    overscroll-behavior: contain;
 }
 
-.tt-choice-tray-foot {
-    display: flex;
-    justify-content: flex-end;
-}
-
-.tt-choice-bar-gen {
-    background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.15));
-    color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid var(--SmartThemeBorderColor, #666);
-    border-radius: 6px;
-    padding: 3px 10px;
+.tt-choice-error {
+    color: var(--SmartThemeQuoteColor, #c58a36);
     font-size: 0.8em;
-    cursor: pointer;
+    padding: 4px 0;
+    word-break: break-all;
 }
 
-.tt-choice-bar-gen:hover {
-    filter: brightness(1.15);
-}
-
-.tt-choice-bar-gen--cancel {
-    opacity: 0.85;
+.tt-choice-pending {
+    font-size: 0.8em;
+    opacity: 0.6;
+    padding: 6px 0;
 }
 
 .tt-choice-option {
@@ -135,4 +80,14 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+}
+
+/* 宿主编辑态：正文进入编辑框时该楼选项块暂隐（宿主编辑语义接管该楼） */
+.mes:has(.edit_textarea) .tt-choice-floor {
+    display: none;
+}
+
+/* 宿主删除模式：勾选待删楼层时选项块暂隐（宿主 .selected 态，style.css:1285） */
+#chat .mes.selected .tt-choice-floor {
+    display: none;
 }

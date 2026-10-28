@@ -22,7 +22,7 @@ export const GLOBAL_CHOICE_KEY = 'choice';
 
 /** 生成行为参数（全局域；含池抽取参数）。 */
 export interface ChoiceGenParams extends PoolGenParams {
-    /** 每次生成选项条数（语义＝pinned+drawn 的目标基数） */
+    /** 每次生成的选项数量（语义＝pinned+drawn 的目标基数） */
     count: number;
     /** 选项正文字数下/上限 */
     minChars: number;

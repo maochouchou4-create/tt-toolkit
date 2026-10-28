@@ -36,6 +36,12 @@
  *      新增环 → exit 1，既有环走 EXEMPT_CYCLES 显式豁免（理由随代码
  *      同行，不另立文档）。并入本门禁而非另立脚本：多一个独立环节＝多
  *      一次被跳过的机会，环检测的价值恰在「必跑」。
+ *   8. 命令字面量单源：'tt-choice-gen' 在 src 内只允许出现在
+ *      src/constants.ts（CHOICE_GEN_COMMAND）——choice 注册与 nav QR
+ *      按钮两侧各写一份字面量＝改名时静默断链。
+ *   9. 选项文本渲染禁 innerHTML：src/modules/choice/** 出现 innerHTML
+ *      即 exit 1——选项正文是模型输出（不可信输入），渲染只许
+ *      createElement＋textContent。
  *
  * 注：块注释内不得出现「斜杠+星」闭合序列，涉及 @sillytavern 与
  * glob 的措辞一律加空格隔开。
@@ -437,9 +443,54 @@ function checkCycles() {
 
 const cycleReport = checkCycles();
 
+// ---- 8. 命令字面量单源（CHOICE_GEN_COMMAND） ------------------------------
+
+const CHOICE_GEN_LITERAL = 'tt-choice-gen';
+{
+    const files = walkFiles(SRC_DIR, ['.ts', '.tsx', '.jsx', '.js', '.mjs', '.vue']);
+    for (const file of files) {
+        const rel = relative(ROOT, file).replaceAll('\\', '/');
+        if (rel === 'src/constants.ts') continue;
+        // 注释已剥离：说明文字里提到命令名不是第二处字面量
+        const text = stripComments(readFileSync(file, 'utf8'));
+        if (text.includes(CHOICE_GEN_LITERAL)) {
+            problems.push(`命令字面量散落：${rel} 出现 '${CHOICE_GEN_LITERAL}'——命令名须走 @/constants 的 CHOICE_GEN_COMMAND 单源（choice 注册与 nav QR 按钮共用）`);
+        }
+    }
+    // harness 调试口（scripts/dev-harness）拿不到 TS 常量只能写字面量，但
+    // 必须与 CHOICE_GEN_COMMAND 的值同步：命令改名漏改调试口＝按钮静默
+    // 断链，此处必红（src 内已由上面的散落扫描单源保证）
+    const declaredCommand = readFileSync(join(ROOT, 'src', 'constants.ts'), 'utf8')
+        .match(/CHOICE_GEN_COMMAND\s*=\s*'([^']+)'/)?.[1];
+    if (declaredCommand === undefined) {
+        problems.push('src/constants.ts 缺少 CHOICE_GEN_COMMAND 定义——harness 字面量核对无法进行');
+    } else if (declaredCommand !== CHOICE_GEN_LITERAL) {
+        for (const file of [join(ROOT, 'scripts', 'dev-harness', 'stubs.js'), join(ROOT, 'scripts', 'dev-harness', 'index.html')]) {
+            if (statSync(file, { throwIfNoEntry: false }) === undefined) continue;
+            if (stripComments(readFileSync(file, 'utf8')).includes(CHOICE_GEN_LITERAL)) {
+                problems.push(`命令字面量漂移：${relative(ROOT, file).replaceAll('\\', '/')} 仍是 '${CHOICE_GEN_LITERAL}'，而 CHOICE_GEN_COMMAND＝'${declaredCommand}'——命令改名须同步 harness 调试口`);
+            }
+        }
+    }
+}
+
+// ---- 9. 选项文本渲染禁 innerHTML（XSS 红线） ------------------------------
+
+{
+    const files = walkFiles(join(SRC_DIR, 'modules', 'choice'), ['.ts', '.tsx', '.jsx', '.js', '.mjs', '.vue']);
+    for (const file of files) {
+        const rel = relative(ROOT, file).replaceAll('\\', '/');
+        // 注释已剥离：why 注释里写 innerHTML 不算渲染路径
+        const text = stripComments(readFileSync(file, 'utf8'));
+        if (/\binnerHTML\b/.test(text)) {
+            problems.push(`XSS 红线：${rel} 出现 innerHTML——选项正文是模型输出，渲染只许 createElement+textContent`);
+        }
+    }
+}
+
 if (problems.length > 0) {
     for (const p of problems) console.error(`[check-imports] FAIL: ${p}`);
     process.exit(1);
 }
 
-console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物（${distTexts.length} 个 js）逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中；源级导入环：含环 SCC ${cycleReport.total} 处，其中登记豁免 ${cycleReport.exempted} 处、新增 0 处。`);
+console.log(`[check-imports] OK：上溯 ${uplevels} 级；src/host 导入 ${hostImportCount} 条 @sillytavern 说明符（${[...expected].length} 条唯一），dist 产物（${distTexts.length} 个 js）逐条一致；快照转出黑名单（含解构与宿主可变名 re-export，白名单 extension_settings）零命中；源级导入环：含环 SCC ${cycleReport.total} 处，其中登记豁免 ${cycleReport.exempted} 处、新增 0 处；命令字面量单源（'${CHOICE_GEN_LITERAL}' 仅 constants.ts）与 choice 模块 innerHTML 零命中。`);

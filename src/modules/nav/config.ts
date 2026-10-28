@@ -5,7 +5,7 @@
  * 只接线。熔断降级只丢持久日志，不影响功能。
  */
 
-import { createTtlog, type Ttlog } from '@/host';
+import { createTtlog, HOST_DOM, type Ttlog } from '@/host';
 
 // 版本戳：加载日志 / dump / 错误 toast 全带版本，现场排障可区分运行的
 // 是哪一版（两版同名 nav-v1 时日志无法归因的教训）
@@ -37,12 +37,13 @@ export const CONFIG = Object.freeze({
     SCROLL_VERIFY_FIRST_DELAY_MS: 500,
     SCROLL_VERIFY_DELAY_MS: 150,
     SCROLL_VERIFY_TOLERANCE_PX: 2,
-    // DOM 契约（TauriTavern 主干）
+    // DOM 契约（TauriTavern 主干）：聊天根与楼层选择器引 host 单源
+    // HOST_DOM（宿主模板锚在同一处登记），本层只留 nav 专用的按钮锚
     SEL: Object.freeze({
-        SCROLL_ROOT: '#chat',          // 滚动容器（chatSurface 的 root）
-        MESSAGE: '.mes[mesid]',        // 楼层节点
-        STOP_BUTTON: '#mes_stop',      // 生成期间显示的“暂停”按钮
-        SEND_BUTTON: '#send_but',      // 空闲时的“发送”按钮
+        SCROLL_ROOT: HOST_DOM.chatRoot,  // 滚动容器（chatSurface 的 root）
+        MESSAGE: HOST_DOM.floor,         // 楼层节点
+        STOP_BUTTON: '#mes_stop',        // 生成期间显示的“暂停”按钮
+        SEND_BUTTON: '#send_but',        // 空闲时的“发送”按钮
     }),
 });
 

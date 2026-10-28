@@ -333,7 +333,7 @@ function setGlobalListeners(on: boolean): void {
 
 .tt-combobox-popup {
     position: fixed;
-    /* 层级走全局单源 --tt-z-popup（shell.css :root，choice 托盘同源）：
+    /* 层级走全局单源 --tt-z-popup（shell.css :root，壳内浮层单源）：
        挂 body 须越过宿主 #movingDivs>div 的 4000 层叠上下文（工具箱壳
        深处其中），压壳自身的 30000 一头 */
     z-index: var(--tt-z-popup);

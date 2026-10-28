@@ -66,15 +66,26 @@ function isStoredFloorOptions(value: unknown): value is StoredFloorOptions {
         && (o.aim === undefined || typeof o.aim === 'string'));
 }
 
+/** 坏档告警每会话一次：坏档是坏数据不是流程错，逐楼重复刷屏会淹没真错误。 */
+let badArchiveWarned = false;
+
 /**
  * 读某楼层的选项存档；无档/越界/形状不符（坏档）一律 null——坏档回退
  * 空态优于抛错打断装载（派生数据不值得 Fail Fast 打断聊天）。
+ * 坏档留一条 console.warn（用户终端排障口，楼层渲染器不进 UI 零件）。
  */
 export function readFloorOptions(index: number): StoredFloorOptions | null {
     const message = messageAt(index);
     if (!message) return null;
     const stored = choiceNamespaceOf(message)?.[EXTRA_CHOICE_KEY];
-    if (!isStoredFloorOptions(stored)) return null;
+    if (stored === undefined) return null;
+    if (!isStoredFloorOptions(stored)) {
+        if (!badArchiveWarned) {
+            badArchiveWarned = true;
+            console.warn(`[tt-toolkit][choice] 楼层 ${index} 的选项存档形状不符，按无档处理（该楼不出选项块）`, stored);
+        }
+        return null;
+    }
     // 逐条重建：与消息单例解耦，调用方改返回值不污染 extra
     return {
         options: stored.options.map(toStoredOption),
@@ -126,13 +137,17 @@ export function clearFloorOptions(index: number, expectMessage: ChatMessage | nu
     saveCurrentChat();
 }
 
-/** 当前末条 assistant 楼层索引（倒序首条非 user/非 system）；无则 null。 */
+/** AI 回复楼层判据（生成锚点与楼层渲染共用单源）：非 user 且非 system。 */
+export function isAiFloor(message: { is_user?: unknown; is_system?: unknown }): boolean {
+    return message.is_user !== true && message.is_system !== true;
+}
+
+/** 当前末条 assistant 楼层索引（倒序首条 AI 回复楼）；无则 null。 */
 export function latestAssistantFloorIndex(): number | null {
     const messages = getChatMessages();
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
-        if (!isRecord(message)) continue;
-        if (message.is_user !== true && message.is_system !== true) return i;
+        if (isRecord(message) && isAiFloor(message)) return i;
     }
     return null;
 }
