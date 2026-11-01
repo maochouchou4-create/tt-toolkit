@@ -1,30 +1,24 @@
 /**
- * 统一设置存储（三域一层服务）。
+ * 统一设置存储（两域一层服务）。
  *
  * 域划分：
  *   - 全局域 extension_settings.ttToolkit：风格池、API 配置、
  *     UI 偏好、nav 域标记。各内容子域自带版本机制
  *     （如 choice 域 assetVersion），顶层不再持 schema version 概念。
- *   - 聊天域 chat_metadata.ttToolkit：配置绑定、剧情走向设置。
- *     写入纪律：同步变更当前 chat_metadata + 立即 getContext().saveMetadata
- *     显式保存（host/settings.ts，无防抖无排队、目标即当前活跃聊天）。
  *   - 角色域 character.data.extensions.ttToolkit：预留域，本仓暂无写面；
  *     若落地配置绑定须经 /api/characters/edit 全量合并通道（契约按 TT
  *     源码核实，严禁 saveCharacterDebounced）。
  *
- * 组件与模块一律通过本服务读写，不直接碰 extension_settings/chat_metadata。
+ * 组件与模块一律通过本服务读写，不直接碰 extension_settings。
  * 唯一例外：写口（整键替换）做不了 delete 的清场操作（如调试探针键的
  * 删除）走 host 层直访，见 storage/debug.ts 的探针清理。
  */
 
-import { currentChatMetadata, extension_settings, writeChatMetadata, writeExtensionSettings } from '@/host';
-import type { StoryDirection } from '@/prompts/types';
+import { extension_settings, writeExtensionSettings } from '@/host';
 import { isRecord } from './shape';
 
 /** 全局域存储键（extension_settings 下本扩展命名空间）。 */
 export const GLOBAL_KEY = 'ttToolkit';
-/** 聊天域存储键（chat_metadata 下本扩展命名空间）。 */
-export const CHAT_KEY = 'ttToolkit';
 
 export interface NavStorageState {
     /** QR 集「首次激活」标记（激活一次制，见 nav 模块） */
@@ -37,9 +31,8 @@ export interface NavStorageState {
  * 自己声明——服务层因此不必反向 import 任何功能模块（那会让 storage↔modules
  * 成环，而域读写是全仓最底层的公共面）。
  *
- * 本接口内联的键只有两类，判据是「类型定义处是否依赖 storage」：类型就在本
- * 文件（nav：启动期退役字段剥离由本层执行）或定义在零依赖叶子模块（storyDirection：
- * prompts/types）。其余子域一律走声明合并。
+ * 本接口内联的键只有一类，判据是「类型定义处是否依赖 storage」：类型就在本
+ * 文件（nav：启动期退役字段剥离由本层执行）。其余子域一律走声明合并。
  *
  * 新增键漏登记的代价在编译期：getGlobal/setGlobal 的键收窄到 keyof，子域
  * 写新键而不登记，vue-tsc 立即报错（编译期登记门）。
@@ -48,27 +41,15 @@ export interface GlobalDomain {
     nav: NavStorageState;
 }
 
-/** 聊天域显式键登记（登记义务同 GlobalDomain）。 */
-export interface ChatDomain {
-    /** 剧情走向（modules/choice/direction.ts CHAT_STORY_DIRECTION_KEY） */
-    storyDirection?: StoryDirection;
-}
-
 /** 读全局域原始单例（不快照——storage 内部面与调试 dump 用）。 */
 export function readGlobalDomain(): GlobalDomain {
     const raw = extension_settings[GLOBAL_KEY];
     return (raw ?? {}) as GlobalDomain;
 }
 
-/** 读聊天域原始单例（不快照——storage 内部面与调试 dump 用）。 */
-export function readChatDomain(): ChatDomain {
-    const raw = currentChatMetadata()[CHAT_KEY];
-    return (raw ?? {}) as ChatDomain;
-}
-
 /**
  * 深快照：读取返回值与宿主可变单例彻底解耦——调用方改返回值不会
- * 污染 extension_settings / chat_metadata。设置域为小对象非热路径，
+ * 污染 extension_settings。设置域为小对象非热路径，
  * 正确性优先；structuredClone 缺席（宿主环境裁剪）时降级浅拷贝。
  */
 function deepSnapshot<T>(value: T): T {
@@ -121,20 +102,5 @@ export function setGlobal<K extends keyof GlobalDomain>(key: K, value: GlobalDom
         const domain = (isRecord(settings[GLOBAL_KEY]) ? settings[GLOBAL_KEY] : {}) as Record<K, GlobalDomain[K]>;
         domain[key] = value;
         settings[GLOBAL_KEY] = domain;
-    });
-}
-
-/** 读聊天域子域（真深快照：返回值与存储单例解耦，写入走 setChat；口径同 getGlobal）。 */
-export function getChat<K extends keyof ChatDomain>(key: K): ChatDomain[K] | undefined {
-    const domain = readChatDomain();
-    return deepSnapshot(domain[key]) as ChatDomain[K] | undefined;
-}
-
-/** 写聊天域子域：整体替换该 key，经 host 层立即显式保存（口径同 setGlobal）。 */
-export function setChat<K extends keyof ChatDomain>(key: K, value: ChatDomain[K]): void {
-    writeChatMetadata(metadata => {
-        const domain = (isRecord(metadata[CHAT_KEY]) ? metadata[CHAT_KEY] : {}) as Record<K, ChatDomain[K]>;
-        domain[key] = value;
-        metadata[CHAT_KEY] = domain;
     });
 }

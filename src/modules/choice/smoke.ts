@@ -30,7 +30,7 @@ import { getGlobal, setGlobal } from '@/storage';
  */
 const ASSEMBLY_SEGMENT_TAGS: readonly string[] = [
     'persona', 'character', 'personality', 'scenario', 'world_info',
-    'direction', 'external_memory', 'pool_entries', 'current_scene',
+    'external_memory', 'pool_entries', 'current_scene',
     'rules', 'example', 'format',
 ];
 
@@ -77,7 +77,6 @@ function syntheticSources(): AssemblySources {
         worldInfoDepthBefore: '【三年前】她曾与斗篷人有过一面之缘。',
         worldInfoDepthAfter: '',
         history,
-        storyDirection: { presetText: '让剧情围绕未解之谜展开，逐步加深悬念。', freeText: '重点描写她的回避态度' },
         externalSlots: [{ key: '1_memory', value: '此前剧情摘要：两人在酒馆发生过争执。' }],
         poolInjection: null,
         count: 4,
@@ -731,14 +730,6 @@ function runAssemblyChecks(): string {
     check('世界书前插注入可见（<world_info> 段）', allSegments.includes('world_info') && allText.includes('一栋老写字楼'));
     check('世界书深度桶（深组）注入可见', allText.includes('【三年前】'));
     check('聊天历史注入（末条 AI 楼层 <current_scene> 包裹）', allSegments.includes('current_scene') && allText.includes('她垂下眼帘'));
-    check('story_direction 注入可见（<direction> 段＝预设正文＋自由文本拼接）', allSegments.includes('direction') && allText.includes('未解之谜') && allText.includes('重点描写她的回避态度'));
-    // 走向形态：自由文本为主＋预设拼接；两者皆空＝模块按未启用处理
-    const emptyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '' } });
-    const emptyDirTrace = emptyDirection.trace.find(t => t.moduleId === 'inject_story_direction');
-    check('story_direction 两者皆空＝不注入（trace 留痕）', emptyDirTrace?.injected === false && emptyDirTrace.note.includes('未设置'), `note=${emptyDirTrace?.note ?? '（无 trace）'}`);
-    const freeOnlyDirection = assembleMessages(config.modules, { ...sources, storyDirection: { presetText: '', freeText: '重点描写她的回避态度' } });
-    const freeOnlyText = freeOnlyDirection.messages.map(m => m.content).join('\n');
-    check('story_direction 仅自由文本也注入（无预设可用）', segmentTagsIn(freeOnlyText).includes('direction') && freeOnlyText.includes('重点描写她的回避态度') && !freeOnlyText.includes('未解之谜'));
     // 外部槽位：合成源给了非空槽位内容 → 注入可见（非空即带单步链路）。
     // 逐槽位标注：内容段带槽位 key 前缀、trace note 同粒度（逐项可见到槽位）
     check('外部注入槽位搬入可见（<external_memory> 段逐槽位标注）', allSegments.includes('external_memory') && allText.includes('[槽位 1_memory]') && allText.includes('两人在酒馆发生过争执'));

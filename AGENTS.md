@@ -45,19 +45,17 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 - tab 页面只用 TTCard/TTField/TTCombobox/TTStatus 组件与 .tt-btn/.tt-check-row/.tt-ctrl 类拼装，禁止手写裸 label+select/input 组合与私有控件 CSS；原生 select/input/textarea 一律加 .tt-ctrl 取皮；字号/间距/控件高只用令牌（shell.css --tt-*），font-size 字面量只许出现在 ui/ 组件样式内（token 元素父链恒为基准字号），tab 与 shell.css 非 token 区禁止。
 - 一个数据一个控件：同一字段禁止双控件拼功能（可输可选＝TTCombobox 单控件）。
 - 数据有无不改变布局结构：清单出现/消失只许发生在控件内部浮层，不许整行/整块冒出或行高突变。
-- 卡片描述 ≤2 行：规格级长文进 TTCard 的 details 折叠或运行日志，不铺在设置面。
 - 新控件需求先扩原语层再使用（缺什么补什么），不在单 tab 内特化。
 
 ## 存储域纪律
 
-写任何持久化数据前先定域（三域归属判据）：
+写任何持久化数据前先定域（两域归属判据）：
 
 - **跨聊天复用**（生成参数、端点表、条目池、提示词配置……）＝全局域 `extension_settings.ttToolkit`；
-- **跟单次聊天走**（剧情走向……）＝聊天域 `chat_metadata.ttToolkit`；
 - **单条消息的派生数据**（该楼选项……）＝该消息 `extra.ttToolkit`——写入必须是纯数据（宿主 swipe 会 structuredClone 进新槽位）；写前做对象校验（删楼会使索引左移）、写后立即 `saveCurrentChat()`；**生成开始须主动清旧档**（宿主 `clearMessageData` 白名单不碰 `ttToolkit`，普通 regenerate 不调，宿主不会替扩展清理）；
 - 角色域 `character.data.extensions.ttToolkit` 预留，无写面。
 
-新键义务：域键常量与域类型都在**归属模块**定义（字面量仅此一份），并在该模块用 `declare module '@/storage/service'` 声明合并登记进 `GlobalDomain`／`ChatDomain`（键与值类型一并登记）——漏登记或形状写错 vue-tsc 即报错（编译期登记门）。登记放在归属模块是为了让服务层不反向 import 功能模块（那会让 storage↔modules 成环）；内联在 service.ts 的例外只有两种：类型定义就在该文件的 nav，以及定义在零依赖叶子模块的 storyDirection。读面仍须经归属模块的 normalize 才可安全展开——类型收紧只在 API 面，坏档容忍不因此消失。排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
+新键义务：域键常量与域类型都在**归属模块**定义（字面量仅此一份），并在该模块用 `declare module '@/storage/service'` 声明合并登记进 `GlobalDomain`（键与值类型一并登记）——漏登记或形状写错 vue-tsc 即报错（编译期登记门）。登记放在归属模块是为了让服务层不反向 import 功能模块（那会让 storage↔modules 成环）；内联在 service.ts 的例外只有一种：类型定义就在该文件的 nav。读面仍须经归属模块的 normalize 才可安全展开——类型收紧只在 API 面，坏档容忍不因此消失。排障走 `src/storage/debug.ts` 的 `dumpStorage()`。
 
 旧扩展自身域（`extension_settings.choice` 等）与历史 localStorage 旧键的迁移、收编、一次性清理机器均已随 tt-slim 批 B 退役删除——旧键名（`pw_state_v20` 等）不再被任何代码引用，存量残留为无害孤儿，勿再新建引用。
 

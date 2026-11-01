@@ -6,9 +6,9 @@
  * 改动是拖块调序，两件事混在一处时，改装配要在一屏提示词里找落点，改正文
  * 又容易顺手碰走 order。
  *
- * order 分段：注入类 10-100（任务定义 10 → 人设 20 … 剧情走向 100），
+ * order 分段：注入类 10-98（任务定义 10 → 人设 20 … 池条目 98），
  * 规则/格式类 110-140（示例 → 写作规则 → 输出契约 → 生成指令收尾）。
- * 数组次序不按 order 排（池条目 order 98 排在剧情走向 100 之后）：行为排序
+ * 数组次序不按 order 排（池条目 order 98 排在规则类之前）：行为排序
  * 由引擎按 order 做，数组次序不承载行为，保持出厂形态即可。
  */
 import {
@@ -142,15 +142,6 @@ export const DEFAULT_PROMPT_CONFIGS: Record<TaskKey, PromptConfig> = {
                 order: 94,
                 enabled: true,
                 source: 'external_slot',
-            },
-            {
-                kind: 'inject',
-                id: 'inject_story_direction',
-                name: '剧情走向',
-                role: 'system',
-                order: 100,
-                enabled: true,
-                source: 'story_direction',
             },
             {
                 // 池条目注入：模块本体默认参与管线；槽位内容收集全自动

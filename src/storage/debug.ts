@@ -1,17 +1,17 @@
 /**
- * 存储调试设施（写读 roundtrip 机判＋三域 dump）——只服务冒烟与排障，
+ * 存储调试设施（写读 roundtrip 机判＋全局域 dump）——只服务冒烟与排障，
  * 不进 storage 服务公开面（消费方仅 main.ts 冒烟分支与 __TT_TOOLKIT__
  * 排障口）。
  */
 
-import { writeChatMetadata, writeExtensionSettings } from '@/host';
-import { CHAT_KEY, GLOBAL_KEY, getChat, getGlobal, readChatDomain, readGlobalDomain, setChat, setGlobal } from './service';
-import type { ChatDomain, GlobalDomain } from './service';
+import { writeExtensionSettings } from '@/host';
+import { GLOBAL_KEY, getGlobal, readGlobalDomain, setGlobal } from './service';
+import type { GlobalDomain } from './service';
 import { newId } from './id';
 import { isRecord } from './shape';
 
 export interface RoundtripReport {
-    scope: 'global' | 'chat';
+    scope: 'global';
     ok: boolean;
     written: string;
     readBack: string;
@@ -20,7 +20,6 @@ export interface RoundtripReport {
 
 // 测试探针键：非功能域不入域登记，断言处显式豁免（写读后即删、不落用户数据形状）
 const SMOKE_GLOBAL_KEY = '_smoke' as keyof GlobalDomain;
-const SMOKE_CHAT_KEY = '_smoke' as keyof ChatDomain;
 
 /**
  * 探针读写口：探针键不在域登记面里（登记面只登记在用的子域），因此键挂上
@@ -37,17 +36,9 @@ function readGlobalProbe(): string | undefined {
     return (getGlobal(SMOKE_GLOBAL_KEY) as unknown as ProbeValue | undefined)?.token;
 }
 
-function writeChatProbe(value: ProbeValue): void {
-    setChat(SMOKE_CHAT_KEY, value as unknown as ChatDomain[keyof ChatDomain]);
-}
-
-function readChatProbe(): string | undefined {
-    return (getChat(SMOKE_CHAT_KEY) as unknown as ProbeValue | undefined)?.token;
-}
-
 /**
- * storage 写读 roundtrip：全局域与聊天域各写一个随机 token 再读回比对。
- * 读回走同一读取路径（getGlobal/getChat），链路＝用户实际数据链路。
+ * storage 写读 roundtrip：全局域写一个随机 token 再读回比对。
+ * 读回走同一读取路径（getGlobal），链路＝用户实际数据链路。
  * 比对完成后经正式变更器删除 _smoke 键——测试残留会随用户数据落盘
  * 并出现在调试 dump 里。
  */
@@ -65,31 +56,16 @@ export function runStorageRoundtrip(): RoundtripReport[] {
         at: new Date().toISOString(),
     });
 
-    const chatToken = newId('rt');
-    writeChatProbe({ token: chatToken });
-    const chatRead = readChatProbe();
-    reports.push({
-        scope: 'chat',
-        ok: chatRead === chatToken,
-        written: chatToken,
-        readBack: String(chatRead),
-        at: new Date().toISOString(),
-    });
-
     writeExtensionSettings(settings => {
         const domain = settings[GLOBAL_KEY];
         if (isRecord(domain)) delete domain[SMOKE_GLOBAL_KEY];
-    });
-    writeChatMetadata(metadata => {
-        const domain = metadata[CHAT_KEY];
-        if (isRecord(domain)) delete domain[SMOKE_CHAT_KEY];
     });
 
     return reports;
 }
 
 /**
- * 存储三域快照序列化（调试 dump 用）。
+ * 存储全局域快照序列化（调试 dump 用）。
  * 密钥掩码（双复核 P3）：调试面板不回显明文——choice.apis[].key 只保留
  * 前 6 字符＋省略号（判断「填没填、填的是哪把」足够，整把钥匙不进 DOM）。
  */
@@ -101,7 +77,6 @@ export function dumpStorage(): string {
     const lines = [
         `storage dump @ ${new Date().toISOString()}`,
         `global(${GLOBAL_KEY}) = ${maskedGlobal}`,
-        `chat(${CHAT_KEY}) = ${JSON.stringify(readChatDomain(), null, 2)}`,
     ];
     return lines.join('\n');
 }

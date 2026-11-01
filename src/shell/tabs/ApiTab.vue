@@ -4,18 +4,18 @@
     （任务档案，各任务独立选服务商与模型）＋生成注入（破限预设）。
     url+key＝服务商，模型选择权在任务模型卡——两层分离。
     页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn，
-    字号/间距只走 --tt-* 令牌，本样式只余页面私有布局与信息行。
+    字号/间距只走 --tt-* 令牌，本样式只余页面私有布局。
   -->
   <div class="tt-api-tab">
-    <TTCard title="API 服务商" :sub="PROVIDERS_SUB">
+    <TTCard title="API 服务商">
       <div v-if="!apis.endpoints.length" class="tt-api-empty">
-        还没有服务商——点下方「新增服务商」开始配置。
+        还没有服务商
       </div>
 
       <div v-for="p in apis.endpoints" :key="p.id" class="tt-api-row">
         <div class="tt-api-row-main">
           <span class="tt-api-name">{{ p.name || '（未命名）' }}</span>
-          <TTStatus v-if="p.noPrefill" tone="warn" :title="NO_PREFILL_BADGE_TITLE">不支持 prefill</TTStatus>
+          <TTStatus v-if="p.noPrefill" tone="warn">不支持 prefill</TTStatus>
           <span class="tt-api-url" :title="p.url">{{ p.url || '（未填地址）' }}</span>
           <span class="tt-api-model">{{ p.models.length > 0 ? `${p.models.length} 个模型` : '未拉取清单' }}</span>
         </div>
@@ -31,13 +31,13 @@
 
     <TTCard v-if="apis.draft" :title="isEdit ? '编辑服务商' : '新服务商'">
       <TTField label="名称">
-        <input v-model.trim="apis.draft.name" class="tt-ctrl" type="text" placeholder="如：DeepSeek 官方 / 某中转站">
+        <input v-model.trim="apis.draft.name" class="tt-ctrl" type="text">
       </TTField>
       <TTField label="地址">
-        <input v-model.trim="apis.draft.url" class="tt-ctrl" type="text" placeholder="https://api.example.com/v1">
+        <input v-model.trim="apis.draft.url" class="tt-ctrl" type="text">
       </TTField>
       <TTField label="密钥">
-        <input v-model.trim="apis.draft.key" class="tt-ctrl" type="text" autocomplete="off" placeholder="sk-…">
+        <input v-model.trim="apis.draft.key" class="tt-ctrl" type="text" autocomplete="off">
       </TTField>
 
       <div class="tt-api-model-edit">
@@ -45,9 +45,8 @@
         <span class="tt-api-model">{{ apis.draft.models.length > 0 ? `${apis.draft.models.length} 个模型` : '未拉取' }}</span>
         <button type="button" class="tt-btn" :disabled="modelsLoading" @click="onFetchModels">拉模型清单</button>
       </div>
-      <div class="tt-api-hint">勾选想保留的模型后点「只保留勾选」收窄清单；过滤框只帮定位，不影响勾选。</div>
       <div class="tt-api-model-filter">
-        <input v-model="modelFilter" class="tt-ctrl" type="text" placeholder="按关键字过滤（辅助定位）" aria-label="模型过滤">
+        <input v-model="modelFilter" class="tt-ctrl" type="text" placeholder="按关键字过滤" aria-label="模型过滤">
       </div>
       <!-- 列表区常驻渲染（有 draft 即渲染，内容有无不改变结构，空态文案兜底） -->
       <div class="tt-api-model-list">
@@ -76,7 +75,7 @@
       </div>
     </TTCard>
 
-    <TTCard title="任务模型" :sub="TASKS_SUB">
+    <TTCard title="任务模型">
       <div class="tt-task-grid" role="table">
         <div class="tt-task-grid-row tt-task-grid-head" role="row">
           <span class="tt-task-grid-cell tt-task-grid-cell--name" role="presentation" />
@@ -100,7 +99,7 @@
               :model-value="batchModel"
               :options="modelsOf(batchProviderId)"
               :empty-text="modelEmptyText(batchProviderId)"
-              placeholder="模型 ID（可从所选服务商清单选）"
+              placeholder="模型 ID"
               aria-label="批量模型"
               @update:model-value="onBatchModelInput"
             />
@@ -131,7 +130,7 @@
               :model-value="apis.taskProfiles[t.id].model"
               :options="modelsOf(apis.taskProfiles[t.id].providerId)"
               :empty-text="modelEmptyText(apis.taskProfiles[t.id].providerId)"
-              placeholder="模型 ID（可从所选服务商清单选）"
+              placeholder="模型 ID"
               aria-label="模型"
               @update:model-value="onModelInput(t.id, $event)"
             />
@@ -162,11 +161,9 @@
           </span>
         </div>
       </div>
-
-      <div class="tt-api-hint">推荐参数（调乱后照此恢复）：选项生成/人设生成＝温度 1.0·思考高。</div>
     </TTCard>
 
-    <TTCard title="生成注入" :sub="JB_SUB">
+    <TTCard title="生成注入">
       <TTField label="破限预设">
         <select class="tt-ctrl" :value="apis.jailbreakPreset" @change="onJbPresetChange">
           <option value="">不启用</option>
@@ -176,7 +173,6 @@
       <div v-if="jbMissing" class="tt-api-notice">
         <TTStatus tone="err">选中预设「{{ apis.jailbreakPreset }}」已不存在——生成将不带注入，请重选或切回「不启用」</TTStatus>
       </div>
-      <template #details>{{ JB_DETAILS }}</template>
     </TTCard>
   </div>
 </template>
@@ -198,12 +194,6 @@ const draftError = ref('');
 watch(() => apis.draft, () => {
     draftError.value = '';
 });
-
-// 卡片描述走常量：模板属性里换行会掺空格，逐字文案只有常量能所见即所写
-const PROVIDERS_SUB = '这里只管接入身份（地址＋密钥），各生成任务用什么模型在下方「任务模型」卡按行选择。 密钥经宿主后端转发直达上游，不存进宿主的密钥库。';
-const TASKS_SUB = '每个生成任务独立选择服务商与模型；温度留空或改回即用推荐档，思考强度同理。 模型下拉来自所选服务商的模型清单（可在编辑服务商时勾选保留），也可直接手填模型 ID。';
-const JB_SUB = '选中宿主预设的「启用文本条目」会插到创作类任务每次请求的最前，人设链每一轮都带（含复核那一轮）；预设不存在或无启用条目时生成不带注入（运行日志有记录）。';
-const JB_DETAILS = '按原角色插入（assistant 开场就还是 assistant）。预设的采样参数不生效——温度与思考强度在「任务模型」卡按任务配置。人设页已无任务级预设——预设对生成的影响只经此处注入（全插件唯一预设口）。';
 
 // 档位清单取任务档案侧的枚举（守卫同源）——UI 只出中文标签，不另抄一份档位表
 const EFFORT_LABELS: Readonly<Record<ReasoningEffort, string>> = { off: '关', low: '低', medium: '中', high: '高' };
@@ -262,10 +252,7 @@ function confirmRemove(provider: ApiProvider): void {
     apis.removeEndpoint(provider.id);
 }
 
-// 徽标悬停说明（why：起手词为何被摘、怎么恢复）；toast 在点击点弹——store
-// 动作会被冒烟直接调用，那里没有宿主桥
-const NO_PREFILL_BADGE_TITLE = '该端点拒绝以模型续写开头（prefill）的请求，已自动不再附带起手词；点「复位」可恢复。';
-
+// 复位按钮（toast 在点击点弹——store 动作会被冒烟直接调用，那里没有宿主桥）
 function resetPrefill(provider: ApiProvider): void {
     apis.resetPrefillCapability(provider.id);
     showToast('已恢复该端点的续写能力');
@@ -282,9 +269,9 @@ function modelsOf(providerId: string): string[] {
     return apis.endpoints.find(p => p.id === providerId)?.models ?? [];
 }
 
-/** 模型候选空态文案：区分「没选服务商」与「选了但没清单」两种指引。 */
+/** 模型候选空态文案：区分「没选服务商」与「选了但没清单」两种状态。 */
 function modelEmptyText(providerId: string): string {
-    return providerId ? '该服务商暂无模型清单，可直接手填' : '请先选择服务商，或直接手填模型 ID';
+    return providerId ? '暂无模型清单' : '请先选择服务商';
 }
 
 function onProviderChange(task: TaskId, event: Event): void {
@@ -470,12 +457,6 @@ function onSave(): void {
 /* 批量行按钮占温度＋思考两列（该行没有这两个数据格） */
 .tt-task-batch-actions {
     grid-column: 4 / -1;
-}
-
-.tt-api-hint {
-    font-size: var(--tt-fs-hint);
-    opacity: 0.65;
-    padding-top: var(--tt-sp-2);
 }
 
 .tt-api-model-edit {

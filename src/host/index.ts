@@ -14,7 +14,6 @@ export {
     currentChatMetadata,
     currentThisChid,
     extension_settings,
-    writeChatMetadata,
     writeExtensionSettings,
 } from './settings';
 export { isSlashCommandRegistered, registerSlashCommand } from './slash';

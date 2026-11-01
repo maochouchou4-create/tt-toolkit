@@ -43,8 +43,8 @@ export const EXTRA_NAMESPACE_KEY = 'ttToolkit';
 /**
  * 当前聊天消息变更的立即落盘通道（写 message.extra 后调用）。
  * 只许走 context.saveChat（＝saveChatConditional，内部按群聊分流）；
- * 保存通道缺席（宿主版本漂移）照 writeChatMetadata 的失败纪律：
- * 内存改动仍生效，但 console.error 留痕，不许静默当作已落盘。
+ * 保存通道缺席（宿主版本漂移）＝内存改动仍生效，但 console.error
+ * 留痕，不许静默当作已落盘。
  */
 export function saveCurrentChat(): void {
     const save = getTavernContext()?.saveChat;

@@ -15,7 +15,6 @@ import type {
     ModuleTrace,
     PersonaInjectionSource,
     PromptModule,
-    StoryDirection,
     TextModule,
 } from './types';
 import { PERSONA_INJECTION_SOURCES } from './types';
@@ -46,8 +45,6 @@ export interface AssemblySources {
     worldInfoDepthAfter: string;
     /** 原始历史（不含 <current_scene>——包裹在本引擎做，位置固定末条 AI 楼层） */
     history: HistoryEntry[];
-    /** 剧情走向（null＝未设置——story_direction 模块按未启用处理） */
-    storyDirection: StoryDirection | null;
     /** 自动搬入的宿主通用注入槽位（非空即带；顺序＝宿主 depth 升序＋key 字典序，见 sources 收集处） */
     externalSlots: Array<{ key: string; value: string }>;
     /**
@@ -238,16 +235,6 @@ function resolveInjectContent(
             // 不可达：chat_history 在 assembleMessages 提前展开为多条消息
             // （本函数返回单串表达不了多消息）——此分支只为 switch 穷尽性
             return { content: '', note: '聊天历史为空' };
-        case 'story_direction': {
-            // <direction> 段＝已应用预设正文＋自由文本拼接
-            // （预设文本与自由文本同为走向指令，不做二级标注）；两者
-            // 皆空＝模块按未启用处理（不注入、trace 留痕）
-            const preset = sources.storyDirection?.presetText.trim() ?? '';
-            const free = sources.storyDirection?.freeText.trim() ?? '';
-            if (!preset && !free) return { content: '', note: '剧情走向未设置（不注入）' };
-            const note = preset && free ? '预设＋自由文本' : preset ? '预设' : '自由文本';
-            return { content: wrapTag('direction', [preset, free].filter(Boolean).join('\n'), sources), note };
-        }
         case 'external_slot': {
             // 自动口径：sources 枚举宿主非空槽位全带，
             // 无配置门——空列表＝没有插件写入，段缺席不报错

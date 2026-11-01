@@ -16,8 +16,6 @@
  */
 import { event_types, extension_settings, getCurrentCharacter, getTavernContext, readPresetInjectMessages, upsertPersona } from '@/host';
 import { toolkitGlobalPort } from '@/global-port';
-import { getChat, setChat } from '@/storage/service';
-import type { ChatDomain } from '@/storage/service';
 import { readPersonaDomain, writePersonaDomain } from './storage';
 import { DEFAULT_TEMPLATES } from './prompts';
 import { isSchemaSkeleton, parseYamlToBlocks, checkProfileShape, scanProfileLeaves } from './yaml';
@@ -2584,7 +2582,7 @@ function smokeStubs(): SmokeStubs {
 function runHostLiveBindingChecks(): void {
     const stubs = smokeStubs();
 
-    // 1. 读通道活取用：this_chid 运行中变更即跟随
+    // 读通道活取用：this_chid 运行中变更即跟随
     const backupChars = stubs.characters;
     try {
         stubs.setCharacters([{ name: '卡A' }, { name: '卡B' }]);
@@ -2595,25 +2593,6 @@ function runHostLiveBindingChecks(): void {
     } finally {
         stubs.setCharacters(backupChars);
         stubs.setThisChid('0');
-    }
-
-    // 2. 写通道活目标：chat_metadata 换引用后写落当前对象、读回当前对象
-    // （livenessProbe 是测试探针键，不入 ChatDomain 登记——keyof 与值形状
-    // 均由本段显式断言，登记门只管在用子域的键）
-    const probeKey = 'livenessProbe' as keyof ChatDomain;
-    type LivenessProbe = { v?: number };
-    const originalChat = stubs.chat_metadata;
-    try {
-        stubs.setChatMetadata({});
-        setChat(probeKey, { v: 1 } as unknown as ChatDomain[keyof ChatDomain]);
-        const domain = stubs.chat_metadata.ttToolkit as Record<string, unknown> | undefined;
-        const probe = domain?.livenessProbe as LivenessProbe | undefined;
-        const readBack = getChat(probeKey) as LivenessProbe | undefined;
-        check('host 活取用：chat_metadata 换引用后 setChat 写落当前对象、getChat 读当前对象（写通道目标=现取，脱挂写丢失回归红线）',
-            readBack?.v === 1 && probe?.v === 1,
-            `getChat=${JSON.stringify(readBack)} 宿主当前对象=${JSON.stringify(probe)}`);
-    } finally {
-        stubs.setChatMetadata(originalChat);
     }
 }
 
@@ -2793,12 +2772,6 @@ function runShellHookChecks(): void {
     check('写回保护：覆盖确认文案逐字（点明两种来源与覆盖后果）',
         TEXT.CONFIRM_OVERWRITE_HOST === '宿主侧的人设在生成后被修改过（可能你在 TT 里直接改过，或换了卡）。继续覆盖会丢失那些修改。仍要覆盖吗？',
         TEXT.CONFIRM_OVERWRITE_HOST);
-    // 需求框 placeholder 逐字锁：引导句是「点名」通道的用户侧唯一提示，被删
-    // 时无任何门禁信号；句序（问句→引导→示例收尾）也是锁的一部分——引导句
-    // 贴着示例省略号会被断行并进上一句读完。
-    check('壳文案：生成需求 placeholder 逐字（点名通道引导句在前、示例收尾）',
-        TEXT.PERSONA_REQUEST_PLACEHOLDER === '想要一个什么样的人设？想在某方面出细节就写进来（如「想要他吃醋的样子」）。例如：温和的图书管理员，暗中收藏禁忌典籍……',
-        TEXT.PERSONA_REQUEST_PLACEHOLDER);
 }
 
 /** 冒烟入口（main.ts node 分支调用）。 */

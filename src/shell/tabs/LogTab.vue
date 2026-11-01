@@ -13,7 +13,7 @@
     </div>
 
     <div v-if="store.records.length === 0" class="tt-runlog-empty">
-      尚无生成记录——成功与失败的生成都会记在这里（仅本会话，刷新即清）
+      尚无生成记录
     </div>
     <ul v-else class="tt-runlog-list">
       <li v-for="r in store.records" :key="r.id" class="tt-runlog-item">

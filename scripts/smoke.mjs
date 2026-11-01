@@ -85,10 +85,6 @@ const stubContext = {
     characterId: null,
     // 斜令执行器故意缺席：node 冒烟不模拟宿主执行
     executeSlashCommandsWithOptions: undefined,
-    // chat 域立即保存通道（调用计数供断言：writeChatMetadata 是否真的走它）
-    saveMetadata: async () => {
-        globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls++;
-    },
     // 消息级落盘通道（调用计数供断言：writeFloorOptions 是否真的走它）
     saveChat: async () => {
         globalThis.__TT_SMOKE_STUBS__.saveChatCalls++;
@@ -285,7 +281,6 @@ globalThis.__TT_SMOKE_STUBS__ = {
     // 发生，node 冒烟不会真正调用）
     dragElement: noop,
     getContext: () => stubContext,
-    saveMetadataCalls: 0,
     saveChatCalls: 0,
     // ------------------------------------------------------------------
     // persona 通道存根（host/personas.ts / host/worldinfo.ts 导入面）
@@ -500,11 +495,6 @@ if (!('tt-choice-gen' in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.comman
     failures.push('最小初始化未注册 /tt-choice-gen（QR「生成」按钮依赖此命令）');
 }
 
-// chat 域写入走立即保存通道（writeChatMetadata → getContext().saveMetadata）
-if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
-    failures.push('writeChatMetadata 未触发 getContext().saveMetadata（chat 域立即保存链路未接通）');
-}
-
 // 消息级落盘的链路口径在 runFloorPersistChecks 内以 delta 断言收口
 // （writeFloorOptions 调用前后 saveChatCalls 恰 +1）——此处不再设全局
 // 弱门：任何生成成功都会写楼层存档，弱门会被别处用例满足而失去判别力。
@@ -557,7 +547,8 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // （57 静态形状＋同步行为）−3、注入区分区与 P2-1 覆盖句随 pinned 退役（旧形态
 // 清零/编号渲染补位）±0、楼层 aim 断言（旧档带 aim 读侧丢弃替「无 aim 仍缺席」
 // 与往返）−1、解析 aim 三断言并一 −2 ＝ 149。
-const CHOICE_PASS_EXPECTED = 149;
+// ＝ tt-slim UI 精简批：走向指引整链删除（组装段标签/合成源/注入断言三条）−3 ＝ 146。
+const CHOICE_PASS_EXPECTED = 146;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -572,8 +563,9 @@ if (dumpStart < 0) {
     const dumpBody = boot1Lines.slice(dumpStart).join('\n');
     // 池注入 dump 打印在组装 dump 之后（「池注入 dump」段），标记
     // 断言对「dumpStart 之后」的全量输出收口——两份 dump 都算数；
-    // <pool_rules> 标记已删（池规则并入模板 <rules> 段）
-    for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<direction>', '<external_memory>', '<pool_entries>', '<rules>']) {
+    // <pool_rules> 标记已删（池规则并入模板 <rules> 段）、<direction> 标记
+    // 已删（走向指引整链退役）
+    for (const marker of ['<persona>', '<character>', '<world_info>', '<current_scene>', '<external_memory>', '<pool_entries>', '<rules>']) {
         if (!dumpBody.includes(marker)) {
             failures.push(`组装 dump 缺少注入段标记 ${marker}`);
         }
@@ -614,7 +606,7 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // e2e 7（含取消通道 1：请求已发出后取消归类＋复位不误写；破限注入 2：两段
 // 前缀在场＋悬空 fail-soft 不注入）＋store 7＋会话感知 3
 // （CHAT_CHANGED 重置开场白默认档＋emit 接线全链＋无开场白卡回落不注入）＋
-// host 活取用回归 2（this_chid 跟随＋chat_metadata 换引用写读落当前对象）＋
+// host 活取用回归 1（this_chid 跟随）＋
 // 空白正文 fail fast 1（纯空白抛「API 返回为空」：错误 toast 在场＋结果框
 // 保持原值＋互斥态干净）＋宿主错误信封 9（骨架判据 5：放行真骨架/拦下错误
 // 正文/拦下空与散文/拦下散言前导换皮形态/拦下与切块口径分歧的 1 空格散言行；
@@ -675,10 +667,9 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 收尾——模型回「无重复」那条最常见的路也打，载荷只有计数与符号名不带档案
 // 内文；零计数时一条 warn 都不打）＋切聊天取消 in-flight 2（会话切换中止
 // 进行中那轮：互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志留痕
-// ——传输层单一写入点落一条 persona 失败记录且无双记）＋壳真钩子 3（人设
+// ——传输层单一写入点落一条 persona 失败记录且无双记）＋壳真钩子 2（人设
 // tab 描述符注册 onActivate 且每次激活只刷宿主派生快照·结果框编辑现场不动/
-// 覆盖确认文案逐字锁——用户靠这句判断覆盖会丢什么/需求框 placeholder 逐字锁
-// ——点名通道的用户侧唯一提示）＋写回保护 2（首次成功
+// 覆盖确认文案逐字锁——用户靠这句判断覆盖会丢什么）＋写回保护 2（首次成功
 // 写回即立基线故宿主同值时不打扰/宿主正文偏离快照时问一次且拒答即零写通道
 // 调用·镜像与编辑现场原样）＋切聊天落在世界书收集窗口 1（收集是真挂起点且
 // 不收取消信号·该窗口内切聊天则旧会话描述符不写回 lastRun·请求不发出）。
@@ -694,7 +685,9 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // ＝ tt-slim 批 C 提示词域清残：域存储三用例（全任务键齐备/旧数组重建
 // ＋warn/版本化重建按 id 在场）与版本钉 1 条（DEFAULTS_VERSION＝21）随
 // promptConfigs 域机器退役删除 ＝ −4。
-const PERSONA_PASS_EXPECTED = 148;
+// ＝ tt-slim UI 精简批：chat 域 host 活取用换引用断言 1＋需求框 placeholder
+// 逐字锁 1 随机制退役删除 ＝ −2。
+const PERSONA_PASS_EXPECTED = 146;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -845,7 +838,7 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 // ＝收官版本。版本 bump＝五处同步改——漏改任何一处这里红；dist 内嵌一处
 // 专防「src 已 bump 而 dist 未重建」（构建链漏跑）。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '2.0.0';
+const EXPECTED_VERSION = '2.1.0';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿
@@ -912,4 +905,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/候选风格注入/自动生成守卫链＋请求超时与取消两语义分流——风格池 57 名纯随机抽、菜单模式多抽候选、aim 键退役），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/候选风格注入/自动生成守卫链＋请求超时与取消两语义分流——风格池 57 名纯随机抽、菜单模式多抽候选、aim 键退役），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);

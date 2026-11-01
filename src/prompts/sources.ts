@@ -2,7 +2,7 @@
  * 上下文源收集（宿主数据 → AssemblySources 纯数据对象）。
  *
  * 分层：engine 纯函数不碰宿主；本层做全部宿主读取（人设/角色卡/世界书
- * 激活/历史/外部注入/走向），产物交给 engine。node 冒烟下宿主数据为
+ * 激活/历史/外部注入），产物交给 engine。node 冒烟下宿主数据为
  * 存根空值，同一收集路径照跑（dump 可机判的前提）。
  */
 import {
@@ -16,7 +16,6 @@ import {
     substituteMacros,
 } from '@/host';
 import type { AssemblySources, PoolInjectionSupply } from './engine';
-import type { StoryDirection } from './types';
 
 /** 世界书深度条目分界：depth≤2 归「浅」（历史后、贴近生成点），≥3 归「深」。 */
 const WI_DEPTH_AFTER_MAXDEPTH = 2;
@@ -43,12 +42,10 @@ function currentCharacter(): CharacterCardLike | null {
 }
 
 /**
- * 收集一次组装所需的全部上下文。storyDirection 与 poolInjection 由调用方
- * 传入（chat 域/choice 域读取归 choice 侧管——组装参数与存储调度分离；
- * 池供给由 generator 现场抽取，本层只做纯收集不回读 choice 域）。
+ * 收集一次组装所需的全部上下文。poolInjection 由调用方传入（池供给由
+ * generator 现场抽取，本层只做纯收集不回读 choice 域）。
  */
 export async function collectAssemblySources(params: {
-    storyDirection: StoryDirection | null;
     count: number;
     minChars: number;
     maxChars: number;
@@ -129,7 +126,6 @@ export async function collectAssemblySources(params: {
         worldInfoDepthBefore: substituteMacros(depthBefore),
         worldInfoDepthAfter: substituteMacros(depthAfter),
         history,
-        storyDirection: params.storyDirection,
         externalSlots: extSlots,
         // 池供给：调用方（generator）现场抽取后直传——null＝池未启用
         poolInjection: params.poolInjection ?? null,

@@ -4,13 +4,10 @@
  */
 
 export {
-    CHAT_KEY,
     GLOBAL_KEY,
-    getChat,
     getGlobal,
     initStorage,
-    setChat,
     setGlobal,
 } from './service';
-export type { ChatDomain, GlobalDomain, NavStorageState } from './service';
+export type { GlobalDomain, NavStorageState } from './service';
 export { newId } from './id';

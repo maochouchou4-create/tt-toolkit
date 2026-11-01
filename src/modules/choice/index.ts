@@ -58,6 +58,5 @@ export function initChoiceMinimal(): void {
 export { assembleCurrent } from './generator';
 export { parseOptions, DEBUG_MALFORMED_RAW } from './parse';
 export { useChoiceSettingsStore } from './settings';
-export { useStoryDirectionStore, type DirectionPreset } from './direction';
 export { DEFAULT_GEN_PARAMS, type ChoiceGenParams } from './api';
-export { OVERSAMPLE_LIMITS, estimateInjectionLines } from './pool/resolver';
+export { OVERSAMPLE_LIMITS } from './pool/resolver';

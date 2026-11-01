@@ -9,8 +9,6 @@
  *   （浏览器窗口层随时可取）；node 冒烟环境走 ESM 导入同一函数。
  * - executeSlashCommandsWithOptions 在 st-context.js:177 从
  *   slash-commands.js 转发导出，为宿主斜令的权威执行器。
- * - `script.js:11175` `saveMetadata()`（async、无参）在 st-context.js:164
- *   经 getContext() 暴露：当前 chat_metadata 的立即保存通道。
  */
 
 import { getContext as stGetContext } from '@sillytavern/scripts/st-context';
@@ -31,8 +29,6 @@ export interface TavernContextLike {
     /** this_chid 的转发（string 形态，见 host/settings.ts 头注）；未选角色为 null */
     characterId: string | null;
     executeSlashCommandsWithOptions?: (command: string) => Promise<unknown>;
-    /** 当前 chat_metadata 的立即保存通道（script.js:11175，async 无参） */
-    saveMetadata?: () => Promise<unknown>;
     /**
      * 当前聊天消息变更后的立即保存通道（内部＝saveChatConditional：
      * selected_group 分流 saveGroupChat，群聊安全）。严禁改走

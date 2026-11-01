@@ -20,7 +20,6 @@ import {
 import type { ModuleTrace } from '@/prompts';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { choiceStorage } from './api';
-import { useStoryDirectionStore } from './direction';
 import { DEBUG_MALFORMED_RAW, parseOptions, type ParseReport } from './parse';
 import { clearFloorOptions, latestAssistantFloorIndex } from './persist';
 import { drawPoolInjection } from './pool/storage';
@@ -114,7 +113,6 @@ export async function assembleCurrent(): Promise<{ dumpText: string; messages: A
     const gen = choiceStorage.readDomain().gen;
     const poolInjection: PoolInjectionSupply = { drawn: drawPoolInjection() };
     const sources = await collectAssemblySources({
-        storyDirection: useStoryDirectionStore().storyDirection,
         count: gen.count,
         minChars: gen.minChars,
         maxChars: gen.maxChars,

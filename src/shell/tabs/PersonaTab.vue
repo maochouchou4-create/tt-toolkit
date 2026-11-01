@@ -1,8 +1,8 @@
 <template>
   <!--
     「人设」tab（PersonaWeaver 概念的壳内简化形态）。
-    单 tab 纵向卡片流：人设编织单卡；生成参考收 <details>
-    折叠块。流式/超时按任务固化（TASK_PARAMS），模型与温度/思考强度的
+    单 tab 纵向卡片流：人设编织单卡＋生成参考分组（恒展开）。
+    流式/超时按任务固化（TASK_PARAMS），模型与温度/思考强度的
     唯一入口＝「API」页「任务模型」卡（未配置由 generate 的
     fail-fast toast 引导）。生成按钮双态：进行中点击＝取消（长请求逃生
     姿势与导航「生成」键同款）。
@@ -10,17 +10,14 @@
   -->
   <div class="tt-persona-tab">
     <!-- ================= 卡：人设编织 ================= -->
-    <TTCard title="人设编织" sub="AI 生成人设 YAML（末轮模型复核查重）→ 手改 → 写回宿主人设">
-      <!-- 需求框（有结果时折叠） -->
-      <details :open="!store.hasResult" class="tt-persona-details">
-        <summary>生成需求</summary>
+    <TTCard title="人设编织">
+      <TTField label="生成需求" block>
         <textarea
           v-model="store.requestText"
           class="tt-ctrl tt-ctrl--area tt-persona-area"
           rows="4"
-          :placeholder="TEXT.PERSONA_REQUEST_PLACEHOLDER"
         />
-      </details>
+      </TTField>
 
       <div class="tt-btn-row tt-persona-actions">
         <button type="button" class="tt-btn" @click="onGenerateClick">
@@ -36,7 +33,6 @@
         v-model="store.resultText"
         class="tt-ctrl tt-ctrl--area tt-persona-area tt-persona-area--result"
         rows="12"
-        placeholder="生成结果（YAML）……"
       />
 
       <!-- 复核简报（常驻一行；文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
@@ -50,22 +46,20 @@
       </div>
     </TTCard>
 
-    <!-- ================= 折叠：生成参考 ================= -->
-    <details class="tt-persona-fold">
-      <summary>生成参考</summary>
-      <TTCard title="开场白" sub="注入哪一条开场白作为生成参考（默认第一条；「不注入」仅本聊天内保留）">
-        <select v-if="store.greetings.length > 0" :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-ctrl tt-persona-greeting" @change="onGreetingChange">
-          <option v-for="(g, i) in store.greetings" :key="i" :value="String(i)">{{ g.label }}</option>
-          <option value="">不注入开场白</option>
-        </select>
-        <div v-else class="tt-persona-empty">进入角色会话后可选择开场白</div>
-      </TTCard>
+    <!-- ================= 分组：生成参考 ================= -->
+    <div class="tt-persona-group">生成参考</div>
+    <TTCard title="开场白">
+      <select v-if="store.greetings.length > 0" :value="store.selectedGreetingIndex === null ? '' : String(store.selectedGreetingIndex)" class="tt-ctrl tt-persona-greeting" @change="onGreetingChange">
+        <option v-for="(g, i) in store.greetings" :key="i" :value="String(i)">{{ g.label }}</option>
+        <option value="">不注入开场白</option>
+      </select>
+      <div v-else class="tt-persona-empty">暂无开场白</div>
+    </TTCard>
 
-      <TTCard title="世界书">
-        <div v-if="store.boundBooks.length > 0" class="tt-persona-note">已全量注入绑定世界书：{{ store.boundBooks.join('、') }}</div>
-        <div v-else class="tt-persona-empty">当前角色未绑定世界书</div>
-      </TTCard>
-    </details>
+    <TTCard title="世界书">
+      <div v-if="store.boundBooks.length > 0" class="tt-persona-note">已全量注入绑定世界书：{{ store.boundBooks.join('、') }}</div>
+      <div v-else class="tt-persona-empty">当前角色未绑定世界书</div>
+    </TTCard>
   </div>
 </template>
 
@@ -123,33 +117,10 @@ function onGreetingChange(event: Event): void {
     padding: var(--tt-sp-1) 0 0;
 }
 
-.tt-persona-details {
-    margin: var(--tt-sp-1) 0;
-}
-
-.tt-persona-details summary {
-    cursor: pointer;
-    font-size: var(--tt-fs-aux);
-    opacity: 0.8;
-    padding: var(--tt-sp-1) 0;
-}
-
-.tt-persona-details[open] > summary {
-    margin-bottom: var(--tt-sp-1);
-}
-
-.tt-persona-fold {
-    margin: var(--tt-sp-2) 0;
-}
-
-.tt-persona-fold > summary {
-    cursor: pointer;
+/* 生成参考分组标题：自持一行区块名（原 details>summary 去交互态） */
+.tt-persona-group {
     font-weight: bold;
-    padding: var(--tt-sp-1) 0;
-}
-
-.tt-persona-fold[open] > summary {
-    margin-bottom: var(--tt-sp-2);
+    padding: var(--tt-sp-2) 0 var(--tt-sp-1);
 }
 
 /* 开场白下拉无字段行包裹，独立占满卡宽 */

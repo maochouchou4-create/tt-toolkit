@@ -41,7 +41,6 @@ export type InjectionSource =
     | 'wi_depth_before'
     | 'wi_depth_after'
     | 'chat_history'
-    | 'story_direction'
     | 'external_slot'
     | 'pool_entries'
     // ---- persona 任务注入源——内容在 PersonaAssemblySources ----
@@ -101,18 +100,6 @@ export interface PromptConfig {
     modules: PromptModule[];
 }
 
-/**
- * 剧情趋向（chat 域，答「剧情往哪走」）：已应用预设正文＋自由文本。
- * presetText 是应用时刻的快照——预设日后编辑/删除不影响已应用聊天
- * （快照自包含，无悬空引用）；两者皆空＝模块按未启用处理（不注入）。
- */
-export interface StoryDirection {
-    /** 已应用预设正文（空串＝未应用） */
-    presetText: string;
-    /** 自由补充文本（空串＝没有） */
-    freeText: string;
-}
-
 /** 组装产物消息（与 host/generate 的 GenerateMessage 同构，层次内自持）。 */
 export interface AssemblyMessage {
     role: PromptRole;
@@ -121,7 +108,7 @@ export interface AssemblyMessage {
 
 /**
  * 组装溯源（dump 断言依赖）：每模块注入与否＋跳过原因。
- * 用户验收靠它核对「人设/角色卡/世界书/story_direction 注入逐项可见」。
+ * 用户验收靠它核对「人设/角色卡/世界书注入逐项可见」。
  */
 export interface ModuleTrace {
     moduleId: string;

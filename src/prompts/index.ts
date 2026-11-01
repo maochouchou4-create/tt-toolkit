@@ -11,7 +11,6 @@ export type {
     PromptConfig,
     PromptModule,
     PromptRole,
-    StoryDirection,
     TaskKey,
     TextModule,
 } from './types';
