@@ -552,11 +552,11 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ⑤前置切回／swipe 跟随／删楼三条——展示副本删除后由 floor-view 按存档
 // 对账承接，浏览器 harness 目检面），toggle 机判（启动→取消、双击竞态、
 // 成功落档锚楼）＋3 ＝ 159。
-// ＝ v2.0.0 风格池换血与 aim 退役：池抽取区 pinned 恒在/trim/分桶轮询 −3、
-// 池旋钮区重写（钳制/抽取量随动/估算单源）−2、asset 区重写（57 静态形状
-// ＋同步行为）−3、注入区分区与 P2-1 覆盖句随 pinned 退役（旧形态清零/编号
-// 渲染补位）±0、楼层 aim 断言（旧档带 aim 读侧丢弃替「无 aim 仍缺席」与
-// 往返）−1、解析 aim 三断言并一 −2 ＝ 149。
+// ＝ v2.0.0 风格池换血与 aim 退役：池抽取区 pinned 恒在/trim/分桶轮询 −3＋
+// 新增同轮不放回 +1、池旋钮区重写（钳制/抽取量随动/估算单源）−2、asset 区重写
+// （57 静态形状＋同步行为）−3、注入区分区与 P2-1 覆盖句随 pinned 退役（旧形态
+// 清零/编号渲染补位）±0、楼层 aim 断言（旧档带 aim 读侧丢弃替「无 aim 仍缺席」
+// 与往返）−1、解析 aim 三断言并一 −2 ＝ 149。
 const CHOICE_PASS_EXPECTED = 149;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));

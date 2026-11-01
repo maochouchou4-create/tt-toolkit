@@ -799,7 +799,6 @@ function runAssemblyChecks(): string {
     check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
     check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
     check('few-shot 输出示例换血（反客为主/痛快应下/轻笑带过 在场，骤然断电退役）', allText.includes('反客为主') && allText.includes('痛快应下') && allText.includes('轻笑带过') && !allText.includes('骤然断电'));
-    // few-shot 7 条（真人反应类型覆盖）
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
     check('few-shot 输出示例为 4 条（与恰好 N 条同基数；写法对照段另计）', fewShotCount === 4, `条数=${fewShotCount}`);
