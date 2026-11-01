@@ -175,7 +175,6 @@
             console.info('[harness] executeSlashCommandsWithOptions:', command);
             return { pipe: '' };
         },
-        saveMetadata: async () => console.info('[harness] saveMetadata（stub）'),
         // 消息级落盘通道（楼层选项 extra 写入后的保存；harness 聊天数据在内存，noop）
         saveChat: async () => console.info('[harness] saveChat（stub）'),
         powerUserSettings: { movingUI: power_user.movingUI, movingUIState: power_user.movingUIState },

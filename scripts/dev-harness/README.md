@@ -36,7 +36,7 @@ transform.mjs 按 STUBS 表 fail fast——先在 stubs.js 补对应键，再更
 - `events.js`：`event_types`（APP_READY/CHAT_CHANGED/MESSAGE_UPDATED/CHARACTER_MESSAGE_RENDERED/SETTINGS_LOADED）、`eventSource`（on/once/makeLast/makeFirst/removeListener/emit/emitAndWait）
 - `script.js`：`saveSettingsDebounced`（内存日志）、`chat_metadata`、`characters`、`this_chid`、`getRequestHeaders`、`substituteParams`（{{user}}/{{char}} 等替换）、`sendTextareaMessage`（真把消息追加进假聊天）
 - `extensions.js`：`extension_settings`（内存对象，storage 层 mutate 后落"盘"）
-- `st-context.js`：`getContext()`（chat/chatId/characterId/executeSlashCommandsWithOptions/saveMetadata/powerUserSettings/extensionPrompts——含一个假记忆摘要槽位）
+- `st-context.js`：`getContext()`（chat/chatId/characterId/executeSlashCommandsWithOptions/powerUserSettings/extensionPrompts——含一个假记忆摘要槽位）
 - `SlashCommand.js` / `SlashCommandParser.js`：斜令注册（注册名打 console）
 - `RossAscends-mods.js`：`dragElement`（**真拖拽**：把手拖动壳并把位置写入 movingUIState，验证拖动与自恢复链路）
 - `power-user.js`：`power_user`（persona_description/movingUI/movingUIState）
