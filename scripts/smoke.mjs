@@ -726,8 +726,8 @@ if (generateRawCount > 0) failures.push(`dist 产物残留退休符号 generateR
 
 // 楼层选项块容器必须进产物样式：渲染器挂的类名在 dist/index.css 缺席＝
 // 块裸奔（无间距/无两列）。类名从渲染器源码抽取（单源，改名自动跟随），
-// 断言绑三面：裸容器规则存在（规则边界定界——宿主态隐藏的复合选择器也
-// 以 .tt-choice-floor{ 结尾，子串或后缀匹配都会被它们误命中）、产物 js
+// 断言绑四面：裸容器规则存在、宿主态隐藏两条规则（编辑态/删除态暂隐）
+// 存在（规则边界定界——子串或后缀匹配会被同尾选择器误命中）、产物 js
 // 真用该类名（渲染器与样式产物不漂移）。
 const floorClass = readFileSync(new URL('../src/modules/choice/floor-view.ts', import.meta.url), 'utf8')
     .match(/const FLOOR_CLASS = '([^']+)'/)?.[1];
@@ -738,6 +738,19 @@ if (floorClass === undefined) {
     const bareContainerRule = new RegExp('(?:^|})\\s*\\.' + floorClass.replaceAll('.', '\\.') + '\\s*\\{');
     if (!bareContainerRule.test(distCss)) {
         failures.push(`dist/index.css 缺少 .${floorClass} 裸容器规则（楼层选项块样式未随产物发布）`);
+    }
+    // 宿主态隐藏两条规则必须随产物发布：css 整写时静默丢失即在此红。
+    // 选择器串由 floorClass 拼出（类名改自动跟随），前邻 } 或行首定界
+    // （与裸容器规则同纪律）；esbuild 实测不合并这两条同体规则，可各自定界
+    const hostHiddenSelectors = [
+        `.mes:has(.edit_textarea) .${floorClass}`,
+        `#chat .mes.selected .${floorClass}`,
+    ];
+    for (const selector of hostHiddenSelectors) {
+        const hiddenRule = new RegExp('(?:^|})\\s*' + selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{');
+        if (!hiddenRule.test(distCss)) {
+            failures.push(`dist/index.css 缺少宿主态隐藏规则 ${selector}（编辑态/删除态选项块暂隐丢失）`);
+        }
     }
     if (!distSource.includes(floorClass)) {
         failures.push(`dist/index.js 未出现渲染器类名 ${floorClass}（渲染器与样式产物漂移）`);
@@ -822,11 +835,12 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 }
 
 // ---------------------------------------------------------------------------
-// 版本链机器门（挂账⑫）：三处版本（src/version.ts / manifest.json /
-// package.json）一致且＝收官版本。版本 bump＝三处＋本节 EXPECTED_VERSION
-// 同步改——漏改任何一处这里红。
+// 版本链机器门（挂账⑫）：五处版本（src/version.ts / manifest.json /
+// package.json / dist/index.js 内嵌字面量 / 本节 EXPECTED_VERSION）一致且
+// ＝收官版本。版本 bump＝五处同步改——漏改任何一处这里红；dist 内嵌一处
+// 专防「src 已 bump 而 dist 未重建」（构建链漏跑）。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '1.29.0';
+const EXPECTED_VERSION = '1.29.1';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿
@@ -838,8 +852,15 @@ const versionChain = [
 ];
 for (const [where, v] of versionChain) {
     if (v !== EXPECTED_VERSION) {
-        failures.push(`版本链不一致：${where}＝${v ?? '（解析失败）'}，期望 ${EXPECTED_VERSION}（三处＋本门 EXPECTED_VERSION 同步 bump）`);
+        failures.push(`版本链不一致：${where}＝${v ?? '（解析失败）'}，期望 ${EXPECTED_VERSION}（五处同步 bump）`);
     }
+}
+// 第五处读数：dist/index.js 内嵌版本字面量＝期望值才证产物同步重建
+// （esbuild 最小化引号形态实测双引号，单引号一并收——引号策略变更不破门）
+const distVersionEmbedded = distSource.includes(`"${EXPECTED_VERSION}"`)
+    || distSource.includes(`'${EXPECTED_VERSION}'`);
+if (!distVersionEmbedded) {
+    failures.push(`版本链不一致：dist/index.js 内嵌版本字面量≠${EXPECTED_VERSION}（src 已 bump 而 dist 未重建？先跑 pnpm build）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -886,4 +907,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链三处（version.ts/manifest.json/package.json）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);

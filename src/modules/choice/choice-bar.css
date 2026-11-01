@@ -1,85 +1,152 @@
 /*
- * 行动选项楼层块样式：皮肤走宿主 SmartTheme 变量（明暗主题自动跟随）。
- * 块是 .mes_block 尾部的普通内容流节点（非浮层），跟正文一起滚、随楼层
- * 生灭——定位/层级/收起一类浮层补偿件全部不存在。楼层内不造二层滚动：
- * 选项网格与错误行都不设 max-height/overflow。
+ * 行动选项楼层块样式：视觉基线＝实施方案 mockups/tt-choice-mock.html 第一段
+ * 候选样式（已过用户目验拍板）——tint 底＋边框＋圆角实体卡片、块头「行动
+ * 选项」标尺线、EmColor 标题、正文三行封顶。
+ * 皮肤只走宿主 SmartTheme 变量＋fallback（禁写死主题色，明暗主题自动跟随）；
+ * 字号全 em（随宿主基准字号缩放）。
+ * 块是 .mes_block 尾部的普通内容流节点（非浮层），跟正文一起滚、随楼层生
+ * 灭——定位/层级/收起一类浮层补偿件全部不存在；子树内禁 max-height＋
+ * overflow 滚动组合（正文三行封顶走 -webkit-line-clamp 裁剪，不造滚动容器）。
  */
 
 /* 楼层块容器：与正文拉开一点距离；无边框无底色（选项卡片自带背景） */
 .tt-choice-floor {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-top: 10px;
+    gap: 6px;
+    margin-top: 14px;
 }
 
-/* 主体：两列网格，行高由卡片内容决定 */
+/* 块头：小标签＋延伸细线——给选项组一个安静的分组记号 */
+.tt-choice-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 2px;
+    user-select: none;
+}
+
+.tt-choice-head-label {
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    opacity: 0.5;
+    white-space: nowrap;
+}
+
+.tt-choice-head-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--SmartThemeBorderColor, #666);
+    opacity: 0.3;
+}
+
+/* 主体：两列网格；minmax(0,1fr) 允许长串收缩折行（裸 1fr 会被无断点长串顶破列宽） */
 .tt-choice-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 }
 
 .tt-choice-error {
     color: var(--SmartThemeQuoteColor, #c58a36);
     font-size: 0.8em;
-    padding: 4px 0;
+    padding: 5px 0;
     word-break: break-all;
+}
+
+.tt-choice-error::before {
+    content: "⚠ ";
+}
+
+/* 生成中行：呼吸动画替代静态半透明——运行态要有「在动」的观感 */
+@keyframes tt-choice-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 0.25; }
 }
 
 .tt-choice-pending {
     font-size: 0.8em;
-    opacity: 0.6;
     padding: 6px 0;
+    animation: tt-choice-pulse 1.6s ease-in-out infinite;
 }
 
+/* 选项卡片：主题 tint 底＋主题边框＋圆角——两种主题下都是实体卡片 */
 .tt-choice-option {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 2px;
+    gap: 3px;
     width: 100%;
+    min-width: 0;
     text-align: left;
     background: var(--SmartThemeChatTintColor, rgba(128, 128, 128, 0.1));
     color: var(--SmartThemeBodyColor, inherit);
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 5px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #666);
+    border-radius: 8px;
+    padding: 9px 12px;
     font-size: 0.9em;
+    line-height: 1.5;
     cursor: pointer;
-    line-height: 1.45;
+    transition: border-color 0.12s ease, filter 0.12s ease;
 }
 
 .tt-choice-option:hover {
-    border-color: var(--SmartThemeBorderColor, #666);
-    filter: brightness(1.1);
+    border-color: var(--SmartThemeQuoteColor, #b3742a);
+    filter: brightness(1.06);
 }
 
+.tt-choice-option:active {
+    filter: brightness(0.97);
+}
+
+.tt-choice-option:focus-visible {
+    outline: 2px solid var(--SmartThemeQuoteColor, #b3742a);
+    outline-offset: 1px;
+}
+
+/* 标题＝行动标签：主题强调色（EmColor 明暗两版都可读） */
 .tt-choice-option-title {
-    font-weight: bold;
-    /* 标题恒一行（旧单列截断语义的延续）：两列网格下行高才稳，
-       长标题截断不顶高卡片挤正文 */
+    font-weight: 600;
+    font-size: 0.95em;
+    letter-spacing: 0.03em;
+    color: var(--SmartThemeEmColor, #7a5c2e);
+    /* 标题恒一行：两列网格下行高才稳，长标题截断不顶高卡片挤正文 */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+/* 正文：折行防线三行（pre-wrap 保留模型输出换行；anywhere 断无断点长串；
+   break-word 兜底——LogTab.vue「choice-bar 同款」注释引用此口径）＋三行封顶
+   防长文墙（点击后输入框拿的是全文） */
 .tt-choice-option-content {
-    /* 折行防线：min-width:0 允许 flex 收缩；pre-wrap 保留模型输出中的换行；
-       anywhere 连续无断点字符串（长英文词/破折号串）也强制断行 */
     min-width: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    font-size: 0.92em;
+    opacity: 0.92;
 }
 
-/* aim：写给玩家看的元信息，压到弱化小字——抢正文视线即失去辅助位的作用 */
+/* aim：写给玩家看的元信息，「↳」前缀示意「通向哪」——压到弱化小字，
+   抢正文视线即失去辅助位的作用 */
 .tt-choice-option-aim {
-    font-size: 0.82em;
-    opacity: 0.6;
+    font-size: 0.78em;
+    opacity: 0.55;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+    margin-top: 1px;
+}
+
+.tt-choice-option-aim::before {
+    content: "↳ ";
+    opacity: 0.8;
 }
 
 /* 宿主编辑态：正文进入编辑框时该楼选项块暂隐（宿主编辑语义接管该楼） */

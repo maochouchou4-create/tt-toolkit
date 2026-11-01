@@ -26,6 +26,10 @@ const ttlog = createTtlog('choice');
 
 const FLOOR_CLASS = 'tt-choice-floor';
 
+// 卡片类名单源：构建处 className 与点击委托 closest 共用——两处各写一份
+// 字面量时半改类名＝委托找不到目标、点击静默死，单源从结构上杜绝漂移
+const OPTION_CLASS = 'tt-choice-option';
+
 // 幂等旗标走窗口级（nav 先例）：扩展重载会重新求值模块，模块级旗标归零
 // 而旧 observer/点击委托仍挂着——双份委托＝append 加倍、send 双发。
 const FLOOR_VIEW_FLAG = '__TT_CHOICE_FLOOR_VIEW__';
@@ -94,12 +98,20 @@ function buildFloorBlock(input: BlockInput): HTMLElement {
     }
 
     if (options.length > 0) {
+        // 块头＝「行动选项」标尺线（视觉基线既定内容）：给卡片组一个分组
+        // 记号；纯装饰节点，无数据语义，错误行/生成中行不挂头
+        const head = document.createElement('div');
+        head.className = 'tt-choice-head';
+        head.appendChild(textSpan('tt-choice-head-label', '行动选项'));
+        head.appendChild(textSpan('tt-choice-head-rule', ''));
+        container.appendChild(head);
+
         const grid = document.createElement('div');
         grid.className = 'tt-choice-grid';
         options.forEach((option, index) => {
             const button = document.createElement('button');
             button.type = 'button';
-            button.className = 'tt-choice-option';
+            button.className = OPTION_CLASS;
             button.title = input.hint;
             button.dataset.floor = String(input.floorIndex);
             button.dataset.idx = String(index);
@@ -229,7 +241,7 @@ function reconcile(): void {
 function onOptionClick(event: MouseEvent): void {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    const button = target.closest<HTMLElement>('.tt-choice-option');
+    const button = target.closest<HTMLElement>(`.${OPTION_CLASS}`);
     if (button === null) return;
     const floorIndex = Number(button.dataset.floor);
     const optionIndex = Number(button.dataset.idx);
