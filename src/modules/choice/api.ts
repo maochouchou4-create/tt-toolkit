@@ -4,7 +4,7 @@
  * 端点身份（url/key）住在统一服务商表（modules/apis），模型选择权在
  * 任务档案（apis/task-profiles，API 页任务模型卡按任务行配置）。
  * 流式/输出契约按任务固化（apis/task-defaults TASK_PARAMS），本域只承载
- * 生成参数（gen）与条目池数据（pool）。
+ * 生成参数（gen）与风格池数据（pool）。
  *
  * response_format 支持度实测结论（三家端点，json_object 恒定的依据存档）：
  *   - json_schema：ds 官方端点不支持（400），GG（流式）与 CC 支持；
@@ -22,7 +22,7 @@ export const GLOBAL_CHOICE_KEY = 'choice';
 
 /** 生成行为参数（全局域；含池抽取参数）。 */
 export interface ChoiceGenParams extends PoolGenParams {
-    /** 每次生成的选项数量（语义＝pinned+drawn 的目标基数） */
+    /** 每次生成的选项数量（抽取基数——候选风格按此倍率多抽） */
     count: number;
     /** 选项正文字数下/上限 */
     minChars: number;
@@ -42,14 +42,14 @@ export interface ChoiceGenParams extends PoolGenParams {
 
 export interface ChoiceDomain {
     gen: ChoiceGenParams;
-    /** 条目池数据（两层结构，见 pool/types.ts）。 */
+    /** 风格池数据（单层结构，见 pool/types.ts）。 */
     pool: PoolDomainData;
 }
 
 /** 全局域键登记：键常量与域类型同处归属模块（登记面说明见 storage/service.ts）。 */
 declare module '@/storage/service' {
     interface GlobalDomain {
-        /** choice 域（生成参数＋条目池；本文件 GLOBAL_CHOICE_KEY） */
+        /** choice 域（生成参数＋风格池；本文件 GLOBAL_CHOICE_KEY） */
         choice?: ChoiceDomain;
     }
 }
@@ -64,20 +64,21 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
 };
 
 /**
- * gen 域逐字段重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
- * 事实源——退役旋钮（如 contextRounds）在旧档里的残留随任一写通道
- * 自然清除。池参数部分的值域钳制由 normalizePoolGenParams 承担
- * （泛型透传多余字段）。
+ * gen 域七键逐字段显式重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
+ * 事实源——退役旋钮在旧档里的残留（分类轮询/置顶超额/末段打乱三键与更早的
+ * contextRounds 等）随任一读写通道首读即净，不做迁移机器。池参数部分的值域
+ * 钳制由 normalizePoolGenParams 承担（泛型透传多余字段，此处只挑七键落盘）。
  */
 function normalizeGenParams(raw: Partial<ChoiceGenParams>): ChoiceGenParams {
     const merged = normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...raw });
     return {
-        ...merged,
         count: merged.count,
         minChars: merged.minChars,
         maxChars: merged.maxChars,
         clickBehavior: merged.clickBehavior,
         debugForceRaw: merged.debugForceRaw,
+        oversamplePct: merged.oversamplePct,
+        autoGenerate: merged.autoGenerate,
     };
 }
 

@@ -552,7 +552,12 @@ if (globalThis.__TT_SMOKE_STUBS__.saveMetadataCalls < 1) {
 // ⑤前置切回／swipe 跟随／删楼三条——展示副本删除后由 floor-view 按存档
 // 对账承接，浏览器 harness 目检面），toggle 机判（启动→取消、双击竞态、
 // 成功落档锚楼）＋3 ＝ 159。
-const CHOICE_PASS_EXPECTED = 159;
+// ＝ v2.0.0 风格池换血与 aim 退役：池抽取区 pinned 恒在/trim/分桶轮询 −3、
+// 池旋钮区重写（钳制/抽取量随动/估算单源）−2、asset 区重写（57 静态形状
+// ＋同步行为）−3、注入区分区与 P2-1 覆盖句随 pinned 退役（旧形态清零/编号
+// 渲染补位）±0、楼层 aim 断言（旧档带 aim 读侧丢弃替「无 aim 仍缺席」与
+// 往返）−1、解析 aim 三断言并一 −2 ＝ 149。
+const CHOICE_PASS_EXPECTED = 149;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -840,7 +845,7 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 // ＝收官版本。版本 bump＝五处同步改——漏改任何一处这里红；dist 内嵌一处
 // 专防「src 已 bump 而 dist 未重建」（构建链漏跑）。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '1.29.1';
+const EXPECTED_VERSION = '2.0.0';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿
@@ -907,4 +912,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/池注入/自动生成守卫链＋请求超时与取消两语义分流——单层池结构，条目自身 pinned 为真值），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）与 chat 域立即保存链路均通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/候选风格注入/自动生成守卫链＋请求超时与取消两语义分流——风格池 57 名纯随机抽、菜单模式多抽候选、aim 键退役），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);

@@ -133,22 +133,6 @@
     opacity: 0.92;
 }
 
-/* aim：写给玩家看的元信息，「↳」前缀示意「通向哪」——压到弱化小字，
-   抢正文视线即失去辅助位的作用 */
-.tt-choice-option-aim {
-    font-size: 0.78em;
-    opacity: 0.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    margin-top: 1px;
-}
-
-.tt-choice-option-aim::before {
-    content: "↳ ";
-    opacity: 0.8;
-}
-
 /* 宿主编辑态：正文进入编辑框时该楼选项块暂隐（宿主编辑语义接管该楼） */
 .mes:has(.edit_textarea) .tt-choice-floor {
     display: none;

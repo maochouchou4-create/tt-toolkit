@@ -485,7 +485,7 @@
          * 对账路径——也是「节点被换掉后补挂」的目检手段）。
          */
         seedChoiceOptions(floorIndex, options = [
-            { title: '试探', content: '把铜符推回她面前，等她自己开口。', aim: '逼她先表态' },
+            { title: '试探', content: '把铜符推回她面前，等她自己开口。' },
             { title: '退一步', content: '装作没看见，换个话题。' },
         ]) {
             const message = chat[floorIndex];

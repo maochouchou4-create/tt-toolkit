@@ -52,7 +52,7 @@ export interface AssemblySources {
     externalSlots: Array<{ key: string; value: string }>;
     /**
      * 池注入供给。null＝池整体未启用（pool_entries 模块按未启用
-     * 处理）；条目由 generator 现场抽取后传入——prompts 层不回读
+     * 处理）；候选风格名由 generator 现场抽取后传入——prompts 层不回读
      * choice 域（单向供给，引擎保持纯函数）。
      */
     poolInjection: PoolInjectionSupply | null;
@@ -63,20 +63,13 @@ export interface AssemblySources {
 }
 
 /**
- * 池注入供给形状。字段取 PoolEntry 的子集（结构兼容：PoolEntry
- * 可直接赋进来）——prompts 层只关心渲染所需的两个文本字段，不知道池的
- * id 等概念，保持两层解耦。
+ * 池注入供给形状：本轮抽中的候选风格名（纯随机不放回，候选可能多于
+ * 实际所需——菜单模式）。generator 现场抽取后传入，prompts 层只渲染，
+ * 不知道池的 id 等概念，保持两层解耦。
  */
-export interface PoolEntryLine {
-    type: string;
-    content: string;
-}
-
 export interface PoolInjectionSupply {
-    /** 必发区（pinned，每轮必须在场的条目） */
-    pinned: PoolEntryLine[];
-    /** 候选区（等权抽取，数量可多于实际所需——菜单模式） */
-    drawn: PoolEntryLine[];
+    /** 候选风格名（可多于实际所需，AI 按贴合度挑选） */
+    drawn: string[];
 }
 
 export interface AssemblyResult {
@@ -268,45 +261,22 @@ function resolveInjectContent(
             return { content: wrapTag('external_memory', blocks.join('\n\n'), sources), note: `已搬入槽位：${keys}` };
         }
         case 'pool_entries': {
-            // 分区呈现：pinned＝固定条目（固定纳入每轮选项），drawn＝候选
-            // 菜单（多于所需，AI 按场景贴合挑选）——菜单模式语义写在提示
-            // 词文本里，不是条目行自己标注；逐条可见（dump 验收靠它）。
-            // pinned 无注入上限＝fork send_all 同款语义，保留。
+            // 菜单模式：候选风格名单（多于所需，AI 按场面贴合挑选 count 个）
+            // ——风格决定每条选项的姿态与笔调，选项正文由模型按风格轴现场写；
+            // 逐名编号可见（dump 验收靠它）。
             const pool = sources.poolInjection;
             if (!pool) return { content: '', note: '池未启用（无池数据）' };
-            if (pool.pinned.length === 0 && pool.drawn.length === 0) {
-                return { content: '', note: '本聊天池为空（无条目被引用或全部停用）' };
+            if (pool.drawn.length === 0) {
+                return { content: '', note: '本聊天池为空' };
             }
-            const parts: string[] = [];
-            if (pool.pinned.length > 0) {
-                // P2-1 修复（双复核）：pinned ≥ count 时与 core_rules/output_format
-                // 的「恰好 {{count}} 条」互斥——此段显式声明覆盖语义（后注入
-                // 的专项指令赢），数量约束以固定条目为准。{{count}} 由
-                // wrapTag 的占位符填充统一替换。
-                const overage = pool.pinned.length >= sources.count
-                    ? `\n注意：固定条目数量已达到常规数量 {{count}} 条——本轮选项数量以固定条目为准，允许超过 {{count}} 条，不受数量规则限制。`
-                    : '';
-                parts.push(`【固定条目】以下每条是一个行动方向，固定纳入每轮选项（共 ${pool.pinned.length} 条）：${overage}\n${pool.pinned.map(renderPoolLine).join('\n')}`);
-            }
-            if (pool.drawn.length > 0) {
-                parts.push(`【候选条目】以下是本轮抽出的候选行动方向，数量多于实际所需——按与当前剧情的贴合度挑选使用，不要求全用，未选中的不出现在选项里（共 ${pool.drawn.length} 条）：\n${pool.drawn.map(renderPoolLine).join('\n')}`);
-            }
-            const note = `固定 ${pool.pinned.length} 条、候选 ${pool.drawn.length} 条${pool.pinned.length >= sources.count ? '（固定条目已覆盖数量规则）' : ''}`;
-            return { content: wrapTag('pool_entries', parts.join('\n\n'), sources), note };
+            const body = `【候选风格】本轮抽到的风格轴（共 ${pool.drawn.length} 个，候选可能多于实际所需）——按与当前场面的贴合度挑选 {{count}} 个使用，每条选项各用一个风格、不重复，未选中的不出现：\n${pool.drawn.map((name, i) => `${i + 1}. ${name}`).join('\n')}`;
+            return { content: wrapTag('pool_entries', body, sources), note: `候选风格 ${pool.drawn.length} 个` };
         }
         // 防御分支：注入源类型新增而未接 case 时按「跳过留痕、不静默吞」
         // 纪律空段留痕，不让解构炸在组装中段（形态对齐 persona 解析的 default）
         default:
             return { content: '', note: `未知注入源 ${String(source)}` };
     }
-}
-
-/** 单条池条目渲染：`type：content`（空段省略——与池层 renderEntryLine 同构约定）。 */
-function renderPoolLine(entry: PoolEntryLine): string {
-    let line = entry.type.trim();
-    const content = entry.content.trim();
-    if (content) line += `：${content}`;
-    return line;
 }
 
 /** 分段标签包裹（§2.3 制版原则：结构化分段标签）＋占位符填充。 */

@@ -117,7 +117,6 @@ function buildFloorBlock(input: BlockInput): HTMLElement {
             button.dataset.idx = String(index);
             if (option.title) button.appendChild(textSpan('tt-choice-option-title', option.title));
             button.appendChild(textSpan('tt-choice-option-content', option.content));
-            if (option.aim) button.appendChild(textSpan('tt-choice-option-aim', option.aim));
             grid.appendChild(button);
         });
         container.appendChild(grid);
@@ -235,8 +234,7 @@ function reconcile(): void {
 
 /**
  * 点击委托（#chat 上一次性）：点击现场读档，不用渲染期快照——块可能是
- * 旧签名的残留，存档才是真值；null/越界拒点。只把 content 交给点击行为，
- * aim 属展示与存档面，绝不外发（主聊天出现「想撬动什么」＝对外契约破坏）。
+ * 旧签名的残留，存档才是真值；null/越界拒点。只把 content 交给点击行为。
  */
 function onOptionClick(event: MouseEvent): void {
     const target = event.target;

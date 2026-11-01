@@ -13,14 +13,13 @@ import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTas
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
-import { choiceStorage, GLOBAL_CHOICE_KEY, type ChoiceGenParams } from './api';
-import { DEFAULT_POOL_GEN_PARAMS } from './pool/normalize';
+import { choiceStorage, GLOBAL_CHOICE_KEY } from './api';
 import { applyOption, cancelGeneration, generateOptions, toggleChoiceGeneration, zeroOptionsMessage } from './generator';
 import { clearFloorOptions, latestAssistantFloorIndex, readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
 import { useChoiceSettingsStore } from './settings';
-import { drawAmount, resolvePool } from './pool/resolver';
-import { POOL_CATEGORIES, type DrawResult, type PoolCategory, type PoolEntry } from './pool/types';
+import { drawAmount, estimateInjectionLines, OVERSAMPLE_LIMITS, resolvePool } from './pool/resolver';
+import type { PoolEntry } from './pool/types';
 import { ASSET_POOL_VERSION, buildAssetPool, syncAssetPool } from './pool/asset';
 import { getGlobal, setGlobal } from '@/storage';
 
@@ -105,151 +104,77 @@ function mulberry32(seed: number): () => number {
     };
 }
 
-function makeEntry(id: string, pinned: boolean, category = '默认'): PoolEntry {
-    // 夹具分类＝有意不在名单内的合成桶键（resolver 把 category 当纯字符串
-    // 桶键用）；类型收紧的判定面是存档读侧（normalize），不追溯冒烟夹具
-    return { id, type: `选项${id}`, content: `${id}的行动正文`, category: category as PoolCategory, pinned };
+function makeEntry(id: string): PoolEntry {
+    return { id, name: `风格${id}` };
 }
 
 /** 1) 抽取分布与数学（种子 PRNG 驱动 resolvePool 纯函数）。 */
 function runPoolChecks(): void {
-    // 等权分布：8 条同权条目，每轮抽 4。每条命中频次应大致均摊
+    // 等权分布：8 条同权风格，每轮抽 4。每条命中频次应大致均摊
     // （每轮换种子——300 轮聚合抹平单轮波动；期望 150/条，100-200 为安全带）
-    const distPool = Array.from({ length: 8 }, (_, i) => makeEntry(`e${i}`, false));
+    const distPool = Array.from({ length: 8 }, (_, i) => makeEntry(`e${i}`));
     const ROUNDS = 300;
     const hits = new Array<number>(8).fill(0);
     for (let i = 0; i < ROUNDS; i++) {
-        const result = resolvePool({ pool: distPool, count: 4, categoriesEnabled: false, pinnedOverflow: 'send_all', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0xc0ffee + i) });
-        result.drawn.forEach(e => {
+        const result = resolvePool({ pool: distPool, count: 4, oversamplePct: 0, random: mulberry32(0xc0ffee + i) });
+        result.forEach(e => {
             hits[Number(e.id.slice(1))]++;
         });
     }
     check('抽取分布：等权条目命中频次大致均摊（300 轮）', hits.every(h => h >= 100 && h <= 200), `hits=${hits.join('/')}`);
 
-    // pinned 恒在：send_all 策略下每轮必含全部 pinned
-    const pinnedPool = [makeEntry('p1', true), makeEntry('p2', true), makeEntry('c1', false), makeEntry('c2', false)];
-    let pinnedOk = true;
+    // 同轮不放回：每轮结果内部无重复（风格池每条选项各用一种风格的前提）
+    let uniqueOk = true;
     for (let i = 0; i < 100; i++) {
-        const result = resolvePool({ pool: pinnedPool, count: 4, categoriesEnabled: false, pinnedOverflow: 'send_all', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0x1234 + i) });
-        if (!result.pinned.some(e => e.id === 'p1') || !result.pinned.some(e => e.id === 'p2')) pinnedOk = false;
+        const result = resolvePool({ pool: distPool, count: 4, oversamplePct: 0, random: mulberry32(0x1234 + i) });
+        if (result.length !== 4 || new Set(result.map(e => e.id)).size !== result.length) uniqueOk = false;
     }
-    check('抽取分布：pinned 恒在结果（send_all 全发）', pinnedOk);
+    check('抽取分布：纯随机不放回（同轮无重复名且抽满 count）', uniqueOk);
 
-    // trim：pinned 超过 count 时打乱后截到 count
-    const overPool = Array.from({ length: 5 }, (_, i) => makeEntry(`p${i}`, true));
-    let trimOk = true;
-    for (let i = 0; i < 50; i++) {
-        const result = resolvePool({ pool: overPool, count: 3, categoriesEnabled: false, pinnedOverflow: 'trim', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0x5678 + i) });
-        if (result.pinned.length !== 3) trimOk = false;
-    }
-    check('抽取分布：trim 策略把 pinned 截到 count', trimOk);
-
-    // 抽取量数学：remaining＋ceil(remaining×pct/100)，封顶池大小；remaining=0 时不补抽
+    // 抽取量数学：count＋ceil(count×pct/100)，封顶池大小（抽不出多于池里有的）；count 0 归零
     check(
-        '抽取数学：drawAmount＝remaining＋ceil(remaining×pct/100)（封顶池大小）',
-        drawAmount(4, 100, 10) === 8 && drawAmount(4, 0, 10) === 4 && drawAmount(2, 150, 3) === 3 && drawAmount(0, 100, 10) === 0 && drawAmount(3, 1, 99) === 4,
-        `样本：${[drawAmount(4, 100, 10), drawAmount(4, 0, 10), drawAmount(2, 150, 3), drawAmount(0, 100, 10), drawAmount(3, 1, 99)].join('/')}`,
+        '抽取数学：drawAmount＝count＋ceil(count×pct/100)（封顶池大小）',
+        drawAmount(4, 100, 10) === 8 && drawAmount(4, 0, 10) === 4 && drawAmount(4, 150, 57) === 10 && drawAmount(4, 500, 5) === 5 && drawAmount(0, 100, 10) === 0 && drawAmount(3, 1, 99) === 4,
+        `样本：${[drawAmount(4, 100, 10), drawAmount(4, 0, 10), drawAmount(4, 150, 57), drawAmount(4, 500, 5), drawAmount(0, 100, 10), drawAmount(3, 1, 99)].join('/')}`,
     );
-
-    // 分桶轮询：3 桶各 2 条、抽 6 → 覆盖桶数 ≥2（单桶垄断被轮询打散）
-    const catPool = [
-        makeEntry('a1', false, '甲'), makeEntry('a2', false, '甲'),
-        makeEntry('b1', false, '乙'), makeEntry('b2', false, '乙'),
-        makeEntry('c1', false, '丙'), makeEntry('c2', false, '丙'),
-    ];
-    let catOk = true;
-    for (let i = 0; i < 10; i++) {
-        const result = resolvePool({ pool: catPool, count: 6, categoriesEnabled: true, pinnedOverflow: 'send_all', oversamplePct: 0, shuffleFinal: true, random: mulberry32(0x9abc + i) });
-        const buckets = new Set(result.drawn.map(e => e.category));
-        if (buckets.size < 2) catOk = false;
-    }
-    check('分组轮询：候选覆盖多个 category 桶（≥2 桶）', catOk);
 }
 
 /**
- * 1.6) 池旋钮贯通（UI 写面 → normalize → resolver）：置顶超额策略与末段打乱
- * 在设置页接上写面之前恒为 normalize 默认值——两个参数从未被真实用户数据走
- * 过。本区把「store 写 → 域读回（钳制后）→ resolver 入参」串成一条链：写面
- * 漏传、钳制语义漂、resolver 分支与旋钮值脱钩，三处断链任一都在这里红。
+ * 1.6) 池旋钮贯通（UI 写面 → normalize → resolver）：候选倍率是设置页唯一
+ * 的池旋钮。本区把「store 写 → 域读回（钳制后）→ 抽取量随动」串成一条链：
+ * 写面漏传、钳制语义漂、抽取量与旋钮值脱钩，三处断链任一都在这里红。
  */
 function runPoolKnobChecks(): void {
     const settings = useChoiceSettingsStore();
     const saved = getGlobal(GLOBAL_CHOICE_KEY);
-    // 池规模随域内 count 现值走：置顶条目取 count+2 条恒构成超额（trim 面
-    // 可观测），候选区留 4 条保证任何倍率下都抽得到、不落空态
-    const { count } = choiceStorage.readDomain().gen;
-    const knobPool = [
-        ...Array.from({ length: count + 2 }, (_, i) => makeEntry(`kp${i}`, true)),
-        ...Array.from({ length: 4 }, (_, i) => makeEntry(`kc${i}`, false)),
-    ];
-    const inputOrder = knobPool.filter(e => e.pinned).map(e => e.id).join(',');
-    // resolver 入参与 pool/storage.ts 的生成管线同形（逐项取自读面）：设置页
-    // 写面新增字段若漏进生成管线，这里解析出的结果就与真实生成不是一回事
-    const resolveFromDomain = (seed: number): DrawResult => {
-        const { gen } = choiceStorage.readDomain();
-        return resolvePool({
-            pool: knobPool,
-            count: gen.count,
-            categoriesEnabled: gen.categoriesEnabled,
-            pinnedOverflow: gen.pinnedOverflow,
-            oversamplePct: gen.oversamplePct,
-            shuffleFinal: gen.shuffleFinal,
-            random: mulberry32(seed),
-        });
-    };
-    const orderOf = (result: DrawResult, zone: 'pinned' | 'drawn'): string => result[zone].map(e => e.id).join(',');
-    const contentOf = (result: DrawResult, zone: 'pinned' | 'drawn'): string => [...result[zone].map(e => e.id)].sort().join(',');
-    // 顺序断言取多组固定种子：单组可能偶然同序/偶然全异，多组两面各判一次
-    const ORDER_SEEDS = [0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888];
     try {
-        // 并排组：同一种子先关后开各抽一轮——末段打乱是纯顺序操作，抽到哪些
-        // 条目不该随开关变（变即是抽取逻辑被开关污染）
-        const pairs = ORDER_SEEDS.map((seed) => {
-            settings.updateGen({ shuffleFinal: false });
-            const off = resolveFromDomain(seed);
-            settings.updateGen({ shuffleFinal: true });
-            return { off, on: resolveFromDomain(seed) };
-        });
-        settings.updateGen({ pinnedOverflow: 'trim', shuffleFinal: false });
-        const written = choiceStorage.readDomain().gen;
+        // 超上限写 600 → 域读回钳到 OVERSAMPLE_LIMITS.max；负值写 −5 → 钳到 min
+        settings.updateGen({ oversamplePct: 600 });
+        const at600 = choiceStorage.readDomain().gen.oversamplePct;
+        settings.updateGen({ oversamplePct: -5 });
+        const atNeg = choiceStorage.readDomain().gen.oversamplePct;
         check(
-            '池旋钮写面：UI 写 trim/不打乱后域读回同值（落档链路贯通）',
-            written.pinnedOverflow === 'trim' && written.shuffleFinal === false,
-            `overflow=${written.pinnedOverflow} shuffle=${String(written.shuffleFinal)}`,
+            '池旋钮写面：UI 写超上限 600／负值 −5 经 normalize 钳回 500／0（落档链路贯通）',
+            at600 === OVERSAMPLE_LIMITS.max && atNeg === OVERSAMPLE_LIMITS.min,
+            `600→${at600} −5→${atNeg}`,
         );
 
-        const trimmed = resolveFromDomain(0x1a2b);
-        settings.updateGen({ pinnedOverflow: 'send_all' });
-        const sendAll = resolveFromDomain(0x1a2b);
+        // 抽取量随旋钮值变动（同池同 count，倍率 0 与 500 的抽取量不同——旋钮与 resolver 脱钩即红）
+        const knobPool = Array.from({ length: 20 }, (_, i) => makeEntry(`k${i}`));
+        settings.updateGen({ oversamplePct: 0 });
+        const base = choiceStorage.readDomain().gen;
+        const atZero = drawAmount(base.count, base.oversamplePct, knobPool.length);
+        settings.updateGen({ oversamplePct: 500 });
+        const maxed = choiceStorage.readDomain().gen;
+        const atMax = drawAmount(maxed.count, maxed.oversamplePct, knobPool.length);
         check(
-            '池旋钮贯通：置顶超额时 trim 截到条数、send_all 全保留（resolver 随旋钮变）',
-            trimmed.pinned.length === count && sendAll.pinned.length === count + 2,
-            `trim=${trimmed.pinned.length} send_all=${sendAll.pinned.length} count=${count}`,
+            '池旋钮贯通：抽取量随候选倍率随动（drawAmount 与域读回同链）',
+            atZero === base.count && atMax === Math.min(base.count + Math.ceil(base.count * 5), knobPool.length),
+            `pct0=${atZero} pct500=${atMax} count=${base.count}`,
         );
 
-        const keptOff = pairs.filter(p => orderOf(p.off, 'pinned') === inputOrder).length;
-        const keptOn = pairs.filter(p => orderOf(p.on, 'pinned') === inputOrder).length;
-        check(
-            '池旋钮贯通：末段打乱关闭时置顶区保持输入序、打开后被打乱（8 组种子）',
-            keptOff === ORDER_SEEDS.length && keptOn === 0,
-            `关=${keptOff}/${ORDER_SEEDS.length} 开=${keptOn}/${ORDER_SEEDS.length}`,
-        );
-
-        check(
-            '池旋钮贯通：末段打乱只改出场序不改内容（同种子开/关两区条目集合逐条一致）',
-            pairs.every(p => contentOf(p.off, 'pinned') === contentOf(p.on, 'pinned') && contentOf(p.off, 'drawn') === contentOf(p.on, 'drawn')),
-            `置顶样例=${orderOf(pairs[0].off, 'pinned')} → ${orderOf(pairs[0].on, 'pinned')}`,
-        );
-
-        // 坏值钳制：写面若送出枚举外/非布尔值，域读回必须是默认（旋钮缺省与
-        // normalize 单一真相，UI 不另立缺省）
-        settings.updateGen({ pinnedOverflow: 'trim_ex', shuffleFinal: 'yes' } as unknown as Partial<ChoiceGenParams>);
-        const clamped = choiceStorage.readDomain().gen;
-        check(
-            '池旋钮写面：非法枚举/非布尔经 normalize 钳回默认（send_all/true）',
-            clamped.pinnedOverflow === DEFAULT_POOL_GEN_PARAMS.pinnedOverflow && clamped.shuffleFinal === DEFAULT_POOL_GEN_PARAMS.shuffleFinal,
-            `overflow=${clamped.pinnedOverflow} shuffle=${String(clamped.shuffleFinal)}`,
-        );
+        // 注入行数估算与抽取量同式单源（设置页估算行的公式面）
+        check('池旋钮贯通：注入行数估算与抽取量同式（estimateInjectionLines 单源）', estimateInjectionLines(base.count, 0) === base.count && estimateInjectionLines(4, 150) === 10, `估算=${estimateInjectionLines(4, 150)}`);
     } finally {
         // 还原存回原值（不存 readDomain 的归一投影：那会把夹具没写过的默认
         // 字段补进存储，与「本区不留残」的纪律相悖）
@@ -263,20 +188,15 @@ function runPoolKnobChecks(): void {
 function runAssetPoolChecks(): void {
     // ---- 静态形状（纯函数，不依赖存储态）----
     const { masterPool } = buildAssetPool();
-    check('asset：内置池 124 条（纯走法制版）', masterPool.length === 124, `实际 ${masterPool.length}`);
-    const cats = new Set(masterPool.map(e => e.category));
+    check('asset：内置池 57 个风格名（冻结名单制版）', masterPool.length === 57, `实际 ${masterPool.length}`);
+    const names = new Set(masterPool.map(e => e.name));
+    check('asset：风格名全池唯一（名字即内容，id 是下标生成的派生值）', names.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${names.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
+    // 数据形状干净：条目池时代的 type/content/category/pinned 键整体退役
     check(
-        'asset：分类集合与 POOL_CATEGORIES 名单全等（纯走法制版）',
-        cats.size === POOL_CATEGORIES.length && POOL_CATEGORIES.every(c => cats.has(c)),
-        `实际 ${[...cats].join('/')}`,
+        'asset：数据形状干净（条目无 type/content/category/pinned 旧键）',
+        masterPool.every(e => !('type' in e) && !('content' in e) && !('category' in e) && !('pinned' in e)),
+        `带旧键条目 ${masterPool.filter(e => 'type' in e || 'content' in e || 'category' in e || 'pinned' in e).length}`,
     );
-    const transition = masterPool.find(e => e.type === '转场推进');
-    // pinned 恰 1 是注入公式（1 置顶＋(count−1)＋…）与设置页估算行的共同前提，多一条即静默分家。
-    check('asset：转场推进转固定（pinned 且全池唯一）', !!transition && transition.pinned && masterPool.filter(e => e.pinned).length === 1, `pinned=${String(transition?.pinned)} 共 ${masterPool.filter(e => e.pinned).length}`);
-    const types = new Set(masterPool.map(e => e.type));
-    check('asset：条目 type 唯一（走法名即身份，id 是下标生成的派生值）', types.size === masterPool.length && masterPool[0].id === 'asset-1', `唯一 ${types.size}/${masterPool.length} 首条 ${masterPool[0]?.id}`);
-    // 条目级 rule 字段已弃（v2 起移除，v3 连数据形状都不带）
-    check('asset：条目规则字段移除（v3，数据形状不再含 rule）', masterPool.every(e => !('rule' in e)), `带 rule 条目 ${masterPool.filter(e => 'rule' in e).length}`);
 
     // ---- 同步行为（存储态驱动）----
     const resetPool = () => {
@@ -284,58 +204,57 @@ function runAssetPoolChecks(): void {
             d.pool = { masterPool: [] };
         });
     };
-    // 首次同步：旧默认 false 被一次性翻转为 true（拍板：轮询默认开）
+    // 首次同步：空池覆盖为 57 条并标记 assetVersion（gen 不动）
     resetPool();
-    choiceStorage.updateGenParams({ categoriesEnabled: false });
     syncAssetPool();
     let domain = choiceStorage.readDomain();
-    check('asset 首次同步：空池覆盖为 124 条并标记 assetVersion', domain.pool.masterPool.length === 124 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
-    check('asset 首次同步：categoriesEnabled 旧 false 翻转为 true', domain.gen.categoriesEnabled === true, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
-    // 用户手动关：后续同步不得回翻（gen 纯用户域）
-    choiceStorage.updateGenParams({ categoriesEnabled: false });
+    check('asset 首次同步：空池覆盖为 57 条并标记 assetVersion', domain.pool.masterPool.length === 57 && domain.pool.assetVersion === ASSET_POOL_VERSION, `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`);
+    // 连续两次 sync 幂等：池内容逐字一致且版本标记稳定——ASSET_POOL_VERSION
+    // 与 json version 脱钩时第二次 sync 会重写池/改标记，此处即红
+    const snapshotBefore = JSON.stringify(domain.pool.masterPool);
     syncAssetPool();
     domain = choiceStorage.readDomain();
-    check('asset 幂等同步：用户关掉的轮询不被回翻', domain.gen.categoriesEnabled === false, `categoriesEnabled=${String(domain.gen.categoriesEnabled)}`);
+    check(
+        'asset 幂等同步：连续两次 sync 池内容逐字一致且版本标记稳定',
+        JSON.stringify(domain.pool.masterPool) === snapshotBefore && domain.pool.assetVersion === ASSET_POOL_VERSION,
+        `v=${String(domain.pool.assetVersion)}`,
+    );
     // 内容污染＋版本变更（assetVersion 指向旧版本）→ 同步全量恢复、不动 gen
+    // （gen 不动用 oversamplePct 哨兵证明：同步前后同值）
+    const savedPct = domain.gen.oversamplePct;
+    choiceStorage.updateGenParams({ oversamplePct: 123 });
     choiceStorage.writeDomain(d => {
-        // 'x' 是有意的名单外污染值（本断言测「版本变更全量恢复」）——normalize
-        // 对名单外分类按原值放行，坏值能在池里活着正是恢复机判的前提
-        d.pool.masterPool.push({ id: 'smoke-junk', type: '垃圾', content: '应被覆盖', category: 'x' as string as PoolCategory, pinned: false });
+        d.pool.masterPool.push({ id: 'smoke-junk', name: '垃圾' });
         d.pool.assetVersion = 0;
     });
     syncAssetPool();
     domain = choiceStorage.readDomain();
+    const genUntouched = choiceStorage.readDomain().gen.oversamplePct === 123;
+    choiceStorage.updateGenParams({ oversamplePct: savedPct });
     check(
         'asset 版本变更：污染池全量恢复（垃圾清除、gen 不动）',
-        domain.pool.masterPool.length === 124 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && domain.gen.categoriesEnabled === false,
-        `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)}`,
+        domain.pool.masterPool.length === 57 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && genUntouched,
+        `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)} gen不动=${String(genUntouched)}`,
     );
 }
 
-/** 3) 注入：pool_entries 模块的分区呈现与空态（池规则并入模板，独立段已删）。 */
+/** 3) 注入：pool_entries 模块的候选风格呈现与空态（池规则并入模板，独立段已删）。 */
 function runInjectionChecks(): void {
     const config = DEFAULT_PROMPT_CONFIGS.choice;
-    const supply: PoolInjectionSupply = {
-        pinned: [{ type: '检查酒馆', content: '仔细检查酒馆每个角落' }],
-        drawn: [{ type: '打听消息', content: '向酒保打听传闻' }],
-    };
+    const supply: PoolInjectionSupply = { drawn: ['轻喜剧', '口是心非'] };
     const result = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: supply });
     const allText = result.messages.map(m => m.content).join('\n');
+    const segment = allText.slice(allText.indexOf('<pool_entries>'), allText.indexOf('</pool_entries>'));
 
-    check('池注入：pool_entries 段在场（固定/候选两区标签）', allText.includes('<pool_entries>') && allText.includes('【固定条目】') && allText.includes('【候选条目】'));
+    check('池注入：pool_entries 段在场＋【候选风格】头句', allText.includes('<pool_entries>') && allText.includes('【候选风格】'));
+    check('池注入：菜单模式语义写进提示词文本（候选可能多于实际所需、按贴合度挑选）', allText.includes('候选可能多于实际所需') && allText.includes('贴合'));
+    check('池注入：候选风格逐名编号渲染（1. 轻喜剧）', segment.includes('1. 轻喜剧') && segment.includes('2. 口是心非'));
+    // 旧条目形态清零：分区标签不再存在；编号行内无全角冒号（旧形态 type：content
+    // 拼行的判据——段首句以冒号收尾，段级 includes('：') 判不了）
     check(
-        '池注入：条目逐条渲染（type：content；规则概念已删，无 [规则: …] 后缀）',
-        allText.includes('检查酒馆：仔细检查酒馆每个角落') && allText.includes('打听消息：向酒保打听传闻') && !allText.includes('[规则'),
-    );
-    check('池注入：菜单模式语义写进提示词文本（候选多于所需，AI 挑选）', allText.includes('数量多于实际所需') && allText.includes('贴合'));
-
-    // P2-1 回归：pinned ≥ count 时固定条目声明覆盖语义（不再与「恰好 N 条」互斥）
-    const overResult = assembleMessages(config.modules, { ...syntheticSources(), count: 1, poolInjection: supply });
-    const overText = overResult.messages.map(m => m.content).join('\n');
-    check(
-        '池注入：pinned≥count 时显式声明数量覆盖（固定条目优先于恰好 N 条）',
-        overText.includes('以固定条目为准') && overText.includes('不受数量规则限制'),
-        `含覆盖句=${overText.includes('以固定条目为准')}`,
+        '池注入：旧条目形态清零（无【固定条目】/【候选条目】分区、编号行无 type：content 拼行）',
+        !allText.includes('【固定条目】') && !allText.includes('【候选条目】') && !/^\d+\. .+：/m.test(segment),
+        `段级编号行带冒号=${String(/^\d+\. .+：/m.test(segment))}`,
     );
 
     // 池规则不再独立注入——<pool_rules> 段缺席，反 OOC 要点
@@ -346,14 +265,14 @@ function runInjectionChecks(): void {
     );
 
     const entTrace = result.trace.find(t => t.moduleId === 'inject_pool_entries');
-    check('池注入：trace 留痕（固定 N 条、候选 M 条）', entTrace?.injected === true && entTrace.note.includes('固定 1 条、候选 1 条'), `note=${entTrace?.note ?? '（无 trace）'}`);
+    check('池注入：trace 留痕（候选风格 N 个）', entTrace?.injected === true && entTrace.note.includes('候选风格 2 个'), `note=${entTrace?.note ?? '（无 trace）'}`);
     check('池规则模块已从模板移除（trace 无 inject_pool_rules 条目）', !result.trace.some(t => t.moduleId === 'inject_pool_rules'));
 
-    // 空态：null 供给＝池整体未启用；两区空＝池为空
+    // 空态：null 供给＝池整体未启用；空名单＝池为空
     const nullResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: null });
     const nullEnt = nullResult.trace.find(t => t.moduleId === 'inject_pool_entries');
     check('空池跳过＋trace note（无池数据＝池未启用）', nullEnt?.injected === false && nullEnt.note.includes('池未启用'), `note=${nullEnt?.note ?? '（无 trace）'}`);
-    const emptyResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: { pinned: [], drawn: [] } });
+    const emptyResult = assembleMessages(config.modules, { ...syntheticSources(), poolInjection: { drawn: [] } });
     const emptyEnt = emptyResult.trace.find(t => t.moduleId === 'inject_pool_entries');
     check('空引用跳过＋trace note（池为空）', emptyEnt?.injected === false && emptyEnt.note.includes('本聊天池为空'), `note=${emptyEnt?.note ?? '（无 trace）'}`);
 
@@ -471,9 +390,10 @@ async function runAutoGenerateChecks(): Promise<void> {
         await new Promise(r => setTimeout(r, 20));
     }
     check('自动生成：stub 端点回固定 JSON → 4 条选项落到锚楼存档', store.phase === 'idle' && readFloorOptions(latestAssistantFloorIndex() ?? -1)?.options.length === 4, `phase=${store.phase} count=${readFloorOptions(latestAssistantFloorIndex() ?? -1)?.options.length ?? 0} error=${store.error}`);
-    // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（pinned 条目必发；
-    // 条目渲染无规则后缀）
-    check('自动生成：生成管线现场抽取池（dump 必发条目可见）', store.lastDump.includes('<pool_entries>') && store.lastDump.includes('转场推进：用一两句精炼的叙述完成时间跳跃或地点切换，快速进入下一段剧情') && !store.lastDump.includes('[规则:'));
+    // 生成管线现场抽取池：drawPoolInjection 直吃 asset 全量池（57 风格纯随机
+    // 抽取——不锁具体风格名，锁「编号行 ≥count」的形状）
+    const styleLines = store.lastDump.match(/^\d+\. \S+$/gm)?.length ?? 0;
+    check('自动生成：生成管线现场抽取池（dump 候选风格编号行可见）', store.lastDump.includes('<pool_entries>') && styleLines >= 4, `编号行=${styleLines}`);
     // 外部注入全自动链路（stub context 槽位 → sources
     // 自动收集 → engine → dump）。stub_memory 先插入但 depth 4、
     // stub_anchor 后插入但 depth 0——排序断言只有真的按 depth 升序排
@@ -614,21 +534,15 @@ async function runFloorPersistChecks(): Promise<void> {
         legacyBack !== null && legacyBack.options[0]?.title === '旧',
         `read=${JSON.stringify(legacyBack)}`,
     );
-    check(
-        '楼层落盘：旧档无 aim 读回后该键仍缺席（读侧容忍，不补默认值）',
-        legacyBack !== null && legacyBack.options.length === 1 && !('aim' in legacyBack.options[0]),
-        `keys=${Object.keys(legacyBack?.options[0] ?? {}).join('|')}`,
-    );
 
-    // aim 往返：存档是考古线索——回看楼层要能看到当时这条想撬动什么
-    context.chat = [msg('（开场白）'), msg('aim 楼')];
-    const aimOption = { title: '甲', content: '做甲事', aim: '撬一格关系' };
-    const aimWritten = writeFloorOptions({ index: 1, payload: { options: [aimOption] }, expectMessage: null });
-    const aimBack = readFloorOptions(1);
+    // aim 已退役（输出契约砍键）：旧档带 aim 键＝读侧容忍（不判坏档）＋读到
+    // 即弃（读回结果里没有该键）；写侧归一只挑 title/content，不再回写该键
+    context.chat = [msg('旧档 aim 楼', { ttToolkit: { choice: { options: [{ title: '旧', content: '旧档正文', aim: '旧的一句' }], parsePath: 'json' } } })];
+    const legacyAimBack = readFloorOptions(0);
     check(
-        '楼层落盘：aim 随选项往返写入读回（写侧不静默丢字段）',
-        aimWritten === true && aimBack?.options[0]?.aim === '撬一格关系',
-        `written=${String(aimWritten)} read=${JSON.stringify(aimBack?.options[0] ?? null)}`,
+        '楼层落盘：旧档带 aim 读回后该键被丢弃（读侧容忍，不判坏档）',
+        legacyAimBack !== null && legacyAimBack.options[0]?.title === '旧' && !('aim' in legacyAimBack.options[0]),
+        `keys=${Object.keys(legacyAimBack?.options[0] ?? {}).join('|')}`,
     );
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: '甲', content: '做甲事', aim: { 想: 1 } }], parsePath: 'json' } } })];
     check('楼层落盘：坏档（aim 在场非字符串）回退 null', readFloorOptions(0) === null);
@@ -746,14 +660,14 @@ async function runToggleChecks(): Promise<void> {
 }
 
 /** 断言名（守卫分支与实测分支同名，FAIL 定位同窗）。 */
-const APPLY_OPTION_ASSERTION = 'applyOption 点击行为三分支快照（fill/append/send 落到发送通道的文本，aim 一律不外泄）';
+const APPLY_OPTION_ASSERTION = 'applyOption 点击行为三分支快照（fill/append/send 落到发送通道的文本）';
 
 /**
  * 点击应用面机判：applyOption 三个点击行为（fill/append/send）各自落到宿主
- * 发送通道的文本快照——fill 拼正文、append 拼草稿、send 发正文，且 aim 一律
- * 不随发送外泄（契约红线：aim 属显示与存档面，混进发送内容＝主模型拿到一句
- * 写给玩家看的元信息）。断言窗口内由 scripts/smoke.mjs 的发送面桩提供
- * #send_textarea（node 冒烟全程无 DOM，装卸理由见该桩）。
+ * 发送通道的文本快照——fill 拼正文、append 拼草稿、send 发正文。发送内容
+ * 只有正文一项（选项无附带元信息，aim 键已随输出契约退役）。断言窗口内由
+ * scripts/smoke.mjs 的发送面桩提供 #send_textarea（node 冒烟全程无 DOM，
+ * 装卸理由见该桩）。
  */
 async function runApplyOptionChecks(): Promise<void> {
     const stubs = smokeStubs();
@@ -761,7 +675,7 @@ async function runApplyOptionChecks(): Promise<void> {
         check(APPLY_OPTION_ASSERTION, false, '__TT_SMOKE_STUBS__ 缺席（应在浏览器宿主外由 smoke.mjs 注入）');
         return;
     }
-    const option = { title: '摊牌', content: '林霜把录音笔推到桌子中央：「那就别再绕了。」', aim: '逼对方当场表态' };
+    const option = { title: '摊牌', content: '林霜把录音笔推到桌子中央：「那就别再绕了。」' };
     const draft = '林霜已经笑了一下：';
     const last = (texts: string[]): string => texts[texts.length - 1] ?? '';
     const surface = stubs.sendSurface;
@@ -790,8 +704,7 @@ async function runApplyOptionChecks(): Promise<void> {
             APPLY_OPTION_ASSERTION,
             filled === option.content
                 && appended === draft + option.content
-                && sent === option.content
-                && ![filled, appended, sent].some(text => text.includes(option.aim)),
+                && sent === option.content,
             `fill=${filled} append=${appended} send=${sent}`,
         );
     } finally {
@@ -875,31 +788,32 @@ function runAssemblyChecks(): string {
     check('写作规则＝同一刻的平行分支（各走一路、不互为前情）',
         allText.includes('此刻同时摆开') && allText.includes('不互为因果') && allText.includes('不得被当成另一条的前情'),
         `平行口径=${allText.includes('此刻同时摆开')}`);
-    // galgame 选项铁律：同一拍覆盖不同性格倾向的玩家——每条面向一种玩家心态
-    check('选项面向不同玩家心态（同一拍覆盖不同性格倾向）',
-        allText.includes('面向一种玩家心态') && allText.includes('不同心情的玩家都有顺手的一条'),
-        `心态覆盖=${allText.includes('面向一种玩家心态')}`);
+    // 风格轴口径：风格池菜单模式——风格决定姿态与笔调，一条一风格不重复，
+    // 不同风格＝不同行动（防「同一件事换语气」的换皮选项）
+    check('选项风格轴锁（一条一个风格、不重复；不同风格＝不同的行动）',
+        allText.includes('一条一个风格、不重复') && allText.includes('不同的行动') && allText.includes('不是同一件事换语气'),
+        `风格口径=${allText.includes('一条一个风格、不重复')}`);
     check('平行口径三层同锁（规则/示例/指令）且旧措辞清零',
         allText.includes('各走一路') && allText.includes('并排的') && !allText.includes('角度错开'),
         `示例层=${allText.includes('各走一路')} 指令层=${allText.includes('并排的')}`);
     check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
     check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
-    check('few-shot 旧三条仍在（反客为主/骤然断电）', allText.includes('反客为主') && allText.includes('骤然断电'));
+    check('few-shot 输出示例换血（反客为主/痛快应下/轻笑带过 在场，骤然断电退役）', allText.includes('反客为主') && allText.includes('痛快应下') && allText.includes('轻笑带过') && !allText.includes('骤然断电'));
     // few-shot 7 条（真人反应类型覆盖）
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
     check('few-shot 输出示例为 4 条（与恰好 N 条同基数；写法对照段另计）', fewShotCount === 4, `条数=${fewShotCount}`);
-    // aim 的模板两面：示例四条各带（示例即格式范本，漏一条即教会模型漏
-    // 一条），契约声明键名而规则段不提它（元信息不占每轮规则预算）
+    // aim 已随输出契约退役：模板两面（示例与格式声明）零 "aim":——模板重新
+    // 引入该键即翻红
     const fewShotAimCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"aim":/g) ?? []).length : 0;
-    check('few-shot 输出示例四条各带 aim（示例即格式范本）', fewShotAimCount === fewShotCount && fewShotCount > 0, `aim=${fewShotAimCount} 条=${fewShotCount}`);
+    check('aim 退役：few-shot 输出示例零 "aim":', fewShotAimCount === 0, `aim=${fewShotAimCount}`);
     const outputFormat = config.modules.find(m => m.id === 'output_format');
     const coreRules = config.modules.find(m => m.id === 'core_rules');
     check(
-        '输出契约声明 aim 键且写作规则段不提 aim（元信息只进显示与存档，不占规则段预算）',
-        outputFormat?.kind === 'text' && outputFormat.content.includes('"aim":')
+        'aim 退役：输出契约不再声明 aim 键（行动标签 2～6 字替代），写作规则段不提 aim',
+        outputFormat?.kind === 'text' && !outputFormat.content.includes('"aim":') && outputFormat.content.includes('2～6字')
             && coreRules?.kind === 'text' && !coreRules.content.includes('aim'),
-        `format=${outputFormat?.kind === 'text' ? String(outputFormat.content.includes('"aim":')) : '（模块缺席）'} rules=${coreRules?.kind === 'text' ? String(!coreRules.content.includes('aim')) : '（模块缺席）'}`,
+        `format无aim=${outputFormat?.kind === 'text' ? String(!outputFormat.content.includes('"aim":')) : '（模块缺席）'} rules=${coreRules?.kind === 'text' ? String(!coreRules.content.includes('aim')) : '（模块缺席）'}`,
     );
     check('生成指令口径＝下一步的行动选项/此刻并排的走法（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('并排的走法') && !allText.includes('为当前剧情提供'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
@@ -913,17 +827,15 @@ function runAssemblyChecks(): string {
     const extTrace = offResult.trace.find(t => t.moduleId === 'inject_external_slot');
     check('模块开关优先（关掉后不注入）', extTrace?.injected === false, `note=${extTrace?.note ?? '（无 trace）'}`);
 
-    // 池与模板的交付面锁：池侧扫 type/content/category 三面（题材硬编码
-    // 主要落在分类名上，只扫正文会漏），模板侧四锁（规则 6 新元素边界／
-    // 规则 7 直球位／输出契约标题与 aim 忠实性／few_shot 直球示例）——
-    // 全是字面量锁，正文改字即翻红。
+    // 池与模板的交付面锁：池侧扫风格名单单面（风格名即全部内容），模板侧
+    // 四锁（规则 6 新元素边界／规则 7 直球位／输出契约标题忠实性／few_shot
+    // 直球示例）——全是字面量锁，正文改字即翻红。
     const { masterPool } = buildAssetPool();
     const BANNED = ['商队', '义体', '尸群', '丧尸', '公会', '师门', '末世', '辐射', '黑客', '修炼', '境界', '法宝', '灵根', '战技', '魔法', '江湖', '内力', '骑士', '精灵', '星舰', '机甲', '异能', '学院', '神殿', '祭坛', '神明', '侦探', '宫廷', '王朝', '战斗异能', '权谋斗争', '末日生存', '校园职场', '奇幻冒险', '科幻未来', '推理调查'];
-    // 三面各成一段再扫：字段直接相接会在边界拼出词表词造成假红。
-    const bannedHits = (w: string) => masterPool.some(e => [e.type, e.content, e.category].join('\n').includes(w));
+    const bannedHits = (w: string) => masterPool.some(e => e.name.includes(w));
     check('asset：无题材硬编码残留（题材词表零命中）', !BANNED.some(bannedHits), BANNED.filter(bannedHits).join('/'));
     check('写作规则锁「直接回应」直球位', allText.includes('至少一条选项是对它的直接回应') && allText.includes('不绕开、不岔走'));
-    check('输出契约锁标题与 aim 忠实性', allText.includes('核心动作') && allText.includes('不许埋在修饰里') && allText.includes('不得与正文动作相悖'));
+    check('输出契约锁标题忠实性（点出核心动作、不许埋在修饰里）', allText.includes('核心动作') && allText.includes('不许埋在修饰里'));
     check('规则 6 锁新元素边界（背景服务＋不得偷走这一拍）', allText.includes('只能作背景') && allText.includes('不得偷走这一拍') && allText.includes('新元素不许把它挤掉'));
     check('few_shot 直球示例换血（岔开话题退役）', allText.includes('痛快应下') && !allText.includes('岔开话题'));
 
@@ -983,28 +895,14 @@ function runParseChecks(): void {
     const wrappedReport = parseOptions(wrapped, 4);
     check('对象契约 {"options":[...]} 走主路径', wrappedReport.path === 'json' && wrappedReport.options.length === 1, `path=${wrappedReport.path}`);
 
-    // aim（只进显示与存档的元信息）：主契约带 aim 时提取；缺 aim 的两条
-    // 来源——旧契约输出与括号回退路径——一律不带该键
+    // aim 已退役：输出带 aim 键 → 解析后丢弃（toOption 只挑 title/content）；
+    // 带键输出不因此判坏（与旧档读侧容忍同一口径）
     const aimJson = '{"options":[{"title":"A","content":"甲","aim":"撬出对方底牌"},{"title":"B","content":"乙"}]}';
     const aimReport = parseOptions(aimJson, 4);
     check(
-        '解析：主契约提取 aim（显示侧「这条想撬动什么」的来源）',
-        aimReport.path === 'json' && aimReport.options[0]?.aim === '撬出对方底牌',
-        `aim=${String(aimReport.options[0]?.aim)}`,
-    );
-    const aimAbsent = aimReport.options[1];
-    check(
-        '解析：元素缺 aim 不带该键（旧契约输出与括号回退路径同此形态，读侧一律容忍）',
-        aimAbsent !== undefined && !('aim' in aimAbsent) && !('aim' in (report.options[0] ?? {})),
-        `json=${Object.keys(aimAbsent ?? {}).join('|')} 回退=${Object.keys(report.options[0] ?? {}).join('|')}`,
-    );
-    // 归一：非字符串（模型爱写 null）与纯空白都按缺席处理，与缺键同义
-    const oddAimJson = '{"options":[{"title":"A","content":"甲","aim":null},{"title":"B","content":"乙","aim":"   "}]}';
-    const oddAimReport = parseOptions(oddAimJson, 4);
-    check(
-        '解析：aim 非字符串（null）与纯空白归一为缺席（显示侧「在场才渲染」的判据）',
-        oddAimReport.options.length === 2 && oddAimReport.options.every(o => !('aim' in o)),
-        `keys=${oddAimReport.options.map(o => Object.keys(o).join('|')).join(' / ')}`,
+        '解析：输出带 aim 键→解析后丢弃（toOption 只挑 title/content）',
+        aimReport.path === 'json' && aimReport.options.length === 2 && aimReport.options.every(o => !('aim' in o)),
+        `keys=${aimReport.options.map(o => Object.keys(o).join('|')).join(' / ')}`,
     );
 
     // 空输入
@@ -1597,5 +1495,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：trim 截断/末段打乱开与关两侧）、asset 同步（124 条/9 分类/首次翻转/幂等不回翻/污染恢复）、池注入分区、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/重 roll 作废/写侧守门/坏档回退）与生成 toggle 两段式（启动→取消、成功落档锚楼）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：候选倍率钳制/抽取量随动）、asset 同步（57 风格名/纯随机/首次标记/幂等逐字一致/污染恢复）、池注入候选风格（菜单模式/aim 退役）、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/重 roll 作废/写侧守门/坏档回退/旧档 aim 读侧丢弃）与生成 toggle 两段式（启动→取消、成功落档锚楼）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }

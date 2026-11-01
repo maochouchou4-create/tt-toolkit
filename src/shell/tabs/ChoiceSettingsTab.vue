@@ -1,8 +1,7 @@
 <template>
   <!--
-    选项生成设置：生成参数（含每轮自动生成/按分类轮询开关、置顶超额策略
-    与末段打乱两个池旋钮——生成行为参数归一处）＋走向指引（提示词 tab
-    删除后唯一存留的提示词入口）。
+    选项生成设置：生成参数（含每轮自动生成开关与候选倍率池旋钮——
+    生成行为参数归一处）＋走向指引（提示词 tab 删除后唯一存留的提示词入口）。
     输出契约/流式按任务固化（TASK_PARAMS），温度/思考强度与模型选择唯一
     入口＝「API」页「任务模型」卡——本页不再有生成通道卡。
     页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn，
@@ -14,27 +13,13 @@
         <input :checked="settings.gen.autoGenerate" type="checkbox" @change="onAutoToggle">
         <span>AI 回复后自动生成选项（生成中 / 未配 API 自动跳过）</span>
       </label>
-      <label class="tt-check-row">
-        <input :checked="settings.gen.categoriesEnabled" type="checkbox" @change="onCategoriesToggle">
-        <span>按分类轮询（每轮选项尽量来自不同分类，保证多样性）</span>
-      </label>
       <TTField label="每次生成条数">
         <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, DEFAULT_GEN_PARAMS.count) })">
       </TTField>
       <TTField label="候选倍率（%）">
         <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" :min="OVERSAMPLE_LIMITS.min" :max="OVERSAMPLE_LIMITS.max" :step="OVERSAMPLE_LIMITS.step" @change="settings.updateGen({ oversamplePct: clampInt($event, OVERSAMPLE_LIMITS.min, OVERSAMPLE_LIMITS.max, DEFAULT_GEN_PARAMS.oversamplePct) })">
       </TTField>
-      <div class="tt-choice-hint">提示词候选 ≈ {{ candidateEstimate }} 条（1 条固定项＋随机抽取，随上方条数与倍率变化）</div>
-      <TTField label="置顶超额策略">
-        <select class="tt-ctrl" :value="settings.gen.pinnedOverflow" @change="onOverflowChange">
-          <option value="send_all">全部保留（置顶条目超过生成条数时全部保留，实际给出的候选会多于设定条数）</option>
-          <option value="trim">裁到条数（置顶条目超过生成条数时随机保留一组、裁到条数）</option>
-        </select>
-      </TTField>
-      <label class="tt-check-row">
-        <input :checked="settings.gen.shuffleFinal" type="checkbox" @change="onShuffleToggle">
-        <span>末段打乱（每次生成把置顶区与轮询区各自打乱；关闭则不打乱出场序（置顶超额裁剪时的随机保留与本开关无关））</span>
-      </label>
+      <div class="tt-choice-hint">提示词候选风格 ≈ {{ candidateEstimate }} 个（按候选倍率随机抽取，随上方条数与倍率变化）</div>
       <TTField label="选项字数下限">
         <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, DEFAULT_GEN_PARAMS.minChars) })">
       </TTField>
@@ -117,21 +102,6 @@ function onAutoToggle(event: Event): void {
     settings.updateGen({ autoGenerate: (event.target as HTMLInputElement).checked });
 }
 
-function onCategoriesToggle(event: Event): void {
-    settings.updateGen({ categoriesEnabled: (event.target as HTMLInputElement).checked });
-}
-
-// 两个池旋钮的值恒取自 normalize 后的域，控件不带独立缺省：写面若另立
-// 默认，用户看到的默认与实际抽取行为会分家。写出去的非法枚举由
-// normalizePoolGenParams 钳回默认域（同 clickBehavior 的既有纪律）。
-function onOverflowChange(event: Event): void {
-    settings.updateGen({ pinnedOverflow: targetValue(event) as ChoiceGenParams['pinnedOverflow'] });
-}
-
-function onShuffleToggle(event: Event): void {
-    settings.updateGen({ shuffleFinal: (event.target as HTMLInputElement).checked });
-}
-
 function clampInt(event: Event, min: number, max: number, fallback: number): number {
     const value = Number(targetValue(event));
     if (!Number.isFinite(value)) return fallback;
@@ -139,10 +109,7 @@ function clampInt(event: Event, min: number, max: number, fallback: number): num
 }
 
 // 候选估算行：公式单源＝resolver.estimateInjectionLines（与抽取量同式）。
-// 置顶数恒传常量 1、不从池读：「全池恰一条置顶」由 choice/smoke.ts 的
-// pinned 全池唯一机判锁（asset：转场推进转固定（pinned 且全池唯一））保证，
-// UI 面不新增对池的数据依赖。
-const candidateEstimate = computed(() => estimateInjectionLines(settings.gen.count, 1, settings.gen.oversamplePct));
+const candidateEstimate = computed(() => estimateInjectionLines(settings.gen.count, settings.gen.oversamplePct));
 
 // ---- 剧情走向卡（随提示词 tab 删除从 PromptEditorTab
 //      搬回本页；数据域与写入通道零改动） ----

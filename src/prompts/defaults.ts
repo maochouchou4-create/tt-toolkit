@@ -189,9 +189,6 @@ export const DEFAULT_PROMPT_CONFIGS: Record<TaskKey, PromptConfig> = {
                 role: 'system',
                 order: 130,
                 enabled: true,
-                // aim 只服务显示与楼层存档，不随发言外发给主模型——所以它是
-                // 输出契约的一个键而不是写作规则里的一条：规则段每轮都要模型
-                // 重读并占输出预算，而 aim 对模型的写作行为没有任何要求。
                 content: CHOICE_OUTPUT_FORMAT_TEXT,
             },
             {
