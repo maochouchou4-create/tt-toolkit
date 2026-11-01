@@ -11,53 +11,54 @@
  * file:line + 片段），scripts/check-host-anchors.mjs 解析全部锚点、读
  * 宿主 checkout 对应行、规范化空白后比对片段，漂移即 exit 1。
  *
- * 核实基线：D:\code\repos\TauriTavern\src（rewrite 施工时 HEAD）。
+ * 核实基线：D:\code\repos\TauriTavern\src（本机 checkout 现值；宿主升级
+ * 行号/文件漂移时按新源码重锚，签名变化须重核 d.ts 声明面）。
  */
 
 declare module '@sillytavern/script' {
     /**
-     * @hostAnchor script.js:775 export let chat_metadata = {};
+     * @hostAnchor script.js:769 export let chat_metadata = {};
      */
     export let chat_metadata: Record<string, unknown>;
     /**
-     * @hostAnchor script.js:670 export let characters = [];
+     * @hostAnchor script.js:665 export let characters = [];
      */
     export let characters: unknown[];
     /**
      * 当前角色索引的字符串形态（未选角色为 undefined；索引口径见
      * host/settings.ts 头注）。
-     * @hostAnchor script.js:8709 this_chid = String(value);
+     * @hostAnchor script.js:8522 this_chid = String(value);
      */
     export let this_chid: string;
     /**
-     * @hostAnchor script.js:805 export function saveSettingsDebounced(loopCounter = 0) {
+     * @hostAnchor script.js:799 export function saveSettingsDebounced(loopCounter = 0) {
      */
     export function saveSettingsDebounced(loopCounter?: number): void;
     /**
      * 发送 #send_textarea 当前内容（宿主完整发送语义：slash 解析/
      * continue-on-send；async 无参）。
-     * @hostAnchor script.js:2312 export async function sendTextareaMessage() {
+     * @hostAnchor script.js:2360 export async function sendTextareaMessage() {
      */
     export function sendTextareaMessage(): Promise<void>;
     /**
      * 宏替换（{{user}}/{{char}} 等；options 形态见宿主 source）。
-     * @hostAnchor script.js:3787 export function substituteParams(content, options = {}) {
+     * @hostAnchor script.js:3701 export function substituteParams(content, options = {}) {
      */
     export function substituteParams(content: string, options?: Record<string, unknown>): string;
     /**
      * 宿主请求头（CSRF token；生成端点调用必需）。
-     * @hostAnchor script.js:1041 export function getRequestHeaders({ omitContentType = false } = {}) {
+     * @hostAnchor script.js:1053 export function getRequestHeaders({ omitContentType = false } = {}) {
      */
     export function getRequestHeaders(options?: { omitContentType?: boolean }): Record<string, string>;
     /**
      * 宿主通用注入槽位表（可变单例；本仓只读扫描，不写）。
-     * @hostAnchor script.js:1021 export let extension_prompts = {};
+     * @hostAnchor script.js:1031 export let extension_prompts = {};
      */
     export let extension_prompts: Record<string, unknown>;
     /**
      * 新建用户头像时复制的宿主默认头像文件路径（host/personas.ts
      * 上传通道的 blob 来源）。
-     * @hostAnchor script.js:680 export const default_user_avatar = 'img/user-default.png';
+     * @hostAnchor script.js:674 export const default_user_avatar = 'img/user-default.png';
      */
     export const default_user_avatar: string;
 }
@@ -135,8 +136,8 @@ declare module '@sillytavern/scripts/st-context' {
      * 宿主 openai 预设管理器（`getPresetManager('openai')` 返回的 class 实例；
      * 方法体内部走 `this`，调用方必须保留接收者——解引用后裸调会丢 this 抛错）。
      * @hostAnchor scripts/preset-manager.js:97 export function getPresetManager(apiId = '') {
-     * @hostAnchor scripts/preset-manager.js:549 getPresetList(api) {
-     * @hostAnchor scripts/preset-manager.js:777 getCompletionPresetByName(name) {
+     * @hostAnchor scripts/preset-manager.js:554 getPresetList(api) {
+     * @hostAnchor scripts/preset-manager.js:782 getCompletionPresetByName(name) {
      */
     export interface TauriTavernPresetManager {
         getPresetList(api?: string): unknown;
@@ -145,34 +146,34 @@ declare module '@sillytavern/scripts/st-context' {
     /**
      * getContext() 返回宿主上下文（此处只声明本仓消费的字段子集，
      * 全量字段见宿主源码）。
-     * @hostAnchor scripts/st-context.js:121 export function getContext() {
+     * @hostAnchor scripts/st-context.js:123 export function getContext() {
      */
     export function getContext(): {
         /** 当前聊天全量消息数组（绝对索引即楼层号） */
         chat: unknown[];
-        /** @hostAnchor scripts/st-context.js:131 chatId: selected_group */
+        /** @hostAnchor scripts/st-context.js:133 chatId: selected_group */
         chatId: string | null;
-        /** @hostAnchor scripts/st-context.js:130 groupId: selected_group, */
+        /** @hostAnchor scripts/st-context.js:132 groupId: selected_group, */
         groupId: unknown;
         /**
          * this_chid 的转发（string 形态；未选角色为 null）。
-         * @hostAnchor scripts/st-context.js:129 characterId: this_chid,
+         * @hostAnchor scripts/st-context.js:131 characterId: this_chid,
          */
         characterId: string | null;
-        /** @hostAnchor scripts/st-context.js:177 executeSlashCommandsWithOptions, */
+        /** @hostAnchor scripts/st-context.js:179 executeSlashCommandsWithOptions, */
         executeSlashCommandsWithOptions?: (command: string) => Promise<unknown>;
         /** 当前 chat_metadata 的立即保存通道（script.js:11175，async 无参） */
         saveMetadata?: () => Promise<unknown>;
         /**
          * 当前聊天消息变更后的立即保存通道（内部＝saveChatConditional：
          * script.js:11198 selected_group 分流，群聊安全）。
-         * @hostAnchor scripts/st-context.js:161 saveChat: saveChatConditional,
+         * @hostAnchor scripts/st-context.js:163 saveChat: saveChatConditional,
          */
         saveChat?: () => Promise<unknown>;
         /**
          * power_user 的转发：movingUIState 持久化各浮层拖动位置
          * （dragElement 写入），壳挂载时自恢复读取。
-         * @hostAnchor scripts/st-context.js:235 powerUserSettings: power_user,
+         * @hostAnchor scripts/st-context.js:237 powerUserSettings: power_user,
          */
         powerUserSettings?: {
             movingUI: boolean;
@@ -181,17 +182,17 @@ declare module '@sillytavern/scripts/st-context' {
         /**
          * oai_settings 的转发（当前激活 openai 预设名＝
          * preset_settings_openai；persona 预设解析读取）。
-         * @hostAnchor scripts/st-context.js:233 chatCompletionSettings: oai_settings,
+         * @hostAnchor scripts/st-context.js:235 chatCompletionSettings: oai_settings,
          */
         chatCompletionSettings?: Record<string, unknown>;
         /**
          * 全量世界书名快照（persona 书目分区）。
-         * @hostAnchor scripts/st-context.js:289 getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
+         * @hostAnchor scripts/st-context.js:293 getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
          */
         getWorldInfoNames?: () => unknown;
         /**
          * 预设管理器转发（persona 预设清单/按名取预设）。
-         * @hostAnchor scripts/st-context.js:293 getPresetManager,
+         * @hostAnchor scripts/st-context.js:297 getPresetManager,
          */
         getPresetManager?: (apiId: string) => TauriTavernPresetManager | null;
         [key: string]: unknown;
@@ -205,7 +206,7 @@ declare module '@sillytavern/scripts/RossAscends-mods' {
      * jQuery 包装对象上找 .dragElement 导致永远走降级分支的实锤）。
      * 拖把手契约：目标元素需有 id，把手 selector 固定 #<id>header 且
      * 须带 .drag-grabber 类（:648-656 才绑 mousedown）。
-     * @hostAnchor scripts/RossAscends-mods.js:498 export function dragElement($elmnt) {
+     * @hostAnchor scripts/RossAscends-mods.js:502 export function dragElement($elmnt) {
      */
     export function dragElement($elmnt: unknown): void;
 }
@@ -214,7 +215,7 @@ declare module '@sillytavern/scripts/power-user' {
     /**
      * 全局 power_user 单例（含 persona_description 人设字段 :322；
      * 本仓只读该字段，不写）。
-     * @hostAnchor scripts/power-user.js:136 export const power_user = {
+     * @hostAnchor scripts/power-user.js:142 export const power_user = {
      */
     export const power_user: Record<string, unknown>;
 }
@@ -225,7 +226,7 @@ declare module '@sillytavern/scripts/world-info' {
      * worldInfoBefore/After/Examples/Depth/anBefore/anAfter 桶，
      * world-info.js:1005-1018）。globalScanData 键集见
      * world-info.js:279-287 defaultGlobalScanData。
-     * @hostAnchor scripts/world-info.js:988 export async function getWorldInfoPrompt(chat, maxContext, isDryRun, globalScanData) {
+     * @hostAnchor scripts/world-info.js:918 export async function getWorldInfoPrompt(chat, maxContext, isDryRun, globalScanData) {
      */
     export function getWorldInfoPrompt(
         chat: string[],
@@ -236,13 +237,13 @@ declare module '@sillytavern/scripts/world-info' {
     /**
      * 按书名装载世界书数据（entries 键是 uid 字符串；persona
      * 的世界书条目读取通道，返回 null=书不存在）。
-     * @hostAnchor scripts/world-info.js:2241 export async function loadWorldInfo(name) {
+     * @hostAnchor scripts/world-info-persistence.js:36 export async function loadWorldInfo(name) {
      */
     export function loadWorldInfo(name: string): Promise<{ entries: Record<string, WorldInfoEntryHost> } | null>;
 
     /**
      * 宿主世界书条目字段（本仓消费面子集；宽松形态见 host/worldinfo.ts 收窄）。
-     * @hostAnchor scripts/world-info.js:4303 const newEntry = { uid: newUid, ...structuredClone(newWorldInfoEntryTemplate) };
+     * @hostAnchor scripts/world-info.js:4262 const newEntry = { uid: newUid, ...structuredClone(newWorldInfoEntryTemplate) };
      */
     export interface WorldInfoEntryHost {
         uid?: number;
@@ -271,7 +272,7 @@ declare module '@sillytavern/scripts/personas' {
      * 头像即 persona 键：power_user.personas[avatarId]=名称。initPersona
      * 建描述符+落盘+非 silent emit PERSONA_CREATED（建档走
      * silent:true，写回纪律在 host/personas.ts）。
-     * @hostAnchor scripts/personas.js:548 export async function initPersona(avatarId, personaName, personaDescription, personaTitle, {
+     * @hostAnchor scripts/personas.js:528 export async function initPersona(avatarId, personaName, personaDescription, personaTitle, {
      */
     export function initPersona(
         avatarId: string,
@@ -283,7 +284,7 @@ declare module '@sillytavern/scripts/personas' {
     /**
      * 切换当前用户头像（toastPersonaNameChange:false 供 persona
      * 写回静默切换）。
-     * @hostAnchor scripts/personas.js:168 export async function setUserAvatar(imgfile, {
+     * @hostAnchor scripts/personas.js:169 export async function setUserAvatar(imgfile, {
      */
     export function setUserAvatar(
         imgfile: string,
@@ -291,13 +292,13 @@ declare module '@sillytavern/scripts/personas' {
     ): Promise<void>;
     /**
      * 刷新头像/persona 列表视图（ghost 键防御用它取真实文件名集）。
-     * @hostAnchor scripts/personas.js:302 export async function getUserAvatars(doRender = true, openPageAt = '') {
+     * @hostAnchor scripts/personas.js:303 export async function getUserAvatars(doRender = true, openPageAt = '') {
      */
     export function getUserAvatars(doRender?: boolean, openPageAt?: string): Promise<unknown>;
     /**
      * 刷新人设管理页描述框（PERSONA_UPDATED 无人订阅，镜像字段写完必须
      * 直接调它，宿主页才拿到新描述）。
-     * @hostAnchor scripts/personas.js:651 export function setPersonaDescription({ displayName = name1 } = {}) {
+     * @hostAnchor scripts/personas.js:631 export function setPersonaDescription({ displayName = name1 } = {}) {
      */
     export function setPersonaDescription(options?: { displayName?: string }): void;
 }
@@ -305,7 +306,7 @@ declare module '@sillytavern/scripts/personas' {
 declare module '@sillytavern/scripts/utils' {
     /**
      * 按名称查宿主 persona（upsert 写回通道用它判「已有同名档」）。
-     * @hostAnchor scripts/utils.js:2724 export function findPersona({ name = null, allowAvatar = true, insensitive = true, preferCurrentPersona = true, quiet = false } = {}) {
+     * @hostAnchor scripts/utils.js:2652 export function findPersona({ name = null, allowAvatar = true, insensitive = true, preferCurrentPersona = true, quiet = false } = {}) {
      */
     export function findPersona(options?: {
         name?: string | null;

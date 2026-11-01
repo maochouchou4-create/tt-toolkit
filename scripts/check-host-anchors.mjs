@@ -144,8 +144,8 @@ if (!hostDomSelectors.floor) {
 // 骨架（聊天根、楼层正文容器）；floor 的漂移守门由楼层渲染器运行期承接
 // （匹配 0 楼层即 toast，见 floor-view.ts reconcile 尾部守卫）。
 const DOM_ANCHORS = [
-    { key: 'chatRoot', selector: '#chat', file: 'index.html', line: 8382, fragment: '<div id="chat">' },
-    { key: 'floorBlock', selector: '.mes_block', file: 'index.html', line: 7699, fragment: '<div class="mes_block">' },
+    { key: 'chatRoot', selector: '#chat', file: 'index.html', line: 8480, fragment: '<div id="chat">' },
+    { key: 'floorBlock', selector: '.mes_block', file: 'index.html', line: 7808, fragment: '<div class="mes_block">' },
 ];
 for (const anchor of DOM_ANCHORS) {
     const declared = hostDomSelectors[anchor.key];
