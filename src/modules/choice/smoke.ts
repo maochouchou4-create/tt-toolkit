@@ -1190,11 +1190,12 @@ async function runRunlogChecks(): Promise<void> {
     try {
         await generateOptions();
         const record = runlog.records[runlog.records.length - 1];
-        check('runlog：debugForceRaw 生成成功落记录（ok=true、responseText 非空、parsePath/条数进记录）',
+        check('runlog：debugForceRaw 生成成功落记录（ok=true、responseText 非空、parsePath/条数/标题清单进记录）',
             !!record && record.ok && record.responseText === DEBUG_MALFORMED_RAW
             && record.parsePath === 'bracket_fallback' && record.optionCount === 4
+            && !!record.optionTitles && record.optionTitles.join('｜') === '推开酒馆的门｜向老板打听｜查看告示牌｜转身离开'
             && record.endpointUrl === '(debugForceRaw)',
-            `ok=${String(record?.ok)} parsePath=${record?.parsePath ?? '无'} count=${String(record?.optionCount)}`);
+            `ok=${String(record?.ok)} parsePath=${record?.parsePath ?? '无'} count=${String(record?.optionCount)} titles=${record?.optionTitles?.join('｜') ?? '无'}`);
     } finally {
         choiceStorage.updateGenParams({ debugForceRaw: false });
     }

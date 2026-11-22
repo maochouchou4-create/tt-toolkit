@@ -86,12 +86,13 @@ export const useRunlogStore = defineStore('tt-runlog', {
             return full.id;
         },
         /** choice 任务层补解析结论；摘要随最终态重发一行（同 run# 可对账）。 */
-        enrich(id: number, patch: { parsePath?: string; optionCount?: number; dropped?: number }): void {
+        enrich(id: number, patch: { parsePath?: string; optionCount?: number; dropped?: number; optionTitles?: string[] }): void {
             const record = this.records.find(r => r.id === id);
             if (!record) return;
             if (patch.parsePath !== undefined) record.parsePath = patch.parsePath;
             if (patch.optionCount !== undefined) record.optionCount = patch.optionCount;
             if (patch.dropped !== undefined) record.dropped = patch.dropped;
+            if (patch.optionTitles !== undefined) record.optionTitles = patch.optionTitles;
             this.emitSummary(record);
         },
         /** 翻转最终态为失败并写摘要（传输已 commit 的记录由任务层二次定性）。 */

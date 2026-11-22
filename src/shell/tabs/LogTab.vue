@@ -26,6 +26,7 @@
           <span class="tt-runlog-dur">{{ formatDuration(r.durationMs) }}</span>
         </button>
         <div v-if="r.ok === false && r.error" class="tt-runlog-error">{{ r.error }}</div>
+        <div v-if="r.optionTitles?.length" class="tt-runlog-titles">{{ r.optionTitles.join(' ｜ ') }}</div>
         <div v-if="expanded === r.id" class="tt-runlog-body">
           <button type="button" class="tt-btn" @click="copyRecord(r)">复制全文</button>
           <div class="tt-runlog-section">请求（{{ r.endpointUrl }} · {{ r.contract }} · {{ r.stream ? '流式' : '非流式' }}）</div>
@@ -72,6 +73,7 @@ function recordText(r: RunRecord): string {
         `端点 ${r.endpointUrl} 模型 ${r.model} 契约 ${r.contract} ${r.stream ? '流式' : '非流式'} 耗时 ${formatDuration(r.durationMs)}`,
         r.error ? `错误 ${r.error}` : '',
         `解析 ${r.parsePath ?? '—'} 条数 ${r.optionCount ?? '—'}${r.dropped !== undefined ? ` 丢弃 ${r.dropped}` : ''}`,
+        r.optionTitles?.length ? `标题 ${r.optionTitles.join(' ｜ ')}` : '',
         '--- 请求 ---',
         r.requestText,
         '--- 响应 ---',
@@ -179,6 +181,15 @@ async function copyRecord(r: RunRecord): Promise<void> {
 .tt-runlog-dur {
     flex-shrink: 0;
     opacity: 0.75;
+}
+
+.tt-runlog-titles {
+    font-size: var(--tt-fs-hint);
+    opacity: 0.75;
+    padding: var(--tt-sp-1) 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .tt-runlog-error {

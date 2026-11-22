@@ -188,7 +188,7 @@ export async function generateOptions(): Promise<void> {
             throw new Error(message);
         }
         if (runId !== null) {
-            runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length, dropped: report.dropped });
+            runlogStore.enrich(runId, { parsePath: report.path, optionCount: report.options.length, dropped: report.dropped, optionTitles: report.options.map(o => o.title) });
         }
         const stored = store.succeed({
             options: report.options,

@@ -38,6 +38,9 @@ export interface RunRecord {
     optionCount?: number;
     /** choice 任务 enrich：partial 路径的残缺丢弃数（排障展示用；非 UI 行为判据） */
     dropped?: number;
+    /** choice 任务 enrich：成稿选项标题清单——生成质量的肉眼回归观测面。
+     *  只进内存记录与日志页，不进 ttlog 摘要（摘要约定只含元数据）。 */
+    optionTitles?: string[];
     /** 失败摘要（safeText，300 字内） */
     error?: string;
 }
