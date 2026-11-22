@@ -38,6 +38,7 @@ dist 新鲜度复验（commit 后、push 前，发布批必做）：再跑一次
 
 - dist 重建后**必须**重跑 `node scripts/dev-harness/build.mjs`（dist-harness/ 下是实体文件不是映射，忘了跑＝验证的是旧代码）。
 - `node scripts/dev-harness/serve.mjs` → http://127.0.0.1:4173/scripts/dev-harness/
+- 浏览器面机判＝`pnpm e2e`（@playwright/test，`playwright.config.ts` 自起 serve.mjs 于 4319 端口、用后即收）。**按需跑、不进七道门禁**——浏览器门要内核与网络栈，拖慢每次 commit；改壳层/UI 时手动跑。断言面＝DOM 挂载与交互逻辑（壳开合、tab 切换、跟随开关状态行）；CSS 依赖型 bug 仍须真机验（harness 无宿主样式表）。首次缺内核跑 `pnpm exec playwright install chromium`。
 - 开壳正解：`document.getElementById('tt-toolkit-wand-entry').click()`。
 - 陷阱：`.extensionsMenuExtensionButton` 是条目内图标 div（无文本），按它找按钮永远 undefined；`display:none` 的壳里 `querySelectorAll` 照样列出隐藏 tab（假阳性），以 `innerText` 判可见性。
 - harness 存储在内存，刷新即丢端点等数据（正常现象，不是 bug）。
