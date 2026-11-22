@@ -35,6 +35,17 @@ const KEY_LINE_RE = /^\s*([^:\s\-]+?)\s*[:：]/;
  */
 const SCHEMA_KEY_LINE_RE = /^\s*([^\s\-:，。！？；、,.!?;…“”‘’"']+?)\s*[:：]/;
 
+/**
+ * 单行严格键行判定（SCHEMA_KEY_LINE_RE 的具名出口）：骨架校验
+ * （isSchemaSkeleton）与 prefill 补回判据（generation-wrap 的
+ * resumesPrefillHead）共用——两处判的是同一件事「这一行是 YAML 键行还是
+ * 散文」，口径必须同源：补回侧宽一档会把散言前导误黏上起手词，严一档
+ * 会把真实叶行漏掉（首块头静默丢失、首块叶逃出复核轮的叶级守卫）。
+ */
+export function isStrictKeyLine(line: string): boolean {
+    return SCHEMA_KEY_LINE_RE.test(line);
+}
+
 /** 无缩进行判定（行首即内容）。 */
 const isUnindented = (line: string): boolean => line.search(/\S|$/) === 0;
 

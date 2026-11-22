@@ -18,7 +18,8 @@ export interface ApiProvider {
     models: string[];
     /**
      * 端点不支持续写（prefill）的能力记忆：该端点曾因带 prefill 收 400、
-     * 去 prefill 重试成功后落下的事实标记（baseUrl 粒度，跨会话持久）。
+     * 去 prefill 重试成功后落下的事实标记（条目粒度、跨会话持久——同一
+     * baseUrl 建两条目不共享，记忆跟接入身份走）。
      * 生成链据此跳过 prefill；不自动翻回（防探测抖动），复位走 API 页手动按钮。
      */
     noPrefill: boolean;

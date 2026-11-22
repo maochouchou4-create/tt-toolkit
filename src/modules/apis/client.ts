@@ -218,7 +218,10 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 
 /**
  * 拉取模型名单（双候选端点探测：base 有 /vN → base/models，否则补
- * /v1/models；次选裸 base/models）。全部失败抛错（调用方 toast）。
+ * /v1/models；次选裸 base/models）。全部失败抛错（调用方 toast），错误
+ * 消息带上每个候选端点的失败原因（非 2xx 读响应体经 readUpstreamError
+ * 出上游错文；网络/超时出传输层错文）——笼统一句「连接失败」会把 401
+ * 密钥错报成端点连不上，排障第一步就被引歪。
  */
 export async function fetchModels(url: string, key: string): Promise<string[]> {
     const cleanBase = normalizeApiBase(url);
@@ -226,15 +229,18 @@ export async function fetchModels(url: string, key: string): Promise<string[]> {
         /\/v\d+$/.test(cleanBase) ? `${cleanBase}/models` : `${cleanBase}/v1/models`,
         `${cleanBase}/models`,
     ];
+    const failures: string[] = [];
     for (const ep of endpoints) {
         try {
             const res = await fetchWithTimeout(ep, { method: 'GET', headers: { 'Authorization': `Bearer ${key}` } });
             if (res.ok) return extractModelList(await res.json());
-        } catch {
-            // 换下一个候选端点
+            const upstream = readUpstreamError(await res.json().catch(() => null));
+            failures.push(`${res.status}${upstream ? ` ${upstream}` : ''}`);
+        } catch (err) {
+            failures.push(err instanceof Error ? err.message : String(err));
         }
     }
-    throw new Error('连接失败或无法获取模型列表');
+    throw new Error(`连接失败或无法获取模型列表（${failures.join('；')}）`);
 }
 
 /**

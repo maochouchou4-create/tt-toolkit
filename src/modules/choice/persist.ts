@@ -11,8 +11,11 @@
  * 是纯数据（{title,content} 数组＋字符串），不得含函数/响应式代理。
  */
 import { EXTRA_NAMESPACE_KEY, getChatMessages, saveCurrentChat, type ChatMessage } from '@/host';
+import { createTtlog } from '@/host/ttlog';
 import { isRecord } from '@/storage/shape';
 import type { ParsedOption } from './parse';
+
+const log = createTtlog('modules/choice/persist');
 
 /** 命名空间内的选项键（命名空间层与单楼派生数据一一对应，不混键）。 */
 const EXTRA_CHOICE_KEY = 'choice';
@@ -69,7 +72,8 @@ let badArchiveWarned = false;
 /**
  * 读某楼层的选项存档；无档/越界/形状不符（坏档）一律 null——坏档回退
  * 空态优于抛错打断装载（派生数据不值得 Fail Fast 打断聊天）。
- * 坏档留一条 console.warn（用户终端排障口，楼层渲染器不进 UI 零件）。
+ * 坏档留一条 ttlog WARN（落宿主日志盘面；打包版无 devtools，纯
+ * console.warn 用户侧不可见——楼层渲染器不进 UI 零件）。
  */
 export function readFloorOptions(index: number): StoredFloorOptions | null {
     const message = messageAt(index);
@@ -79,7 +83,7 @@ export function readFloorOptions(index: number): StoredFloorOptions | null {
     if (!isStoredFloorOptions(stored)) {
         if (!badArchiveWarned) {
             badArchiveWarned = true;
-            console.warn(`[tt-toolkit][choice] 楼层 ${index} 的选项存档形状不符，按无档处理（该楼不出选项块）`, stored);
+            log.warn(`楼层 ${index} 的选项存档形状不符，按无档处理（该楼不出选项块）`, stored);
         }
         return null;
     }

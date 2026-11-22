@@ -64,19 +64,40 @@ export const DEFAULT_GEN_PARAMS: ChoiceGenParams = {
 };
 
 /**
+ * 生成参数值域（单一事实源）：normalize 钳制与设置页控件的 min/max 消费
+ * 同一份——两处各写一套字面量就是口径分裂的种子（UI 收了、落档没收，
+ * 手改存档的越界值直接穿进 {{count}} 占位符）。oversample 的值域在
+ * pool/resolver 的 OVERSAMPLE_LIMITS（与池层共用），不在此重复。
+ */
+export const GEN_PARAM_LIMITS = {
+    count: { min: 1, max: 10 },
+    minChars: { min: 0, max: 200 },
+    maxChars: { min: 10, max: 500 },
+} as const;
+
+/** 数值钳制（值域单源消费点）：非数/NaN 回落默认值，其余取整后钳进值域。 */
+function clampParam(value: unknown, limits: { readonly min: number; readonly max: number }, fallback: number): number {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(limits.min, Math.min(limits.max, Math.round(num)));
+}
+
+/**
  * gen 域七键逐字段显式重建（未知键丢弃）：字段清单即 ChoiceGenParams 的单一
  * 事实源——退役旋钮在旧档里的残留（分类轮询/置顶超额/末段打乱三键与更早的
- * contextRounds 等）随任一读写通道首读即净，不做迁移机器。池参数部分的值域
- * 钳制由 normalizePoolGenParams 承担（泛型透传多余字段，此处只挑七键落盘）。
+ * contextRounds 等）随任一读写通道首读即净，不做迁移机器。数值键在此钳值域
+ * （手改存档的越界/非数值不落盘穿透）；clickBehavior 收枚举；池参数部分的
+ * 值域钳制由 normalizePoolGenParams 承担（泛型透传多余字段，此处只挑七键
+ * 落盘）。
  */
 function normalizeGenParams(raw: Partial<ChoiceGenParams>): ChoiceGenParams {
     const merged = normalizePoolGenParams({ ...DEFAULT_GEN_PARAMS, ...raw });
     return {
-        count: merged.count,
-        minChars: merged.minChars,
-        maxChars: merged.maxChars,
-        clickBehavior: merged.clickBehavior,
-        debugForceRaw: merged.debugForceRaw,
+        count: clampParam(merged.count, GEN_PARAM_LIMITS.count, DEFAULT_GEN_PARAMS.count),
+        minChars: clampParam(merged.minChars, GEN_PARAM_LIMITS.minChars, DEFAULT_GEN_PARAMS.minChars),
+        maxChars: clampParam(merged.maxChars, GEN_PARAM_LIMITS.maxChars, DEFAULT_GEN_PARAMS.maxChars),
+        clickBehavior: merged.clickBehavior === 'append' || merged.clickBehavior === 'send' ? merged.clickBehavior : 'fill',
+        debugForceRaw: merged.debugForceRaw === true,
         oversamplePct: merged.oversamplePct,
         autoGenerate: merged.autoGenerate,
     };

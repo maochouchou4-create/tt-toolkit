@@ -35,14 +35,16 @@
         rows="12"
       />
 
-      <!-- 复核简报（常驻一行；文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
-           文案只读 store 派生，不进结果框：结果框经 upsertPersona 进宿主
-           persona_description、经 inject_persona 进此后每一轮对话，一行 UI
-           文案混进去就是每轮提示词里都漂着它。常驻渲染（不 v-if），
-           卡片高度不随结果有无跳变。字号/弱化走 TTStatus 原语，
-           本 tab 只管它作为一行的位置。 -->
+      <!-- 简报行（常驻；文案在 strings.ts 的 TEXT）。文案只读 store 派生，
+           不进结果框：结果框经 upsertPersona 进宿主 persona_description、
+           经 inject_persona 进此后每一轮对话，一行 UI 文案混进去就是每轮
+           提示词里都漂着它。常驻渲染（不 v-if），卡片高度不随结果有无
+           跳变；策展回退简报是同行内的条件 span（回退时才出现，行结构
+           不变）。字号/弱化/警示色走 TTStatus 原语，本 tab 只管它作为
+           一行的位置。 -->
       <div class="tt-persona-brief">
         <TTStatus tone="muted">{{ store.reviewBriefText }}</TTStatus>
+        <TTStatus v-if="store.schemaFallback" tone="warn">{{ TEXT.SCHEMA_FALLBACK_BRIEF }}</TTStatus>
       </div>
     </TTCard>
 
@@ -112,8 +114,11 @@ function onGreetingChange(event: Event): void {
     min-height: 12em;
 }
 
-/* 复核简报行：只留行块位置（上边距），字号与弱化由 TTStatus 原语承担 */
+/* 简报行：只留行块位置（上边距与两段简报的间距），字号与弱化由 TTStatus 原语承担 */
 .tt-persona-brief {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--tt-sp-2);
     padding: var(--tt-sp-1) 0 0;
 }
 

@@ -30,6 +30,8 @@ smoke 有精确计数纪律（`CHOICE_PASS_EXPECTED` 等期望值）：新增用
 
 门序依赖（smoke 尾部两道机器门的要求）：`node scripts/dev-harness/build.mjs` 不在七门清单内，但必须在 smoke 之前对最新 dist 跑过——smoke 尾部含产物漂移门（dist 现产物经 `scripts/dev-harness/transform.mjs` 转换须与 `dist-harness/` 逐字一致）与版本链门。改 src 后推进序：`pnpm build` → `pnpm harness` → 其余各门（smoke 收口）；commit 前七门与 harness build 全绿。
 
+dist 新鲜度复验（commit 后、push 前，发布批必做）：再跑一次 `pnpm build` 后 `git diff --exit-code -- dist`——红＝已提交的 dist 落后于已提交的 src（门禁全绿测的是工作区产物，commit 与 build 之间还可能插入改动），补 build 进 commit 再走。pre-commit 里跑不了这道（发布批 dist 必有 diff，会假红），所以放在 commit 之后。
+
 `check-imports` 兼管源级导入环（Tarjan 强连通分量，与外置说明符隔离同属导入纪律，故不另立命令）：新增环即红；既有环在脚本内 `EXEMPT_CYCLES` 显式登记豁免（每条带理由），登记项若已消解同样判红——豁免面须与结构同进同退。
 
 ## dev-harness（无 TT 宿主时的本机 DOM 验证）

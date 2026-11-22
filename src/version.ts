@@ -3,4 +3,4 @@
  * manifest.json / package.json 的版本与这里人工同步，三方对齐缺一即漂移
  * （一致性由 scripts/smoke.mjs 尾部版本链门机判，漏改一处即红）。
  */
-export const version = '2.1.0';
+export const version = '2.2.0';

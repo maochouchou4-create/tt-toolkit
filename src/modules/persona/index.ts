@@ -14,16 +14,19 @@
 import { eventBus, event_types } from '@/host';
 import { usePersonaStore } from './store';
 
-/** CHAT_CHANGED 订阅幂等标记（浏览器/node 两路 init 都可能调用）。 */
-let chatListenerInstalled = false;
+// 幂等旗标走窗口级（choice/nav 同款）：模块级旗标在扩展重载（模块重新
+// 求值、窗口不换）下归零而旧监听器仍挂在宿主总线上——每重载累积一条，
+// 双触发 handleChatChanged。
+const CHAT_LISTENER_FLAG = '__TT_PERSONA_CHAT__';
 
 /**
  * 会话感知订阅（扩展生命周期与页面同寿，监听常驻不退订；
  * idempotent 安装防双路 init 重复挂）。
  */
 function installChatChangedListener(): void {
-    if (chatListenerInstalled) return;
-    chatListenerInstalled = true;
+    const flagWindow = globalThis as Record<string, unknown>;
+    if (flagWindow[CHAT_LISTENER_FLAG]) return;
+    flagWindow[CHAT_LISTENER_FLAG] = true;
     eventBus.on(event_types.CHAT_CHANGED, () => {
         usePersonaStore().handleChatChanged();
     });

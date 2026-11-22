@@ -548,7 +548,8 @@ if (!('tt-choice-gen' in globalThis.__TT_SMOKE_STUBS__.SlashCommandParser.comman
 // 清零/编号渲染补位）±0、楼层 aim 断言（旧档带 aim 读侧丢弃替「无 aim 仍缺席」
 // 与往返）−1、解析 aim 三断言并一 −2 ＝ 149。
 // ＝ tt-slim UI 精简批：走向指引整链删除（组装段标签/合成源/注入断言三条）−3 ＝ 146。
-const CHOICE_PASS_EXPECTED = 146;
+// ＝ v2.2.0 值域单源批：gen 数值键钳制（越界/非数回落）＋1 ＝ 147。
+const CHOICE_PASS_EXPECTED = 147;
 const choicePassLines = boot1Lines.filter(l => l.startsWith('[choice-smoke] PASS'));
 const choiceFailLines = boot1Lines.filter(MODULE_FAIL_LINE('choice'));
 if (choicePassLines.length !== CHOICE_PASS_EXPECTED || choiceFailLines.length > 0) {
@@ -687,7 +688,9 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // promptConfigs 域机器退役删除 ＝ −4。
 // ＝ tt-slim UI 精简批：chat 域 host 活取用换引用断言 1＋需求框 placeholder
 // 逐字锁 1 随机制退役删除 ＝ −2。
-const PERSONA_PASS_EXPECTED = 146;
+// ＝ v2.2.0 判据结构化批：起手词补回判据白名单负例删除−1、行形态正反例＋2、
+// 策展回退可见 e2e＋1 ＝ 148。
+const PERSONA_PASS_EXPECTED = 148;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -838,7 +841,7 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 // ＝收官版本。版本 bump＝五处同步改——漏改任何一处这里红；dist 内嵌一处
 // 专防「src 已 bump 而 dist 未重建」（构建链漏跑）。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '2.1.0';
+const EXPECTED_VERSION = '2.2.0';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿

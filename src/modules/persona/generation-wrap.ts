@@ -8,6 +8,8 @@
  * 归属落在这里，两条链单向引用，不成环。
  */
 
+import { isStrictKeyLine } from './yaml';
+
 /**
  * 起手词围栏（全模块唯一定义）：策展段起手词、档案段首键起手词、以及剥
  * 围栏时的「模型有没有把起手词带回来」判据都从它派生。三处各写一份字面
@@ -49,9 +51,18 @@ export function stripYamlFence(rawText: string, prefillContent?: string): string
 }
 
 /**
- * 首行是否像「起手词之后该接上的那一行」：块键段取自起手词本身（档案段
- * 的起手词按 schema 首块拼，那一段就必须是那个块名，写死会在首块改名后
- * 判错），叶行两段是续写落在叶上的两种形态——顶格与两格缩进。
+ * 首行是否像「起手词之后该接上的那一行」。两条判据都是结构性的，不认死
+ * 任何词：
+ *   1. 块键段取自起手词本身——档案段起手词按 schema 首块拼，正文从块键
+ *      起首＝模型把块头自己写了回来，直接接上即可；
+ *   2. 首行是严格键行（键: 值形态，yaml.ts 单源判据）＝续写落在了首块的
+ *      叶上（真实形态：目录现值的首叶，如「年龄: …」）。叶名不枚举——
+ *      schema 首叶随目录改版变，枚举叶名在每次改首叶后就漏判一次；漏判
+ *      的后果是首块头静默丢失、首块叶逃出复核轮的叶级守卫（曾只认
+ *      「姓名」即此事故：目录首叶早已是「年龄」，冒烟夹具恰好也用
+ *      「姓名」当首叶，把它洗绿了）。
+ * 误黏边界（接受）：散文首行恰为「词: 」形态（如「例如: 」）会被当键行
+ * 补头——概率与代价（多一个可解析的块头）都低于漏判（静默丢块头）。
  */
 function resumesPrefillHead(trimmed: string, prefillContent: string): boolean {
     const prefillBlockKey = prefillContent.startsWith(PREFILL_FENCE)
@@ -63,9 +74,9 @@ function resumesPrefillHead(trimmed: string, prefillContent: string): boolean {
     // 空串交给 startsWith 会让块键判据整段空转，写成显式分支是让「恒真」
     // 与「这里根本没有块键可比」在代码里分得开，改的人一眼看得见。
     if (!prefillBlockKey) return true;
-    return trimmed.startsWith(prefillBlockKey)
-        || trimmed.startsWith('姓名')
-        || trimmed.startsWith('  姓名');
+    if (trimmed.startsWith(prefillBlockKey)) return true;
+    const newlineIdx = trimmed.indexOf('\n');
+    return isStrictKeyLine(newlineIdx === -1 ? trimmed : trimmed.slice(0, newlineIdx));
 }
 
 /**

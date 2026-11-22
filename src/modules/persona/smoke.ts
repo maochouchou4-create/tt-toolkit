@@ -829,11 +829,18 @@ function runPureFunctionChecks(): void {
     check('stripYamlFence：首块键非「基本信息」时正文接写补围栏头起首（块键判据生效）',
         stripYamlFence('外貌: 高个冷峻\n  标志性特征: 疤', headKeyPrefill) === '外貌:外貌: 高个冷峻\n  标志性特征: 疤',
         `实得「${stripYamlFence('外貌: 高个冷峻\n  标志性特征: 疤', headKeyPrefill)}」`);
-    // 起首词与块键、叶行两段都不沾时不补头：这一条是「块键判据不是恒真」的
-    // 反向机判——判据若退化成对任何正文都成立，上面两条照样绿。
-    check('stripYamlFence：正文起首词与首块键无关时不补围栏头（判据不恒真）',
-        stripYamlFence('年龄: 20\n籍贯: 江南', headKeyPrefill) === '年龄: 20\n籍贯: 江南',
-        `实得「${stripYamlFence('年龄: 20\n籍贯: 江南', headKeyPrefill)}」`);
+    // 反向机判（判据不恒真）：散言前导不是键行，不得把起手词黏上去——判据若
+    // 退化成对任何正文都成立，上面的正例断言照样绿。散言样本与 isSchemaSkeleton
+    // 的「散言前导出局」共用同一拒判基础（子句标点不进键名）。
+    check('stripYamlFence：散言前导不补围栏头（判据不恒真）',
+        stripYamlFence('好的，以下是为你定制的档案：\n基本信息:\n  年龄: 26', headKeyPrefill) === '好的，以下是为你定制的档案：\n基本信息:\n  年龄: 26',
+        `实得「${stripYamlFence('好的，以下是为你定制的档案：\n基本信息:\n  年龄: 26', headKeyPrefill)}」`);
+    // 目录现值形态的正例：基本信息 的首叶是「年龄」（catalog.ts 现值），旧判据
+    // 只认「姓名」时这种续写被漏判——首块头静默丢失、首块叶逃出复核轮的叶级
+    // 守卫。判据改认行形态（严格键行）后必须补头成功。
+    check('stripYamlFence：首叶行（目录现值「年龄」）补 prefill 再剥',
+        stripYamlFence('年龄: 26\n性别: 女', '```yaml\n基本信息:') === '基本信息:年龄: 26\n性别: 女',
+        `实得「${stripYamlFence('年龄: 26\n性别: 女', '```yaml\n基本信息:')}」`);
 
     // isSchemaSkeleton：策展产出的可用性判据。事故原型——宿主错误正文里
     // 「连接目标服务失败：」「请求地址: …」都是合法的「键行」形态，旧判据
@@ -1755,8 +1762,9 @@ async function runPersonaE2EChecks(): Promise<void> {
             && secondJoined.includes('基本信息:') && secondJoined.includes('[SYSTEM_OP: LOGIC_CONSTRAINT]')
             && !secondJoined.includes('{{template}}')
             && lastSecond?.role === 'assistant' && lastSecond?.content.startsWith('```yaml'));
-        check('端到端：三段链结果落地（结果框是最终档案＝末轮复核查重后的那一份、YAML 剥围栏、互斥复位）',
+        check('端到端：三段链结果落地（结果框是最终档案＝末轮复核查重后的那一份、YAML 剥围栏、策展正常不置回退旗、互斥复位）',
             store.resultText === '姓名: 阿德\n年龄: 20'
+            && store.schemaFallback === false
             && store.isProcessing === false && store.processingLabel === '',
             `result=${store.resultText}`);
 
@@ -1934,6 +1942,29 @@ async function runPersonaE2EChecks(): Promise<void> {
         } finally {
             delete blankWindow.toastr;
         }
+
+        // 策展回退可见性：curator 段回拒答散文 → fail-soft 回退内置骨架照常出
+        // 档案，但结果必须带「策展回退」标记（store 态 → PersonaTab 简报行）
+        // ——否则打包版用户分不清「政策没生效」与「策展回退」（无 devtools，
+        // log.warn 不可见）。三段照发：回退不断链。
+        const FALLBACK_PERSONA_YAML = '```yaml\n基本信息:\n  年龄: 26\n  性别: 女\n```';
+        const callsBeforeFallbackCase = calls.length;
+        globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}')) as CapturedRequest['body'];
+            calls.push({ url: String(url), body });
+            const stage = stageOfRequest(body);
+            if (stage === 'curator') return sseResponse('抱歉，我无法按要求输出。');
+            if (stage === 'personaGen') return sseResponse(FALLBACK_PERSONA_YAML);
+            if (stage === 'personaReview') return sseResponse('无重复');
+            throw new Error(`冒烟桩认不出请求段：${JSON.stringify(body.messages.slice(-1))}`);
+        }) as typeof fetch;
+        await store.generate();
+        check('端到端：策展回退可见（curator 拒答→内置骨架照常出档案＋回退标记置位＋三段照发）',
+            calls.length === callsBeforeFallbackCase + 3
+            && store.schemaFallback === true
+            && store.resultText === '基本信息:\n  年龄: 26\n  性别: 女'
+            && store.reviewBriefText.includes('未发现重复'),
+            `calls=${calls.length - callsBeforeFallbackCase} fallback=${String(store.schemaFallback)} result=${store.resultText}`);
 
         // 宿主错误信封在 curator 段：必须抛错中断整条链——第二段不得发出。
         // 事故原型实证：信封不认 → 错误正文当 schema → 第二段照发，prefill
@@ -2795,5 +2826,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（统一端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地）、复核回合十五断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份重输出落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶改写·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写后档案逐字在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了有重复却零改动即回滚/新增完全同值组拒·改写撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝191 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝192（声明叶 191＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
+    console.info('[persona-smoke] OK：全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、yaml 纯函数（分块/围栏·起手词补回判据行形态化——目录现值首叶行正例与散言反例）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性重复判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（统一端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地·策展回退可见——curator 拒答回退内置骨架·标记置位·三段照发）、复核回合十五断言（判据层零命中仍无条件发出三段且末段认得出查重指令/指令并进 messages 并携带整份档案＋末条是 user 查重指令且全请求零 assistant 模型轮（复核轮不带起手词）/复核轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份重输出落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶改写·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是复核后的那一份·改写后档案逐字在框内/复核轮收尾抛错（非 400 族）只降级不外抛·结果框仍首轮内容·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了有重复却零改动即回滚/新增完全同值组拒·改写撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在复核轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、策展目录数据（目录叶集与策展目录逐叶相等＋块序与块内叶序双向/叶总数＝191 绝对量/旧叶名逐个不在/归属对 10 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/countText 覆盖词面只配模板叶块/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量）＋提示词正文锁（策展段原则 7 三串在场、档案段绝不留空两串在场）＋行为心理类块名串＝字面量九块＋档案段生成契约 11（要求 7 事实唯一归属按序①–⑦与关键条款及末句三维度例外、每个「→」归属处落在真实块名或块·叶、规则 4 跨叶不复述半句追加在跨叶互补之后、三组反例五栏同构（三栏各三处＋改法 2 处＋为什么合格 1 处）、归属优先级表整段＝catalog 渲染、叶边界段模板段体＝宏位且段头首行逐字＝逐字档 C-1b、叶边界段静态成文一叶一行且行数＝192（声明叶 191＋条件叶 1）、排除半句跨叶互指全落目录真实键、无「不装」半句的叶 0）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、档案段正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量四行、叶边界段整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主正文偏离快照时问一次且拒绝即零写通道调用·镜像与编辑现场原样/确认文案逐字）全部通过。');
 }

@@ -13,7 +13,7 @@ import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTas
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
-import { choiceStorage, GLOBAL_CHOICE_KEY } from './api';
+import { choiceStorage, DEFAULT_GEN_PARAMS, GEN_PARAM_LIMITS, GLOBAL_CHOICE_KEY } from './api';
 import { applyOption, cancelGeneration, generateOptions, toggleChoiceGeneration, zeroOptionsMessage } from './generator';
 import { clearFloorOptions, latestAssistantFloorIndex, readFloorOptions, writeFloorOptions } from './persist';
 import { useChoiceStore } from './store';
@@ -234,6 +234,23 @@ function runAssetPoolChecks(): void {
         'asset 版本变更：污染池全量恢复（垃圾清除、gen 不动）',
         domain.pool.masterPool.length === 57 && !domain.pool.masterPool.some(e => e.id === 'smoke-junk') && domain.pool.assetVersion === ASSET_POOL_VERSION && genUntouched,
         `条目 ${domain.pool.masterPool.length} v=${String(domain.pool.assetVersion)} gen不动=${String(genUntouched)}`,
+    );
+
+    // gen 数值键钳制（值域单源 GEN_PARAM_LIMITS，normalize 与设置页控件同源）：
+    // 手改存档的越界/非数值经任一读写通道钳回——count 会进 {{count}} 占位符与
+    // 抽池计算，穿透＝NaN 池量与文不对题的提示词。
+    choiceStorage.updateGenParams({ count: 99 as unknown as number, minChars: -5, maxChars: 99999 });
+    const clamped = choiceStorage.readDomain().gen;
+    choiceStorage.updateGenParams({ count: 'abc' as unknown as number });
+    const nonNumberRecovered = choiceStorage.readDomain().gen.count;
+    choiceStorage.updateGenParams({ count: DEFAULT_GEN_PARAMS.count, minChars: DEFAULT_GEN_PARAMS.minChars, maxChars: DEFAULT_GEN_PARAMS.maxChars });
+    check(
+        `gen 值域钳制：越界钳回上下限（count→${GEN_PARAM_LIMITS.count.max}、minChars→${GEN_PARAM_LIMITS.minChars.min}、maxChars→${GEN_PARAM_LIMITS.maxChars.max}）、非数回落默认`,
+        clamped.count === GEN_PARAM_LIMITS.count.max
+        && clamped.minChars === GEN_PARAM_LIMITS.minChars.min
+        && clamped.maxChars === GEN_PARAM_LIMITS.maxChars.max
+        && nonNumberRecovered === DEFAULT_GEN_PARAMS.count,
+        `count=${clamped.count} min=${clamped.minChars} max=${clamped.maxChars} 非数恢复=${nonNumberRecovered}`,
     );
 }
 
@@ -497,9 +514,21 @@ async function runFloorPersistChecks(): Promise<void> {
         `calls=${stubs.saveChatCalls}`,
     );
 
-    // ⑧ 读侧坏档回退 null
+    // ⑧ 读侧坏档回退 null——首条坏档同时断言 ttlog 留痕：坏档告警走
+    // host/ttlog（落宿主日志盘面；打包版无 devtools，纯 console 用户侧
+    // 不可见），WARN 的 console 镜像携全文。每会话一次的告警旗标打在
+    // 首条上，后续坏档静默是设计（见 persist.ts）。
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: '不是数组', parsePath: 'json' } } })];
-    check('楼层落盘：坏档（options 非数组）回退 null', readFloorOptions(0) === null);
+    const badArchiveWarns: string[] = [];
+    const origConsoleWarn = console.warn;
+    console.warn = (...args: unknown[]) => { badArchiveWarns.push(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')); };
+    try {
+        check('楼层落盘：坏档（options 非数组）回退 null＋ttlog 留痕',
+            readFloorOptions(0) === null && badArchiveWarns.some(w => w.includes('存档形状不符')),
+            `warns=${badArchiveWarns.length}`);
+    } finally {
+        console.warn = origConsoleWarn;
+    }
     context.chat = [msg('坏档楼', { ttToolkit: { choice: { options: [{ title: 1, content: 'x' }], parsePath: 'json' } } })];
     check('楼层落盘：坏档（options 元素形状不符）回退 null', readFloorOptions(0) === null);
     context.chat = [msg('旧档楼', { ttToolkit: { choice: { options: [], parsePath: 'nope' } } })];
@@ -1485,5 +1514,5 @@ export async function runChoiceSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：候选倍率钳制/抽取量随动）、asset 同步（57 风格名/纯随机/首次标记/幂等逐字一致/污染恢复）、池注入候选风格（菜单模式/aim 退役）、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/重 roll 作废/写侧守门/坏档回退/旧档 aim 读侧丢弃）与生成 toggle 两段式（启动→取消、成功落档锚楼）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
+    console.info('[choice-smoke] OK：组装注入逐项可见、占位符替换、trace 覆盖、解析回退确定性触发、debugForceRaw 生成管线接线全部通过；池抽取分布/数学、池旋钮贯通（UI 写面→normalize→resolver：候选倍率钳制/抽取量随动/gen 数值键钳制与非数回落）、asset 同步（57 风格名/纯随机/首次标记/幂等逐字一致/污染恢复）、池注入候选风格（菜单模式/aim 退役）、MESSAGE_RECEIVED 守卫链全部通过；楼层落盘（roundtrip/saveChat 通道/重 roll 作废/写侧守门/坏档回退＋ttlog 留痕/旧档 aim 读侧丢弃）与生成 toggle 两段式（启动→取消、成功落档锚楼）全部通过；生成超时与取消两语义分流（300 秒上限机判/到点按失败可见报出/外部取消仍归已取消/取消与到点竞态仍按超时报）＋未配置任务模型文案单点机判通过。');
 }

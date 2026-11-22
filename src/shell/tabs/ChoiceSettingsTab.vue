@@ -13,16 +13,16 @@
         <span>AI 回复后自动生成选项</span>
       </label>
       <TTField label="每次生成条数">
-        <input class="tt-ctrl" :value="settings.gen.count" type="number" min="1" max="10" @change="settings.updateGen({ count: clampInt($event, 1, 10, DEFAULT_GEN_PARAMS.count) })">
+        <input class="tt-ctrl" :value="settings.gen.count" type="number" :min="GEN_PARAM_LIMITS.count.min" :max="GEN_PARAM_LIMITS.count.max" @change="settings.updateGen({ count: clampInt($event, GEN_PARAM_LIMITS.count, DEFAULT_GEN_PARAMS.count) })">
       </TTField>
       <TTField label="候选倍率（%）">
-        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" :min="OVERSAMPLE_LIMITS.min" :max="OVERSAMPLE_LIMITS.max" :step="OVERSAMPLE_LIMITS.step" @change="settings.updateGen({ oversamplePct: clampInt($event, OVERSAMPLE_LIMITS.min, OVERSAMPLE_LIMITS.max, DEFAULT_GEN_PARAMS.oversamplePct) })">
+        <input class="tt-ctrl" :value="settings.gen.oversamplePct" type="number" :min="OVERSAMPLE_LIMITS.min" :max="OVERSAMPLE_LIMITS.max" :step="OVERSAMPLE_LIMITS.step" @change="settings.updateGen({ oversamplePct: clampInt($event, OVERSAMPLE_LIMITS, DEFAULT_GEN_PARAMS.oversamplePct) })">
       </TTField>
       <TTField label="选项字数下限">
-        <input class="tt-ctrl" :value="settings.gen.minChars" type="number" min="0" max="200" @change="settings.updateGen({ minChars: clampInt($event, 0, 200, DEFAULT_GEN_PARAMS.minChars) })">
+        <input class="tt-ctrl" :value="settings.gen.minChars" type="number" :min="GEN_PARAM_LIMITS.minChars.min" :max="GEN_PARAM_LIMITS.minChars.max" @change="settings.updateGen({ minChars: clampInt($event, GEN_PARAM_LIMITS.minChars, DEFAULT_GEN_PARAMS.minChars) })">
       </TTField>
       <TTField label="选项字数上限">
-        <input class="tt-ctrl" :value="settings.gen.maxChars" type="number" min="10" max="500" @change="settings.updateGen({ maxChars: clampInt($event, 10, 500, DEFAULT_GEN_PARAMS.maxChars) })">
+        <input class="tt-ctrl" :value="settings.gen.maxChars" type="number" :min="GEN_PARAM_LIMITS.maxChars.min" :max="GEN_PARAM_LIMITS.maxChars.max" @change="settings.updateGen({ maxChars: clampInt($event, GEN_PARAM_LIMITS.maxChars, DEFAULT_GEN_PARAMS.maxChars) })">
       </TTField>
       <TTField label="点击选项后">
         <select class="tt-ctrl" :value="settings.gen.clickBehavior" @change="onBehaviorChange">
@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { DEFAULT_GEN_PARAMS, OVERSAMPLE_LIMITS, useChoiceSettingsStore, type ChoiceGenParams } from '@/modules/choice';
+import { DEFAULT_GEN_PARAMS, GEN_PARAM_LIMITS, OVERSAMPLE_LIMITS, useChoiceSettingsStore, type ChoiceGenParams } from '@/modules/choice';
 import { TTCard, TTField } from '@/shell/ui';
 
 const settings = useChoiceSettingsStore();
@@ -53,10 +53,11 @@ function onAutoToggle(event: Event): void {
     settings.updateGen({ autoGenerate: (event.target as HTMLInputElement).checked });
 }
 
-function clampInt(event: Event, min: number, max: number, fallback: number): number {
+/** 控件取值钳制：值域对象（GEN_PARAM_LIMITS／OVERSAMPLE_LIMITS 同形）直入，非数回落默认。 */
+function clampInt(event: Event, limits: { min: number; max: number }, fallback: number): number {
     const value = Number(targetValue(event));
     if (!Number.isFinite(value)) return fallback;
-    return Math.max(min, Math.min(max, Math.round(value)));
+    return Math.max(limits.min, Math.min(limits.max, Math.round(value)));
 }
 </script>
 

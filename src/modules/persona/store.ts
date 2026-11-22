@@ -133,6 +133,7 @@ async function executeGeneration(store: PersonaStore, run: LastRunDescriptor, ap
         });
         store.resultText = result.profile;
         store.reviewBrief = result.review;
+        store.schemaFallback = result.schemaFallback;
         store.persistUserContext();
         if (successToast) toast(successToast);
     } catch (err) {
@@ -161,6 +162,12 @@ export const usePersonaStore = defineStore('tt-persona', {
              * normalizeUserContext 白名单登记的字段存进去也读不出来。
              */
             reviewBrief: REVIEW_BRIEF_NOT_RUN as ReviewBrief,
+            /**
+             * 最近一次结果的策展回退标记（内存态，不落域；生命周期与
+             * reviewBrief 同款——描述「结果框里这份档案怎么来的」，随
+             * 生成成功更新、随清空/读回旧档复位）。UI 简报行消费。
+             */
+            schemaFallback: false,
             /** 生成互斥与进度文案。 */
             isProcessing: false,
             processingLabel: '',
@@ -220,8 +227,10 @@ export const usePersonaStore = defineStore('tt-persona', {
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
             // 读回来的是上一会话落盘的结果，本会话没有复核过它——简报复位成
-            // 未运行（域里根本没有这个字段，落盘的档案不带复核结论）。
+            // 未运行（域里根本没有这个字段，落盘的档案不带复核结论）；策展
+            // 回退标记同理复位。
             this.reviewBrief = REVIEW_BRIEF_NOT_RUN;
+            this.schemaFallback = false;
         },
 
         /**
@@ -343,6 +352,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             // 简报随结果一起复位：结果框空了，它描述的那份档案也不存在了，
             // 留着上一轮的「已改写 N 个字段」就是对着空框讲上一版的账。
             this.reviewBrief = REVIEW_BRIEF_NOT_RUN;
+            this.schemaFallback = false;
             this.lastRun = null;
             this.persistUserContext();
         },

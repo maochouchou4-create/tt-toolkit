@@ -152,10 +152,17 @@ interface ReviewRoundParams {
     signal?: AbortSignal;
 }
 
-/** 生成链的结果：最终档案 ＋ 复核简报（两者分家——见 ReviewBrief 的注释）。 */
+/** 生成链的结果：最终档案 ＋ 复核简报 ＋ 策展回退标记（三者分家——见 ReviewBrief 的注释）。 */
 export interface GenerationResult {
     profile: string;
     review: ReviewBrief;
+    /**
+     * 策展段是否回退了内置骨架（true＝本次档案不是按模型定制模板生成的）。
+     * 与 review 同生命周期（内存态，不落域）：它描述「这份结果怎么来的」，
+     * 结果框被清空/换会话读回旧档后都不再成立。UI 简报行消费它——打包版
+     * 无 devtools，log.warn 用户看不见，分不清「政策没生效」与「策展回退」。
+     */
+    schemaFallback: boolean;
 }
 
 /**
@@ -180,7 +187,10 @@ export interface GenerationResult {
  *   - **取消照旧上抛**：那是用户中止整轮，不是「复核没跑完」——结果框保持原值
  *     是取消通道的既有契约。
  */
-async function reviewProfile(params: ReviewRoundParams): Promise<GenerationResult> {
+/** 复核轮产物：不含策展段旗标（那是 runGeneration 的职责面，收尾时并入）。 */
+type ReviewSettled = Omit<GenerationResult, 'schemaFallback'>;
+
+async function reviewProfile(params: ReviewRoundParams): Promise<ReviewSettled> {
     const { profile } = params;
     // 入口形状闸（纯诊断：它只决定脚本侧那道「无新增完全同值」本轮跑不跑，
     // **不决定这一轮发不发**——拿形状判定当复核的闸门＝把语义检出率为零的判据层
@@ -226,7 +236,7 @@ async function reviewProfile(params: ReviewRoundParams): Promise<GenerationResul
  *     顶掉结果框是把一个可选环节的失败升级成整轮失败。
  *   - 取消照旧上抛（用户中止整轮，不是「复核没跑完」，取消通道的既有契约）。
  */
-async function settleReviewRound(params: ReviewRoundParams): Promise<GenerationResult> {
+async function settleReviewRound(params: ReviewRoundParams): Promise<ReviewSettled> {
     const { profile } = params;
     try {
         const reviewAssembled = assemblePersonaReviewMessages(params.sources, profile);
@@ -348,6 +358,9 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
         userName: currentName,
         charName,
     };
+    // 策展回退标记（结果旗标，不中断链路）：curator 段空/不可解析时置位，
+    // 随结果带给 store → UI 简报行（fail-soft 的「软」对用户不能是隐形的）。
+    let schemaFallback = false;
     const curateSchema = async (): Promise<string> => {
         const assembled = assemblePersonaMessages('persona_curator', baseSources);
         const raw = await requestOnce({
@@ -362,6 +375,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
         const curated = raw ? stripYamlFence(raw, prefillFor(PREFILL_SCHEMA)) : '';
         if (!isSchemaSkeleton(curated)) {
             log.warn('策展输出为空或不可解析，回退默认模板', { curated });
+            schemaFallback = true;
             return SKELETON_FALLBACK;
         }
         return curated;
@@ -388,7 +402,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
     });
 
     // AI 调用 3：整份复核（无条件一轮；不带 prefill；失败降级，首轮档案兜底）。
-    return reviewProfile({
+    const reviewed = await reviewProfile({
         config,
         assembled,
         sources: genSources,
@@ -396,6 +410,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
         onProgress: config.onProgress,
         signal: config.signal,
     });
+    return { ...reviewed, schemaFallback };
 }
 
 /**
