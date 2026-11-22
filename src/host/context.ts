@@ -44,8 +44,16 @@ export interface TavernContextLike {
     getRequestHeaders?: () => Record<string, string>;
     /** 宿主通用注入槽位表转发（st-context.js:158：extensionPrompts: extension_prompts） */
     extensionPrompts?: Record<string, unknown>;
-    /** oai_settings 转发（st-context.js:233；当前激活 openai 预设名读取） */
+    /** oai_settings 转发（st-context.js:233；连接字段与当前激活 openai 预设名读取） */
     chatCompletionSettings?: Record<string, unknown>;
+    /** main_api 转发（st-context.js:208）：'openai'＝聊天补全系主接口 */
+    mainApi?: string;
+    /**
+     * 当前源→模型名单一出口转发（st-context.js:298 ← openai.js:2746
+     * getChatCompletionModel：按 chat_completion_source 分派各 *_model 字段；
+     * 未选模型返回 null/空串）。模块级纯函数，不依赖 this。
+     */
+    getChatCompletionModel?: () => string | null;
     /** 全量世界书名快照（st-context.js:289） */
     getWorldInfoNames?: () => unknown;
     /** 预设管理器转发（st-context.js:293，preset-manager.js:97 getPresetManager；class 方法须保留接收者调用） */

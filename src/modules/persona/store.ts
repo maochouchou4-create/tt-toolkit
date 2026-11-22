@@ -34,7 +34,7 @@ import {
 } from '@/host';
 import { createTtlog } from '@/host/ttlog';
 import { useApisStore } from '@/modules/apis/store';
-import { missingTaskModelMessage, resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { routeUnavailableMessage, resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { collectWorldInfoContext, runGeneration, PersonaRunCancelled, type GenerationApiConfig } from './generation';
 import { REVIEW_BRIEF_NOT_RUN, renderReviewBrief, type ReviewBrief } from './review';
 import { TEXT } from './strings';
@@ -289,7 +289,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             if (this.isProcessing) return;
             const api = buildApiConfig();
             if (!api) {
-                toast(missingTaskModelMessage('persona'), 'error');
+                toast(routeUnavailableMessage('persona'), 'error');
                 return;
             }
             // 互斥与取消通道先于世界书收集建立（异步窗口内二次点击不得重入；
@@ -325,7 +325,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             }
             const api = buildApiConfig();
             if (!api) {
-                toast(missingTaskModelMessage('persona'), 'error');
+                toast(routeUnavailableMessage('persona'), 'error');
                 return;
             }
             await runCycle(this, controller => executeGeneration(this, run, api, TEXT.TOAST_REROLLED, controller.signal));

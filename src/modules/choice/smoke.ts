@@ -9,7 +9,7 @@
 import { assembleMessages, DEFAULT_PROMPT_CONFIGS, renderDump, renderTraceCompact, type AssemblySources, type HistoryEntry, type PoolInjectionSupply } from '@/prompts';
 import { buildGenerateBody, callGenerateEndpoint } from '@/modules/apis/client';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
-import { missingTaskModelError, mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
+import { routeUnavailableError, mutateTaskProfiles, readTaskProfiles, resolveTaskRoute, writeTaskProfiles, type TaskProfilesDomain } from '@/modules/apis/task-profiles';
 import { useRunlogStore } from '@/modules/runlog/store';
 import { createEndpoint, readApiDomain, writeApiDomain } from '@/modules/apis/storage';
 import { DEBUG_MALFORMED_RAW, parseOptions } from './parse';
@@ -1040,8 +1040,7 @@ function runConstantRequestChecks(): void {
     const messages = [{ role: 'user' as const, content: 'x' }];
     const body = buildGenerateBody(messages, {
         task: 'choice',
-        baseUrl: 'https://api.example.com/v1',
-        apiKey: 'sk-test',
+        identity: { kind: 'provider', url: 'https://api.example.com/v1', key: 'sk-test' },
         model: 'test-model',
         temperature: TASK_PARAMS.choice.defaultTemperature,
         stream: TASK_PARAMS.choice.stream,
@@ -1233,7 +1232,7 @@ async function runRunlogChecks(): Promise<void> {
     try {
         const result = await callGenerateEndpoint(
             [{ role: 'user', content: 'hi' }],
-            { task: 'choice', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-leak-canary', model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.choice.timeoutSec },
+            { task: 'choice', identity: { kind: 'provider', url: 'https://api.example.com/v1', key: 'sk-leak-canary' }, model: 'm1', stream: false, outputContract: 'prompt_only', timeoutSec: TASK_PARAMS.choice.timeoutSec },
         );
         const allRecords = JSON.stringify(runlog.records);
         check('runlog：密钥金丝雀——stub fetch 走一次 callGenerateEndpoint（apiKey=\'sk-leak-canary\'，stub 形态仿 persona smoke），全记录序列化不含该值',
@@ -1394,7 +1393,7 @@ async function runTimeoutChecks(): Promise<void> {
             `phase=${store.phase} error=${store.error}`);
 
         // 任务模型未配置文案：任务中文名注入、裸 taskId 不进用户可见文本
-        const missingMessage = missingTaskModelError('choice').message;
+        const missingMessage = routeUnavailableError('choice').message;
         check('文案：未配置任务模型带任务中文名「选项生成」且无裸 taskId（apis 层单点构造器）',
             missingMessage.includes('未配置选项生成模型') && missingMessage.includes('「选项生成」') && !missingMessage.includes('choice'),
             `msg=${missingMessage}`);
@@ -1427,7 +1426,7 @@ function runTaskRouteChecks(): void {
         });
         const route = resolveTaskRoute('choice');
         check('任务路由：写档后带出所写值（url/key/model/温度/思考同点解析）',
-            !!route && route.url === 'https://tp.example.com/v1' && route.key === 'sk-tp'
+            !!route && route.identity.kind === 'provider' && route.identity.url === 'https://tp.example.com/v1' && route.identity.key === 'sk-tp'
             && route.model === 'm-a' && route.temperature === 1.3 && route.reasoningEffort === 'low',
             `route=${JSON.stringify(route)}`);
         setChoiceProfile('tp-p', 'm-a');

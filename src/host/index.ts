@@ -9,6 +9,8 @@
 
 export { event_types, eventBus } from './events';
 export type { EventTypeName } from './events';
+export { readHostConnection } from './connection';
+export type { HostConnection } from './connection';
 export {
     currentCharacters,
     currentChatMetadata,

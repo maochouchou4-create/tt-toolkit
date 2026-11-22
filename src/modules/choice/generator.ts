@@ -7,7 +7,7 @@
  */
 import { getChatMessages, getSendTextareaValue, sendInputMessage, setSendTextareaValue, showToast, type ChatMessage } from '@/host';
 import { callGenerateEndpoint, isBlankResponseContent, RequestTimeoutError, serializeOutbound, type GenerateMessage, type GenerateRequestConfig } from '@/modules/apis/client';
-import { missingTaskModelError, resolveTaskRoute, routeToRequestConfig } from '@/modules/apis/task-profiles';
+import { routeUnavailableError, resolveTaskRoute, routeToRequestConfig } from '@/modules/apis/task-profiles';
 import { TASK_PARAMS } from '@/modules/apis/task-defaults';
 import { resolveJailbreakMessages } from '@/modules/apis/preset-inject';
 import {
@@ -173,7 +173,7 @@ export async function generateOptions(): Promise<void> {
         } else {
             // 任务路由单点解析：未配置/悬空 fail fast，文案指路任务模型卡
             const route = resolveTaskRoute('choice');
-            if (!route) throw missingTaskModelError('choice');
+            if (!route) throw routeUnavailableError('choice');
             const requestConfig = routeToRequestConfig('choice', route);
             handedToClient = true;
             const result = await callGenerateEndpoint(assembly.messages, requestConfig, controller.signal);

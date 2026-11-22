@@ -23,9 +23,12 @@ export function createApiTab(): ShellTab {
             app.mount(container);
         },
         // tab 容器只挂载一次、激活只切可见——宿主侧增删 openai 预设后，
-        // 破限注入卡的清单与悬空提醒靠这里每次激活刷新
+        // 破限注入卡的清单与悬空提醒靠这里每次激活刷新；跟随状态行同批
+        // 刷新（酒馆侧换连接/换模型后回本页即新鲜）
         onActivate() {
-            useApisStore(pinia).refreshPresetNames();
+            const apis = useApisStore(pinia);
+            apis.refreshPresetNames();
+            apis.refreshFollowStatus();
         },
     };
 }

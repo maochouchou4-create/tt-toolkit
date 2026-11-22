@@ -314,7 +314,7 @@ const CYCLE_IMPORT_FORMS = [
  *
  * apis 四文件环的性质：端点表与任务档案互为读写源——删端点或切 provider
  * 要重置该 provider 名下的任务档案（storage → task-profiles），而任务路由
- * 解析又必须回读端点表拿 baseUrl（task-profiles → storage）；client ↔
+ * 解析又必须回读端点表拿直连身份（task-profiles → storage）；client ↔
  * preset-inject 则是出站消息的组装面与传输面互相引用。两侧本就是同一个
  * 「服务商配置」概念的两面，硬断开只能把这份上下文在调用侧搬来搬去，
  * 属 apis 域的独立重构。本门禁守的是「不新增」，不负责改既有结构。

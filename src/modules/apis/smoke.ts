@@ -6,7 +6,10 @@
 import { useApisStore } from './store';
 import { APIS_DOMAIN_KEY, createEndpoint, deleteEndpoint, readApiDomain, setProviderNoPrefill, upsertEndpoint } from './storage';
 import { TASK_PARAMS } from './task-defaults';
-import { readTaskProfiles, resolveTaskRoute, routeToRequestConfig, setRouteForAllTasks, writeTaskProfiles } from './task-profiles';
+import {
+    FOLLOW_TAVERN_KEY, readFollowStatus, readFollowTavern, readTaskProfiles, resolveTaskRoute,
+    routeToRequestConfig, routeUnavailableMessage, setRouteForAllTasks, writeFollowTavern, writeTaskProfiles,
+} from './task-profiles';
 import { buildGenerateBody } from './client';
 import { TASK_IDS } from '@/tasks';
 import { setGlobal } from '@/storage/service';
@@ -48,14 +51,15 @@ export function runApisSmoke(): void {
     check(
         '出站路由跟随批量行',
         route !== null
-            && route.url === 'https://smoke.apis-smoke/v1'
-            && route.key === 'sk-apis-smoke'
+            && route.identity.kind === 'provider'
+            && route.identity.url === 'https://smoke.apis-smoke/v1'
+            && route.identity.key === 'sk-apis-smoke'
             && route.model === 'm-cheap'
             && route.temperature === 1.3
             && personaRoute !== null
             && personaRoute.temperature === TASK_PARAMS.persona.defaultTemperature
             && personaRoute.reasoningEffort === 'low',
-        `choice=${route ? `${route.model}@${route.url}，t=${route.temperature}` : 'null'}；persona=${personaRoute ? `${personaRoute.model}@${personaRoute.url}，t=${personaRoute.temperature}，effort=${personaRoute.reasoningEffort}` : 'null'}`,
+        `choice=${route ? `${route.model}@${route.identity.kind === 'provider' ? route.identity.url : 'host'}，t=${route.temperature}` : 'null'}；persona=${personaRoute ? `${personaRoute.model}@${personaRoute.identity.kind === 'provider' ? personaRoute.identity.url : 'host'}，t=${personaRoute.temperature}，effort=${personaRoute.reasoningEffort}` : 'null'}`,
     );
 
     const store = useApisStore();
@@ -134,16 +138,17 @@ export function runApisSmoke(): void {
     // 流式/输出契约/超时按任务固化档。超时这项钉住的是「任务档进了请求」
     // ——它必填且不给默认，少写就是一次可能永挂的请求。
     const cfgChoice = routeToRequestConfig('choice', {
-        providerId: 'tp-c', url: 'https://cfg.example.com/v1', key: 'sk-cfg',
+        providerId: 'tp-c', identity: { kind: 'provider', url: 'https://cfg.example.com/v1', key: 'sk-cfg' },
         model: 'm-cfg', temperature: 1.3, reasoningEffort: 'low', noPrefill: false,
     });
     const cfgPersona = routeToRequestConfig('persona', {
-        providerId: 'tp-p', url: 'https://cfg.example.com/v1', key: 'sk-cfg',
+        providerId: 'tp-p', identity: { kind: 'provider', url: 'https://cfg.example.com/v1', key: 'sk-cfg' },
         model: 'm-cfg', temperature: 0.7, reasoningEffort: 'high', noPrefill: false,
     });
     check(
         '请求配置构造器：两任务同形（身份与采样参数随路由、流式/契约/超时按 TASK_PARAMS、不发 max_tokens）',
-        cfgChoice.task === 'choice' && cfgChoice.baseUrl === 'https://cfg.example.com/v1' && cfgChoice.apiKey === 'sk-cfg'
+        cfgChoice.task === 'choice'
+        && cfgChoice.identity.kind === 'provider' && cfgChoice.identity.url === 'https://cfg.example.com/v1' && cfgChoice.identity.key === 'sk-cfg'
         && cfgChoice.model === 'm-cfg' && cfgChoice.temperature === 1.3 && cfgChoice.reasoningEffort === 'low'
         && cfgChoice.stream === TASK_PARAMS.choice.stream && cfgChoice.outputContract === TASK_PARAMS.choice.outputContract
         && cfgChoice.timeoutSec === TASK_PARAMS.choice.timeoutSec && cfgChoice.timeoutSec === 300
@@ -155,10 +160,139 @@ export function runApisSmoke(): void {
         `choice=${JSON.stringify(cfgChoice)}；persona=${JSON.stringify(cfgPersona)}`,
     );
 
+    runFollowChecks();
+
     if (failures.length > 0) {
         console.error(`[apis-smoke] ${failures.length} 项 FAIL：${failures.join('；')}`);
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行与能力记忆十断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）');
+    console.info('[apis-smoke] OK：批量设置行与能力记忆十断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）＋跟随四断言（键归一坏值/跟随态路由与请求体/挡源 fail fast 与文案/状态快照三态与复位幂等）');
+}
+
+/** 冒烟 stub 访问（scripts/smoke.mjs 注入；类型只声明本文件用到的面）。 */
+interface FollowSmokeStubs {
+    getContext(): {
+        chatCompletionSettings: Record<string, string>;
+        mainApi: string;
+    };
+}
+
+function followSmokeStubs(): FollowSmokeStubs | null {
+    return (globalThis as { __TT_SMOKE_STUBS__?: FollowSmokeStubs }).__TT_SMOKE_STUBS__ ?? null;
+}
+
+/**
+ * 跟随开关机判：键归一坏值、跟随态路由（忽略档案行、调参档仍生效）、
+ * 请求体两态组装（custom_url 原样/反代原样不走 normalizeApiUrl）、挡源
+ * fail fast 与挡因文案、状态快照三态、收尾复位（boot2 幂等）。
+ */
+function runFollowChecks(): void {
+    const stubs = followSmokeStubs();
+    if (!stubs) {
+        check('跟随：冒烟 stub 在场', false, '__TT_SMOKE_STUBS__ 缺席（应由 scripts/smoke.mjs 注入）');
+        return;
+    }
+    const conn = stubs.getContext().chatCompletionSettings;
+
+    // ① 键归一：非布尔坏值读为关（类型面只收 boolean，坏值模拟须绕过类型——
+    // 存档真实世界不受类型保护）
+    setGlobal(FOLLOW_TAVERN_KEY, 'yes' as unknown as boolean);
+    check('跟随键归一：非布尔坏值读为关', readFollowTavern() === false, `读回=${String(readFollowTavern())}`);
+
+    // ② 跟随开＋custom 缺地址 → 判挡 fail fast，文案指名真因
+    writeFollowTavern(true);
+    conn.custom_url = '';
+    conn.custom_model = 'm-follow';
+    const blockedRoute = resolveTaskRoute('choice');
+    const blockedMsg = routeUnavailableMessage('choice');
+    check(
+        '跟随挡：custom 缺地址 fail fast 且文案指名',
+        blockedRoute === null && blockedMsg.includes('自定义端点未填地址') && readFollowStatus().ok === false,
+        `route=${String(blockedRoute)}，msg=${blockedMsg}`,
+    );
+
+    // ③ 跟随开＋可跟（custom 源填地址选模型）→ host 路由：忽略档案行
+    // （服务商已删、档案行未配置），调参档仍按任务默认
+    conn.custom_url = 'https://follow.example/v1';
+    const followRoute = resolveTaskRoute('choice');
+    check(
+        '跟随态路由：镜像宿主连接、忽略档案行、调参档仍生效',
+        followRoute !== null
+            && followRoute.providerId === ''
+            && followRoute.identity.kind === 'host'
+            && followRoute.identity.source === 'custom'
+            && followRoute.identity.customUrl === 'https://follow.example/v1'
+            && followRoute.model === 'm-follow'
+            && followRoute.noPrefill === false
+            && followRoute.temperature === TASK_PARAMS.choice.defaultTemperature
+            && followRoute.reasoningEffort === TASK_PARAMS.choice.defaultReasoningEffort,
+        `route=${followRoute ? JSON.stringify(followRoute) : 'null'}`,
+    );
+
+    // ④ host 态请求体：源/custom_url 原样直发（custom 不在反代白名单，
+    // reverse_proxy 即使非空也不发——镜像宿主组装条件）
+    if (followRoute) {
+        conn.reverse_proxy = 'https://rp.example/';
+        conn.proxy_password = 'sk-rp';
+        const followBody = buildGenerateBody([{ role: 'user', content: 'hi' }], routeToRequestConfig('choice', followRoute));
+        check(
+            '跟随态请求体：custom 源 custom_url 原样、反代不随发',
+            followBody.chat_completion_source === 'custom'
+            && followBody.custom_url === 'https://follow.example/v1'
+            && !('reverse_proxy' in followBody) && !('proxy_password' in followBody)
+            && followBody.model === 'm-follow' && followBody.type === 'quiet',
+            `body=${JSON.stringify(followBody)}`,
+        );
+
+        // ⑤ openai 源＋反代：反代地址原样直发（不走 normalizeApiUrl 补 /v1
+        // ——宿主里填的是完整反代端点），密钥经 proxy_password 通道
+        conn.chat_completion_source = 'openai';
+        conn.openai_model = 'gpt-follow';
+        const proxyRoute = resolveTaskRoute('choice');
+        const proxyBody = proxyRoute
+            ? buildGenerateBody([{ role: 'user', content: 'hi' }], routeToRequestConfig('choice', proxyRoute))
+            : null;
+        check(
+            '跟随态请求体：openai 源反代原样直发（不补 /v1）',
+            proxyBody !== null
+            && proxyBody.chat_completion_source === 'openai'
+            && proxyBody.reverse_proxy === 'https://rp.example/'
+            && proxyBody.proxy_password === 'sk-rp'
+            && !('custom_url' in proxyBody)
+            && proxyBody.model === 'gpt-follow',
+            `body=${proxyBody ? JSON.stringify(proxyBody) : 'null'}`,
+        );
+
+        // ⑥ 挡源：claude 官方源 → null＋挡因文案点名，状态快照同步报挡
+        conn.chat_completion_source = 'claude';
+        conn.claude_model = 'c-follow';
+        const claudeRoute = resolveTaskRoute('choice');
+        const claudeStatus = readFollowStatus();
+        check(
+            '跟随挡：claude 官方源 fail fast、挡因与状态行点名',
+            claudeRoute === null
+            && routeUnavailableMessage('choice').includes('Claude')
+            && claudeStatus.on === true && claudeStatus.ok === false && claudeStatus.text.includes('Claude'),
+            `route=${String(claudeRoute)}，status=${JSON.stringify(claudeStatus)}`,
+        );
+    }
+
+    // ⑦ 收尾复位：开关关＋存根连接复原——boot2 重跑零依赖前置状态
+    writeFollowTavern(false);
+    conn.chat_completion_source = 'custom';
+    conn.custom_url = '';
+    conn.custom_model = '';
+    conn.reverse_proxy = '';
+    conn.proxy_password = '';
+    conn.openai_model = '';
+    conn.claude_model = '';
+    const offStatus = readFollowStatus();
+    check(
+        '跟随复位：关态三件归位（boot2 幂等前提）',
+        readFollowTavern() === false
+            && resolveTaskRoute('choice') === null
+            && offStatus.on === false && offStatus.ok === true,
+        `follow=${String(readFollowTavern())}，status=${JSON.stringify(offStatus)}`,
+    );
 }

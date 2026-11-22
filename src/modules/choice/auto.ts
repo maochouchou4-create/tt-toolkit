@@ -15,7 +15,7 @@
  */
 
 import { eventBus, event_types, getChatMessages, isHostErrorText } from '@/host';
-import { missingTaskModelMessage, resolveTaskRoute } from '@/modules/apis/task-profiles';
+import { routeUnavailableMessage, resolveTaskRoute } from '@/modules/apis/task-profiles';
 import { choiceStorage } from './api';
 import { generateOptions, isGenerating } from './generator';
 
@@ -66,7 +66,7 @@ export function handleMessageReceived(messageId: unknown, type: unknown): boolea
 
     if (!resolveTaskRoute('choice')) {
         // 不弹 UI（理由见文件头）；留 console 线索供排障
-        console.warn(`[tt-toolkit][choice] 自动生成跳过：${missingTaskModelMessage('choice')}`);
+        console.warn(`[tt-toolkit][choice] 自动生成跳过：${routeUnavailableMessage('choice')}`);
         return false;
     }
 

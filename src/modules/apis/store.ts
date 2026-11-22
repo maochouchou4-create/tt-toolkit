@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia';
 import { createEndpoint, deleteEndpoint, readApiDomain, readJailbreakPreset, setProviderNoPrefill, upsertEndpoint, writeJailbreakPreset } from './storage';
-import { mutateTaskProfiles, readTaskProfiles, setRouteForAllTasks, type TaskProfile, type TaskProfilesDomain } from './task-profiles';
+import { mutateTaskProfiles, readFollowStatus, readFollowTavern, readTaskProfiles, setRouteForAllTasks, writeFollowTavern, type FollowStatus, type TaskProfile, type TaskProfilesDomain } from './task-profiles';
 import type { TaskId } from '@/tasks';
 import type { ApiProvider } from './types';
 import { fetchModels } from './client';
@@ -24,6 +24,8 @@ export const useApisStore = defineStore('tt-apis', {
         fetchStatus: null as { ok: boolean; message: string } | null,
         /** 宿主 openai 预设名清单（破限注入卡下拉源；onActivate 刷新——tab 容器只挂载一次）。 */
         presetNames: [] as string[],
+        /** 跟随状态行数据（判挡与文案在 task-profiles 单点组装，本 store 只存）。 */
+        followStatus: { on: false, ok: true, text: '' } as FollowStatus,
     }),
     getters: {
         endpoints(): ApiProvider[] {
@@ -34,6 +36,11 @@ export const useApisStore = defineStore('tt-apis', {
         taskProfiles(): TaskProfilesDomain {
             void this.revision;
             return readTaskProfiles();
+        },
+        /** 跟随开关开合（任务模型卡跟随行读写）。 */
+        followTavern(): boolean {
+            void this.revision;
+            return readFollowTavern();
         },
         /** 选中破限预设名（''＝不启用；API 页「生成注入」卡读写）。 */
         jailbreakPreset(): string {
@@ -80,6 +87,16 @@ export const useApisStore = defineStore('tt-apis', {
         selectJailbreakPreset(name: string) {
             writeJailbreakPreset(name);
             this.revision += 1;
+        },
+        /** 切跟随开关（状态行随开关即刻重组）。 */
+        toggleFollowTavern(value: boolean) {
+            writeFollowTavern(value);
+            this.revision += 1;
+            this.refreshFollowStatus();
+        },
+        /** 刷新跟随状态行（tab onActivate 与开关切换后调用——酒馆侧换连接/换模型后回本页即新鲜）。 */
+        refreshFollowStatus() {
+            this.followStatus = readFollowStatus();
         },
         /** 刷新宿主预设名清单（tab onActivate 与挂载时调用——宿主侧增删预设后回本页即新鲜）。 */
         refreshPresetNames() {

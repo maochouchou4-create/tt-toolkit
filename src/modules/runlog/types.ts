@@ -19,7 +19,7 @@ export interface RunRecord {
     /** ISO 时间戳 */
     at: string;
     task: RunTask;
-    /** baseUrl 归一后；apiKey 绝不进记录 */
+    /** 端点可读形态：手动配置＝baseUrl 归一后；跟随＝镜像目标（custom 地址/反代/源名）；密钥绝不进记录 */
     endpointUrl: string;
     model: string;
     /** OutputContract 字面量——本模块不 import apis（防环），仅存字符串 */

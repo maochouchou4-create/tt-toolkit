@@ -1,16 +1,19 @@
 /**
  * 统一请求客户端：choice 直连请求与 persona OpenAI 兼容请求
- * 合一。两个任务只差传参——出站身份与采样参数（url/key/model/
- * temperature/reasoningEffort）由任务路由单点解析（apis/task-profiles
+ * 合一。两个任务只差传参——出站身份（两态判别联合，见
+ * GenerateRequestConfig.identity）与采样参数（model/temperature/
+ * reasoningEffort）由任务路由单点解析（apis/task-profiles
  * 的 resolveTaskRoute），流式/输出契约按任务固化于 TASK_PARAMS。
  * 所有任务均不发 max_tokens：服务端用模型默认输出上限
  * （推理模型思维链与正文共享上限，显式小上限会把正文掐断——实测
  * deepseek-flash 2048 预算被思维链耗尽、正文截断在半条 JSON）。
  *
  * 单一传输通道＝宿主生成路由 `/api/backends/chat-completions/generate`
- * （type:'quiet' 旁路：不占宿主生成状态桥/通知；密钥经 reverse_proxy
- * 直达上游，不进宿主 secret store）。模型清单拉取与连通性测试无宿主
- * 路由可走（宿主不透传 /models），保持直连 Bearer 形态。
+ * （type:'quiet' 旁路：不占宿主生成状态桥/通知）。手动配置态密钥经
+ * reverse_proxy 直达上游，不进宿主 secret store；跟随态镜像酒馆当前
+ * 连接（身份解析见 task-profiles.ts 判挡，组装口径见 buildGenerateBody），
+ * 密钥由宿主后端按源自取。模型清单拉取与连通性测试无宿主路由可走
+ * （宿主不透传 /models），保持直连 Bearer 形态。
  *
  * 宿主核实记录（D:\code\repos\TauriTavern\src，rewrite 施工时 HEAD）：
  * - 生成端点 `/api/backends/chat-completions/generate`：
@@ -52,7 +55,7 @@ import { readUpstreamError } from './client-error';
 import { readStream } from './client-sse';
 import { composeOutbound } from './preset-inject';
 // 思考强度档位与其清单同住 task-profiles（枚举单点），传输层只消费类型。
-import type { ReasoningEffort } from './task-profiles';
+import type { ReasoningEffort, TaskRouteIdentity } from './task-profiles';
 
 const log = createTtlog('modules/apis/client');
 
@@ -68,10 +71,12 @@ export type OutputContract = 'json_object' | 'prompt_only';
 export interface GenerateRequestConfig {
     /** 任务归属（runlog 记录与摘要按任务区分；缺省会静默记错任务名，必填拒绝） */
     task: RunTask;
-    /** API base（宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径） */
-    baseUrl: string;
-    /** 直连密钥（走 proxy_password 通道，不进宿主 secret store） */
-    apiKey: string;
+    /**
+     * 出站身份（两态判别联合，形态与合法性见 task-profiles.ts）：
+     * provider＝手动配置直连（url+key 经 custom 源反代通道）；
+     * host＝跟随酒馆当前连接（源/自定义地址/反代镜像，密钥宿主自取）。
+     */
+    identity: TaskRouteIdentity;
     model: string;
     /** 采样温度（undefined＝不发——任务域负责缺省值） */
     temperature?: number;
@@ -97,6 +102,16 @@ export interface GenerateResult {
 
 /** 生成端点（宿主前端路由，相对当前页面 origin）。 */
 const GENERATE_URL = '/api/backends/chat-completions/generate';
+
+/**
+ * 宿主反代转发白名单（镜像 D:\code\repos\TauriTavern\src openai.js:4287
+ * proxySupportedSources，跟随施工时 HEAD）：主聊天只在源∈此清单且反代非空时
+ * 才把 reverse_proxy+proxy_password 发进生成请求（openai.js:4401-4405），
+ * custom 源不在清单（它走 custom_url 分支）。跟随态按同一条件镜像——源
+ * 不在表里时不发反代，行为与酒馆主聊天的实际出站一致，不越权。宿主侧
+ * 清单增删时以宿主现值为准同步此处。
+ */
+const PROXY_SUPPORTED_SOURCES = ['claude', 'openai', 'mistralai', 'makersuite', 'vertexai', 'deepseek', 'xai', 'zai', 'moonshot'];
 
 /**
  * 规范化 API base 地址（宿主路由用：四步语义＝去尾斜杠→剥尾部
@@ -247,21 +262,15 @@ export async function fetchModels(url: string, key: string): Promise<string[]> {
  * 装配生成请求体（契约见文件头核实记录）。显式发送制：temperature/
  * max_tokens 未传（undefined）就不进请求体（宿主 insert_if_present
  * 同语义）——缺省值归任务域 normalize 保证，客户端不做任务侧默认。
+ *
+ * 身份两态：provider＝custom 源直连（密钥经 reverse_proxy 通道）；
+ * host＝跟随酒馆当前连接（源/自定义地址/反代镜像宿主主聊天的组装口径，
+ * 密钥不经过本扩展——宿主后端按源自取）。
  */
 export function buildGenerateBody(messages: GenerateMessage[], config: GenerateRequestConfig): Record<string, unknown> {
     const body: Record<string, unknown> = {
         // quiet：不占宿主生成状态/通知（见文件头）；语义＝后台旁路生成
         type: 'quiet',
-        // custom 源＝OpenAI 兼容直连（custom_api_format 缺省 openai_compat，
-        // 经 openai::build 同一构建路径）：密钥路由与 openai 源相同
-        // （reverse_proxy＋proxy_password），但 reasoning_effort 原样透传
-        // ——openai 源按模型名白名单转发、白名单外静默丢弃（openai.rs:
-        // 182-199），本扩展端点的模型名全在白名单外，走 openai 源等于
-        // 思考强度永远发不出去。
-        chat_completion_source: 'custom',
-        // 密钥经 reverse_proxy 通道直达上游（config.rs:223-224），不落宿主 secret
-        reverse_proxy: normalizeApiUrl(config.baseUrl),
-        proxy_password: config.apiKey ?? '',
         model: config.model,
         messages,
         // 防 fetch 层改写：酒馆助手类预设脚本会 patch 主窗口 fetch 拦截
@@ -274,6 +283,31 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
         // 旁路路由，不经过该断言。
         tool_choice: 'none',
     };
+    if (config.identity.kind === 'provider') {
+        // custom 源＝OpenAI 兼容直连（custom_api_format 缺省 openai_compat，
+        // 经 openai::build 同一构建路径）：密钥路由与 openai 源相同
+        // （reverse_proxy＋proxy_password），但 reasoning_effort 原样透传
+        // ——openai 源按模型名白名单转发、白名单外静默丢弃（openai.rs:
+        // 182-199），本扩展端点的模型名全在白名单外，走 openai 源等于
+        // 思考强度永远发不出去。
+        body.chat_completion_source = 'custom';
+        // 密钥经 reverse_proxy 通道直达上游（config.rs:223-224），不落宿主 secret
+        // （宿主会再拼 /chat/completions——normalizeApiUrl 已剥尾部路径）
+        body.reverse_proxy = normalizeApiUrl(config.identity.url);
+        body.proxy_password = config.identity.key;
+    } else {
+        const id = config.identity;
+        body.chat_completion_source = id.source;
+        // custom 源镜像宿主的 custom_url 组装（openai.js:4474 起）：地址原样
+        // （宿主后端自拼端点路径），密钥由宿主 secret store CUSTOM 键自取。
+        if (id.source === 'custom' && id.customUrl !== '') body.custom_url = id.customUrl;
+        // 反代按宿主条件镜像（源∈PROXY_SUPPORTED_SOURCES 才发，地址原样——
+        // 酒馆里填的是完整反代端点，不是待补 /v1 的裸 base）
+        if (id.reverseProxy !== '' && PROXY_SUPPORTED_SOURCES.includes(id.source)) {
+            body.reverse_proxy = id.reverseProxy;
+            body.proxy_password = id.proxyPassword;
+        }
+    }
     if (config.temperature !== undefined) body.temperature = config.temperature;
     body.stream = config.stream;
     if (config.outputContract === 'json_object') {
@@ -378,11 +412,17 @@ export async function callGenerateEndpoint(
         log.info(`破限注入 (${config.task}): ${outbound.length - messages.length} 条前缀`);
     }
     const requestText = serializeMessages(outbound);
+    // 端点记录两态：provider＝直连 base 归一；host（跟随）＝镜像目标的
+    // 人话形态（custom 地址/反代/源名，空串依次回退）——runlog 是排障
+    // 设施，跟随态让「这次发给谁」可读即可，不参与请求组装。
+    const endpointUrl = config.identity.kind === 'host'
+        ? (config.identity.customUrl || config.identity.reverseProxy || `宿主源:${config.identity.source}`)
+        : normalizeApiBase(config.identity.url);
     const commitRun = (ok: boolean, responseText: string, error?: string): number =>
         runlogStore.commit({
             at: new Date().toISOString(),
             task: config.task,
-            endpointUrl: normalizeApiBase(config.baseUrl),
+            endpointUrl,
             model: config.model,
             contract: config.outputContract,
             stream: config.stream,

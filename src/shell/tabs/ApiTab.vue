@@ -1,7 +1,8 @@
 <template>
   <!--
     「API」tab：服务商接入身份维护（列表/增删改/拉模型清单）＋任务模型
-    （任务档案，各任务独立选服务商与模型）＋生成注入（破限预设）。
+    （任务档案，各任务独立选服务商与模型；跟随开关开时身份与模型镜像
+    酒馆当前连接，档案行调参档仍生效）＋生成注入（破限预设）。
     url+key＝服务商，模型选择权在任务模型卡——两层分离。
     页面用 ui/ 原语组件拼装；控件皮肤在 .tt-ctrl、按钮在 .tt-btn，
     字号/间距只走 --tt-* 令牌，本样式只余页面私有布局。
@@ -76,6 +77,11 @@
     </TTCard>
 
     <TTCard title="任务模型">
+      <label class="tt-check-row tt-task-follow-toggle">
+        <input :checked="apis.followTavern" type="checkbox" @change="onFollowToggle">
+        <span>跟随酒馆会话连接</span>
+      </label>
+      <TTStatus class="tt-task-follow-status" :tone="followTone">{{ apis.followStatus.text }}</TTStatus>
       <div class="tt-task-grid" role="table">
         <div class="tt-task-grid-row tt-task-grid-head" role="row">
           <span class="tt-task-grid-cell tt-task-grid-cell--name" role="presentation" />
@@ -89,7 +95,7 @@
             <span class="tt-task-label">批量设置</span>
           </span>
           <span class="tt-task-grid-cell">
-            <select class="tt-ctrl" :value="batchProviderId" aria-label="批量服务商" @change="onBatchProviderChange">
+            <select class="tt-ctrl" :value="batchProviderId" :disabled="apis.followTavern" aria-label="批量服务商" @change="onBatchProviderChange">
               <option value="">（未选择）</option>
               <option v-for="p in apis.endpoints" :key="p.id" :value="p.id">{{ p.name || p.url }}</option>
             </select>
@@ -99,25 +105,27 @@
               :model-value="batchModel"
               :options="modelsOf(batchProviderId)"
               :empty-text="modelEmptyText(batchProviderId)"
+              :disabled="apis.followTavern"
               placeholder="模型 ID"
               aria-label="批量模型"
               @update:model-value="onBatchModelInput"
             />
           </span>
           <span class="tt-task-grid-cell tt-task-batch-actions">
-            <button type="button" class="tt-btn" :disabled="!batchReady" @click="applyBatch">应用到全部任务</button>
+            <button type="button" class="tt-btn" :disabled="apis.followTavern || !batchReady" @click="applyBatch">应用到全部任务</button>
           </span>
         </div>
         <div v-for="t in TASKS" :key="t.id" class="tt-task-grid-row" role="row">
           <span class="tt-task-grid-cell tt-task-grid-cell--name" role="rowheader">
             <span class="tt-task-label">{{ t.label }}</span>
             <TTStatus v-if="profileStatus(t.id) === 'dangling'" tone="err">所选服务商已删除，请重新选择</TTStatus>
-            <TTStatus v-else-if="profileStatus(t.id) === 'empty'" tone="muted">未配置</TTStatus>
+            <TTStatus v-else-if="profileStatus(t.id) === 'empty' && !apis.followTavern" tone="muted">未配置</TTStatus>
           </span>
           <span class="tt-task-grid-cell" role="cell">
             <select
               class="tt-ctrl"
               :value="apis.taskProfiles[t.id].providerId"
+              :disabled="apis.followTavern"
               aria-label="服务商"
               @change="onProviderChange(t.id, $event)"
             >
@@ -130,6 +138,7 @@
               :model-value="apis.taskProfiles[t.id].model"
               :options="modelsOf(apis.taskProfiles[t.id].providerId)"
               :empty-text="modelEmptyText(apis.taskProfiles[t.id].providerId)"
+              :disabled="apis.followTavern"
               placeholder="模型 ID"
               aria-label="模型"
               @update:model-value="onModelInput(t.id, $event)"
@@ -207,7 +216,15 @@ function effortLabel(effort: ReasoningEffort): string {
 // 挂载一次，宿主侧增删预设后回本页即新鲜）；挂载兜底刷一次
 onMounted(() => {
     apis.refreshPresetNames();
+    apis.refreshFollowStatus();
 });
+
+// 跟随：开关切换（状态行随切换即刻重组）；状态行 tone 三态
+// （开且可跟 ok／开且被挡 err／关 muted）
+function onFollowToggle(event: Event): void {
+    apis.toggleFollowTavern((event.target as HTMLInputElement).checked);
+}
+const followTone = computed(() => (apis.followStatus.on ? (apis.followStatus.ok ? 'ok' : 'err') : 'muted'));
 const jbMissing = computed(() => apis.jailbreakPreset !== '' && !apis.presetNames.includes(apis.jailbreakPreset));
 
 function onJbPresetChange(event: Event): void {
@@ -416,6 +433,21 @@ function onSave(): void {
 .tt-task-grid {
     display: flex;
     flex-direction: column;
+}
+
+/* 跟随开关与状态行：卡首独立两行，不进网格（列宽是为五行控件设计的） */
+.tt-task-follow-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--tt-sp-1);
+    padding: var(--tt-sp-1) 0;
+}
+
+.tt-task-follow-status {
+    display: block;
+    padding: 0 0 var(--tt-sp-2);
+    border-bottom: 1px dashed var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.3));
+    margin-bottom: var(--tt-sp-1);
 }
 
 .tt-task-grid-row {

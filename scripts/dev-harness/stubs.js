@@ -185,7 +185,51 @@
         // 内部走 this.getPresetList()——箭头替身不接受 this，会盖住宿主
         // this 丢失类缺陷）
         getPresetManager: () => new PresetManagerStub([stubPreset], { '存根预设': 0 }),
-        chatCompletionSettings: { preset_settings_openai: '存根预设' },
+        // 跟随面：连接字段按宿主 oai_settings 形态（chat_completion_source/
+        // custom_url/custom_model/reverse_proxy…），冒烟用例经 getContext()
+        // 改写这些字段即可操控「酒馆当前连接」的各形态
+        chatCompletionSettings: {
+            preset_settings_openai: '存根预设',
+            chat_completion_source: 'custom',
+            custom_url: '',
+            custom_api_format: 'openai_compat',
+            reverse_proxy: '',
+            proxy_password: '',
+            custom_model: '',
+            openai_model: '',
+            claude_model: '',
+            deepseek_model: '',
+            google_model: '',
+            mistralai_model: '',
+            openrouter_model: '',
+            xai_model: '',
+            zai_model: '',
+            moonshot_model: '',
+        },
+        // 跟随面：主接口名（'openai'＝聊天补全系，宿主 main_api 同名转发）
+        mainApi: 'openai',
+        // 跟随面：按源分派模型字段（镜像宿主 openai.js getChatCompletionModel
+        // 的分派形态，常用源子集；未映射源返回 null＝未选模型，判挡安全兜底。
+        // 分派表与 scripts/smoke.mjs 的 stubContext 同源互指，改表两处同步）
+        getChatCompletionModel() {
+            const settings = context.chatCompletionSettings;
+            const modelFields = {
+                custom: 'custom_model',
+                openai: 'openai_model',
+                claude: 'claude_model',
+                deepseek: 'deepseek_model',
+                makersuite: 'google_model',
+                google: 'google_model',
+                mistralai: 'mistralai_model',
+                openrouter: 'openrouter_model',
+                xai: 'xai_model',
+                zai: 'zai_model',
+                moonshot: 'moonshot_model',
+            };
+            const field = modelFields[settings.chat_completion_source];
+            const model = field ? settings[field] : '';
+            return typeof model === 'string' && model !== '' ? model : null;
+        },
         extensionPrompts: {
             // 假装是一个记忆摘要类插件占用通用注入槽位（外部注入全自动
             // 搬入——非空即带，无需用户配置）
