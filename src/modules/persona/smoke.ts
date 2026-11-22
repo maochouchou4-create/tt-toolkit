@@ -196,142 +196,71 @@ function runPromptsChecks(): void {
         && genText.includes('{{catalog_definitions}}')
         && genText.includes('{{input}}'));
 
-    // 回退骨架机判：判「每块的叶对不对」。
-    // ⚠️ 期望值一律写字面量：从目录或骨架反推的期望与被测对象同源，两边一起错
-    // 时断言照样恒绿（那只证明「两边一致」，不证明「对的」）。骨架逐块机判的期望
-    // 是内联的 6 块 12 叶字面量，块名与叶名一起锁住；原先那条「回退骨架块集合
-    // ＝目录骨架块集合」两侧都从目录推导、恒绿，已删。
-    const templateBlocks = parseYamlToBlocks(DEFAULT_TEMPLATES.user);
+    // ── 渲染契约：锁形状与接线，不锁散文 ──
+    // 提示词措辞属产品迭代面，散文回归归 diff 评审；逐字锁的唯一失效模式是
+    // 忘了同步簿记——红的是测试不是代码。机器守两条：渲染/组装的形状契约
+    // （改格式在此红）、跨源接线（正文互指的键必须落在目录真实键上，改数据
+    // 在此红）。同源期望在形状位上合法：判的是渲染函数守不守格式，不是数据
+    // 该长什么样。
 
-    /** 回退骨架的字面量期望（块名 → 叶键名，目录顺序）。改目录的骨架标记必须同改这里。 */
-    const SKELETON_EXPECT: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
-        ['基本信息', ['身份定位', '别名与名号']],
-        ['外貌', ['整体印象', '辨识标记']],
-        ['性格', ['核心矛盾']],
-        ['言谈习惯', ['口头禅与语气词', '说话方式']],
-        ['底线雷区', ['绝不做的事', '行为禁区', '禁触话题']],
-        ['目标动机', ['外部义务', '深层需要']],
-    ];
-    const skeletonMismatch = SKELETON_EXPECT.filter(([block, leaves]) => {
-        const got = (templateBlocks.get(block) ?? '').split('\n').map(l => l.trim().replace(/:$/, '')).filter(Boolean);
-        return got.length !== leaves.length || !leaves.every(l => got.includes(l));
-    }).map(([block]) => block);
-    check('prompts：骨架逐块机判（回退骨架每块的叶集合＝字面量期望）',
-        skeletonMismatch.length === 0 && templateBlocks.size === SKELETON_EXPECT.length,
-        `不符块=${skeletonMismatch.join('/') || '无'}`);
-
+    // 清单行形：每块一行「块名——叶名串；N 叶；档位/条件词面…」。叶名串按
+    // 目录现值拼——它由 renderCatalog 内部同式拼出，只有渲染函数改了拼法
+    // （丢块、丢叶名、叶数段变形）才在此红；改词面不红是设计如此。
     const refModuleText = curatorText.split(REFERENCE_MODULES_OPEN_TAG)[1]?.split(REFERENCE_MODULES_CLOSE_TAG)[0] ?? '';
-    // 清单体量机判：渲染行数＝目录条目数（块数由此成派生量，不再单点写死）
-    const renderedLineCount = refModuleText.split('\n').filter(l => l.includes('——') && l.includes('；')).length;
-    check('prompts：curator 参考清单渲染行数＝目录条目数',
-        renderedLineCount === PERSONA_BLOCK_CATALOG.length,
-        `lines=${renderedLineCount} catalog=${PERSONA_BLOCK_CATALOG.length}`);
+    const renderRows = refModuleText.split('\n').filter(l => l.includes('——') && l.includes('；'));
+    const rowShapeBroken = PERSONA_BLOCK_CATALOG.filter((block, i) => {
+        const row = renderRows[i] ?? '';
+        return !row.startsWith(`${block.name}——`)
+            || !row.includes(block.leaves.map(l => l.name).join('/'))
+            || !/；\d+ 叶；/.test(row);
+    }).map(block => block.name);
+    check('prompts：策展清单行形契约（块名——叶名串；N 叶；…·行数＝块数）',
+        renderRows.length === PERSONA_BLOCK_CATALOG.length && rowShapeBroken.length === 0,
+        `行数=${renderRows.length} 块=${PERSONA_BLOCK_CATALOG.length} 破形块=${rowShapeBroken.join('/') || '无'}`);
 
-    // L0 目录层：渲染出来的叶集必须与拍板成文的策展目录逐叶相等（块序、块内
-    // 叶序、叶名三处全锁）。期望值是内联的字面量——从目录反推的期望与目录同
-    // 源，目录改错时两边一起错，断言照样恒绿。条件叶不占声明叶数，比对前从
-    // 叶名串里剔掉（它由下面那条单独判）。
-    const CATALOG_A_SNAPSHOT: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
-        ['基本信息', ['身份定位', '别名与名号']],
-        ['外貌', ['整体印象', '辨识标记']],
-        ['性格', ['核心矛盾']],
-        ['言谈习惯', ['口头禅与语气词', '说话方式']],
-        ['底线雷区', ['绝不做的事', '行为禁区', '禁触话题']],
-        ['目标动机', ['外部义务', '深层需要']],
-        ['恋爱', ['心动反应', '亲密形态']],
-        ['NSFW', ['身体反应', '边界与偏好']],
-        ['既有关系', ['专属称谓', '相处基调']],
-    ];
-    /** 渲染行的叶名串：条件叶（【…】成文）不计入声明叶数。 */
-    const declaredLeavesOf = (row: string): ReadonlyArray<string> => {
-        const head = row.split('；')[0];
-        return head.slice(head.indexOf('——') + 2).split('/').map(x => x.trim()).filter(x => !/^【.*】$/.test(x));
-    };
-    const renderedRows = refModuleText.split('\n').filter(Boolean);
-    const renderedBlockNames = renderedRows.map(l => l.split('——')[0]);
-    const renderedLeaves = renderedRows.flatMap(declaredLeavesOf);
-    const snapshotLeaves = CATALOG_A_SNAPSHOT.flatMap(([, leaves]) => leaves);
-    const leafDiff = [...new Set([
-        ...renderedLeaves.filter(l => !snapshotLeaves.includes(l)),
-        ...snapshotLeaves.filter(l => !renderedLeaves.includes(l)),
-    ])];
-    // 集合相等不锁「叶在块间搬家、同块内换序」——那类错两边都还是那批叶名。
-    const leafOrderOk = renderedRows.every((row, i) => {
-        const expected = CATALOG_A_SNAPSHOT[i]?.[1];
-        if (!expected) return false;
-        const got = declaredLeavesOf(row);
-        return got.length === expected.length && expected.every((leaf, j) => got[j] === leaf);
-    });
-    check('prompts：L0 目录叶集与策展目录逐叶相等（18 叶逐名相等·块序与块内叶序双向锁）',
-        renderedBlockNames.length === CATALOG_A_SNAPSHOT.length
-        && CATALOG_A_SNAPSHOT.every(([name], i) => renderedBlockNames[i] === name)
-        && leafOrderOk
-        && leafDiff.length === 0,
-        `叶差集=${leafDiff.join('/') || '无'} 渲染叶=${renderedLeaves.length} 期望叶=${snapshotLeaves.length}`);
-    // 叶总数写死：上面那条把渲染结果与快照逐叶对齐，两边同源漂移时（例如同一处
-    // 漏写又同时少一个叶）它照样恒绿，只有一个不派生任何一方的绝对量能兜住。
-    check('prompts：目录叶总数＝18（渲染与快照各数一次·绝对量不派生）',
-        renderedLeaves.length === 18 && snapshotLeaves.length === 18,
-        `渲染叶=${renderedLeaves.length} 期望叶=${snapshotLeaves.length}`);
+    // 回退骨架行形：块行顶格、叶行恰两格缩进、一律半角「:」收尾无值——切块
+    // 解析与策展模型的阅读都吃这个形状。骨架内容由目录骨架标记派生（同源），
+    // 数据对不对归目录评审，这里只锁形状可解析。
+    const skeletonLines = DEFAULT_TEMPLATES.user.split('\n').filter(Boolean);
+    const skeletonShapeOk = skeletonLines.length > 0
+        && skeletonLines.every(l => /^[^\s:][^:]*:$/.test(l) || /^ {2}[^:]+:$/.test(l));
+    check('prompts：回退骨架行形契约（块行顶格·叶行两格·键冒号收尾无值）',
+        skeletonShapeOk && parseYamlToBlocks(DEFAULT_TEMPLATES.user).size > 0,
+        `行数=${skeletonLines.length}`);
 
-    // 整段字面量逐字节比：叶集双向相等只锁住「叶名集合」，叶在块间搬家、
-    // 同块内重名、叶数段／档位词面／条件叶括注任一处被改写它都照过。期望值
-    // 只能是抄下来的原文，从目录反推出来的期望锁不住自己。
-    const CATALOG_TEXT_SNAPSHOT = [
-    '基本信息——身份定位/别名与名号；2 叶；几乎必选｜身份定位：一句话身份——他是谁、在哪个世界、站在什么位置（如「十二岁储君，母后被囚后由他代理朝政」）。不装：家谱全录、组织架构、世界书已载的世界规则。；别名与名号：绰号、代号、尊称、自称——一顶多的叫法清单。不装：只对某个特定人物用的专属叫法（归「既有关系·专属称谓」）、只出现一次的临时称呼。',
-    '外貌——整体印象/辨识标记；2 叶；几乎必选｜整体印象：2～4 个能被认出来的强特征（身高体态、气场、最打眼的记号），写「在场面里怎么被看见」。不装：全身照式流水账、他人评价、与「辨识标记」重复的记号。；辨识标记：一认就中的独有记号——疤、瞳色、异肢、气味、嗓音。不装：与剧情绑定的临时伤妆、可从「整体印象」推出的泛写。',
-    '性格——核心矛盾/【类型学速记】；1 叶；几乎必选（可附类型学速记）｜核心矛盾：2～4 条互相拉扯的行为向标签——每条自带「对什么硬/吃什么/护什么」，条与条方向不同，张力即立体；全卡最重的一行。不装：同义堆叠、四字评语连串、谁都适用的泛性格。；【类型学速记】：用户给出 MBTI／九型结果时原样抄录。不装：自行测猜的结果。',
-    '言谈习惯——口头禅与语气词/说话方式；2 叶；几乎必选｜口头禅与语气词：高频口头禅、语气词、口吃结巴——听得见的语言记号。不装：只出现一次的台词、书面语描述。；说话方式：怎么说话——语速、句长、敬语或糙话、对谁省话对谁话痨（行为向标签）。不装：嗓音音色（归「外貌·辨识标记」）、情境台词。',
-    '底线雷区——绝不做的事/行为禁区/禁触话题；3 叶；常选｜绝不做的事：他自己绝不会去做的——无论代价。不装：人人都不会做的法律常识、与「行为禁区」同素材的换皮复述。；行为禁区：别人对他做不得的——踩线即翻脸或冷掉。不装：与「绝不做的事」同素材复述。；禁触话题：一提就僵、就炸、就岔开的话题清单。不装：可从「核心矛盾」直接推出的泛化敏感。',
-    '目标动机——外部义务/深层需要；2 叶；几乎必选｜外部义务：压在他身上的外部要求——职责、契约、他人期待。不装：他人自己的动机。；深层需要：他自己内心真正想要的——与外部义务相反时张力最好。不装：剧情目标与阶段性任务，那些归剧情层承担。',
-    '恋爱——心动反应/亲密形态；2 叶；恋爱线或亲密戏在需求或素材中成立时｜心动反应：动心时怎么看得出来——行为、语言、生理反应的方向。不装：择偶标准清单、对特定角色的好感度——好感进展归剧情层承担。；亲密形态：关系确立后他什么样——黏人度、吃醋方式、亲密时的边界。不装：情史流水账、对前度的叙述——那些归剧情与世界书。',
-    'NSFW——身体反应/边界与偏好；2 叶；需求或素材明确涉及成人内容时｜身体反应：敏感点、生理反应方向。不装：与情节绑定的具体场面。；边界与偏好：硬界限（绝不）＋喜好方向。不装：可从「底线雷区」推出的重复条目。',
-    '既有关系——专属称谓/相处基调；2 叶；素材含与开场人物的既有关系时｜专属称谓：他对特定在场人物的专属叫法＋对方是谁。不装：对任何人都通用的叫法（归「基本信息·别名与名号」）。；相处基调：与该人物之间的历史默契、未说破的事、相处惯性。不装：对方人物的背景，那些归世界书。',
-    ];
-    // 整段整串比对：段体是「开标签 + 换行 + 55 行 + 换行 + 闭标签」一次成文的
-    // 结果，按行拆开比会放过段内多出来的空行与首尾空行——判据写的是整段逐字节
-    // 相等，比的也必须是整串。快照的一次性生成脚本取的正是这个拼接形态。
-    const catalogSectionText = `\n${CATALOG_TEXT_SNAPSHOT.join('\n')}\n`;
-    let firstDiffAt = 0;
-    while (firstDiffAt < refModuleText.length
-        && firstDiffAt < catalogSectionText.length
-        && refModuleText[firstDiffAt] === catalogSectionText[firstDiffAt]) firstDiffAt++;
-    check('prompts：L0 策展清单渲染文本整段逐字节相等（叶名串／叶数段／档位词面／条件叶括注／定义段与段内空行一并锁）',
-        refModuleText === catalogSectionText,
-        `首个差异在第 ${firstDiffAt} 字（渲染 ${refModuleText.length} 字／快照 ${catalogSectionText.length} 字）`);
-
-    // 归属优先级对：两端必须都是目录里的真实叶——写裸块名的那一端永远匹配不
-    // 上任何键，结构重复判定会对那几对永远静默。
+    // 归属对两端必须落在目录真实叶上：写裸块名或已改名的键，结构重复判定对
+    // 那几对永远静默。对内容（几对、谁配谁）是数据设计，归目录评审，这里只
+    // 守接线。
     const catalogLeafKeys = new Set(PERSONA_BLOCK_CATALOG.flatMap(
         block => block.leaves.map(leaf => `${block.name}·${leaf.name}`),
     ));
-    const OWNERSHIP_PAIRS_EXPECT: ReadonlyArray<readonly [string, string]> = [
-        ['底线雷区·绝不做的事', '底线雷区·行为禁区'],
-        ['既有关系·专属称谓', '基本信息·别名与名号'],
-        ['外貌·整体印象', '外貌·辨识标记'],
-        ['目标动机·外部义务', '目标动机·深层需要'],
-    ];
-    const pairsEqual = OWNERSHIP_PAIRS.length === OWNERSHIP_PAIRS_EXPECT.length
-        && OWNERSHIP_PAIRS.every((pair, i) => pair[0] === OWNERSHIP_PAIRS_EXPECT[i][0] && pair[1] === OWNERSHIP_PAIRS_EXPECT[i][1]);
-    const pairEndsMissing = OWNERSHIP_PAIRS_EXPECT.flatMap(([a, b]) => [a, b]).filter(key => !catalogLeafKeys.has(key));
-    check('prompts：L0 归属优先级对 4 对逐对相等且两端都落在目录真实叶上',
-        pairsEqual && pairEndsMissing.length === 0,
-        `对数=${OWNERSHIP_PAIRS.length} 未落地的叶=${pairEndsMissing.join('/') || '无'}`);
+    const pairEndsMissing = OWNERSHIP_PAIRS.flatMap(([a, b]) => [a, b]).filter(key => !catalogLeafKeys.has(key));
+    check('prompts：归属优先级对两端全落在目录真实叶上',
+        pairEndsMissing.length === 0,
+        `未落地的叶=${pairEndsMissing.join('/') || '无'}`);
 
-    // 条件叶：成文在叶名串之后、叶数段之前（排到叶数段之后会被读成多出来的一
-    // 叶），且不占声明叶数、不进回退骨架。
+    // 条件叶：成文在叶名串之后、叶数段之前（排到叶数段之后会被读成多出来的
+    // 一叶）；叶数位＝声明叶数（把条件叶计进去即红，期望从目录字段派生，与
+    // 渲染同式）；不进回退骨架。
     const optionalBlock = PERSONA_BLOCK_CATALOG.find(block => block.optionalLeaf);
     const optionalName = optionalBlock?.optionalLeaf?.name ?? '';
     const optionalMarker = optionalName ? `【${optionalName}】` : '';
-    const optionalRow = optionalBlock ? refModuleText.split('\n').find(line => line.startsWith(`${optionalBlock.name}——`)) ?? '' : '';
-    // 叶数段写成字面量 1：条件叶的叶数位该是「这一块声明了几叶」，用
-    // optionalBlock.leaves.length 拼期望＝把被测对象的字段读回来当判据，性格块
-    // 增减一叶时这条断言照样照过。
+    const optionalRow = optionalBlock ? renderRows.find(line => line.startsWith(`${optionalBlock.name}——`)) ?? '' : '';
     check('prompts：条件叶成文在叶名串之后·叶数段之前（不占声明叶数·不进回退骨架）',
-        optionalName === '类型学速记'
-        && optionalRow.includes(`${optionalMarker}；1 叶；`)
-        && !DEFAULT_TEMPLATES.user.includes('类型学速记'),
+        !optionalBlock || !optionalName
+        || (optionalRow.includes(`${optionalMarker}；${optionalBlock.leaves.length} 叶；`)
+            && !DEFAULT_TEMPLATES.user.includes(optionalName)),
         `条件叶=${optionalName || '无'} 成文=${optionalRow.includes(optionalMarker)}`);
+
+    // 目录里有条件叶时，策展指令必须交代它的例外规则——两处独立维护（目录
+    // 数据、指令正文），目录加条件叶而指令没跟上，策展模型就不知道该叶的
+    // 选用口径。叶名从目录派生，不手抄第二份。
+    const optionalUnmentioned = PERSONA_BLOCK_CATALOG
+        .filter(block => block.optionalLeaf && !curatorText.includes(block.optionalLeaf.name))
+        .map(block => block.optionalLeaf?.name ?? '');
+    check('prompts：策展指令交代条件叶例外（按目录 optionalLeaf 名派生）',
+        optionalUnmentioned.length === 0,
+        `未交代=${optionalUnmentioned.join('/') || '无'}`);
 
     // 定义非空率：每叶的边界定义是策展模型的唯一依据（渲染文本之外它无处可
     // 见），漏填一叶在数据上无痕、只在效果上无痕。
@@ -340,83 +269,15 @@ function runPromptsChecks(): void {
         ...(block.optionalLeaf ? [block.optionalLeaf] : []),
     ]);
     const undefinedLeaves = definitionEntries.filter(entry => !entry.definition.trim());
-    check('prompts：目录 definition 非空率 100%（18 叶＋1 条件叶逐叶都有边界定义·且已渲染成文）',
+    check('prompts：目录 definition 非空率 100%（逐叶都有边界定义·且已渲染成文）',
         undefinedLeaves.length === 0 && renderCatalog().includes('｜'),
         `定义条目=${definitionEntries.length} 空定义=${undefinedLeaves.length}`);
 
-    check('prompts：机制挂载开放段在场',
-        curatorText.includes('<mechanism_mounts>') && curatorText.includes('示例之外出现任何机制同样挂载'));
-    // 「不超过 10」锁出现次数＝2（原则 3 与 [约束] 各一次）＝两处上限同值
-    // 同改：单改一处时另一处仍供给词面，策展指令两处口径矛盾会全绿。「地基
-    // 块之外」锁让位优先序的读法——删「之外」二字语义反转（弱块让位变地基
-    // 块让位），全部词面断言却照样绿。
-    check('prompts：策展收紧口径生效（上限 10 两处同值＋推得出的不选＋让位序＋元层剥离）',
-        curatorText.split('不超过 10').length - 1 === 2
-        && curatorText.includes('推得出的不选')
-        && curatorText.includes('每块只留最强信号的那几叶') && curatorText.includes('宁缺毋滥')
-        && curatorText.includes('地基块之外')
-        && !curatorText.includes('上限 16') && !curatorText.includes('不超过 16')
-        && !curatorText.includes('扮演红线') && !curatorText.includes('呈现偏好'));
+    check('prompts：机制挂载开放段在场', curatorText.includes('<mechanism_mounts>'));
 
-    // 提示词正文锁：策展段与档案段是两次独立请求。档案段正文引用「原则 7」这类
-    // 只有策展段才有的规则编号＝引用一个本请求读不到的判据（要填的键集合由
-    // <target_schema> 定死，它拿不到「哪些键本该空」），所以反向守门锁死这条。
-    // 跨段标记的完整三类扫描（原则 N／要求 N／策展段）在组装段那条断言里做——
-    // 它得扫填充后的档案段正文：模板正文里没有叶边界段成文，只扫模板等于把
-    // 「策展段保证」这类引用漏在射程外。期望值全部写字面量——从模板反推出来的
-    // 期望与模板同源，改回去照样恒绿。
-    const CURATOR_PRINCIPLE_7_KEYS = ['结构层键不自造、不改名', '不输出该键', '未入选的叶'];
-    const GEN_FILL_KEYS = ['绝不留空', '每个叶子键都必须有非空值'];
-    const missingCuratorKeys = CURATOR_PRINCIPLE_7_KEYS.filter(k => !curatorText.includes(k));
-    const missingGenKeys = GEN_FILL_KEYS.filter(k => !genText.includes(k));
-    check('prompts：策展/档案两段正文锁死（原则 7 逐叶裁叶＋「类型学速记」唯一例外＋档案段原口径绝不留空）',
-        missingCuratorKeys.length === 0 && missingGenKeys.length === 0
-        && curatorText.includes('「类型学速记」'),
-        `策展段缺=${missingCuratorKeys.join('/') || '无'} 档案段缺=${missingGenKeys.join('/') || '无'}`);
-
-    // 行为心理类块名串：behaviorBlockList() 私有的，全仓唯一消费面就是生成指令里
-    // 的这一处成文，所以判据落在成文上——期望是字面量五块串，函数里多一块、
-    // 少一块或改次序都会改动这一串而翻红，且不必为测试开新的导出面。
-    const BEHAVIOR_BLOCKS_LITERAL = '性格/言谈习惯/底线雷区/恋爱/NSFW';
-    check('prompts：行为心理类块名串＝字面量五块（生成端可扮演叶规则的适用范围）',
-        genText.includes(`行为心理类块（${BEHAVIOR_BLOCKS_LITERAL}）`),
-        `期望串=${BEHAVIOR_BLOCKS_LITERAL}`);
-
-    check('prompts：gen 值厚度与行为心理类传导',
-        genText.includes('总长 ≤40 个汉字') && genText.includes('行为心理类')
-        && !genText.includes('≤20 个汉字') && !genText.includes('长度上限 30 个汉字'));
-
-    // 档案段的生成契约（事实唯一归属）。期望值全部写字面量——从模板反推出来的
-    // 期望与模板同源，把模板改回旧版照样恒绿；归属顺序还要按序在场：① 挪到
-    // ④ 之后仍是一张归属表，却是一张判错的表。
-    const countOf = (needle: string): number => genText.split(needle).length - 1;
-    const REQUIRE_6_ORDER_LINES = [
-        '① 通用底线、原则性的不做与不许 → 底线雷区',
-        '② 他怎么称呼某个在场的人 → 既有关系·专属称谓',
-        '③ 嗓音、气味这类「一认就中」的记号 → 外貌·辨识标记',
-        '④ 压在他身上的外部要求 → 目标动机·外部义务',
-    ];
-    const REQUIRE_6_KEYS = [
-        '6. 事实唯一归属——同一条事实只写进一个叶，别处不再复述',
-        '走通顺序的第一条即归属处，不再往下问',
-    ];
-    let orderLineAt = -1;
-    const orderKeptInOrder = REQUIRE_6_ORDER_LINES.every(line => {
-        const at = genText.indexOf(line);
-        if (at <= orderLineAt) return false;
-        orderLineAt = at;
-        return true;
-    });
-    const missingRequire6 = REQUIRE_6_KEYS.filter(k => !genText.includes(k));
-    const missingOrderLines = REQUIRE_6_ORDER_LINES.filter(l => !genText.includes(l));
-    check('prompts：档案段要求 6 事实唯一归属在场（归属顺序 ①–④ 按序＋关键条款）',
-        orderKeptInOrder && missingRequire6.length === 0 && missingOrderLines.length === 0,
-        `按序=${orderKeptInOrder} 缺条款=${missingRequire6.join('/') || '无'} 缺归属顺序行=${missingOrderLines.join('/') || '无'}`);
-
-    // 要求 6 每个「→」后面的归属处必须落在目录里：① 指的是块（块内怎么分
-    // 由同一条里的分句随后细分），②③④ 指的是叶子键。裸块名与带前导散文的键
-    // 都在这里归位；带散文的键交给 resolveCatalogKey 从后缀回退，不靠放宽
-    // 正则蒙过去。
+    // 档案段「→」归属处必须落在目录里（指块或「块名·叶名」）：目录改名后
+    // 这些手写指针不会自己跟着改，模型会拿到一份自相矛盾的归属表。切片锚是
+    // 要求 6 的条头——条头改字时此处红，属于锚点维护（一处），不是散文锁。
     const require6Text = genText.slice(genText.indexOf('6. 事实唯一归属'), genText.indexOf(OWNERSHIP_TABLE_OPEN_TAG));
     const arrowAtoms = [...require6Text.matchAll(/→\s*([^；，。\s（(]+)/g)].map(m => m[1]);
     const unknownTargets = arrowAtoms.filter(a => (a.includes('·') ? resolveCatalogKey(a) === null : !CATALOG_BLOCK_NAMES.has(a)));
@@ -424,86 +285,42 @@ function runPromptsChecks(): void {
         arrowAtoms.length > 0 && unknownTargets.length === 0,
         `目标数=${arrowAtoms.length} 目录外=${unknownTargets.join('/') || '无'}`);
 
-    // 跨叶不复述半句挂在要求 3 的跨叶互补之后：它是那一条的续句（两半都管
-    // 「同一个事实不许写两遍」），挪到别的规则下面会被读成另一条规则的约束。
-    const noRestateAt = genText.indexOf('跨叶不复述：同一条事实已经在别的叶写明时');
-    const complementAt = genText.indexOf('跨叶互补：行为心理类块的叶合起来不许整体同向');
-    const noRestateTail = '呼应可以有，抄写没有——回应方向不同即不算复读，原句照搬才算';
-    check('prompts：档案段要求 3 追加「跨叶不复述」半句（原句保留·追加在跨叶互补之后）',
-        noRestateAt > 0 && complementAt > 0 && noRestateAt > complementAt && genText.includes(noRestateTail),
-        `跨叶互补位=${complementAt} 跨叶不复述位=${noRestateAt} 末句在场=${genText.includes(noRestateTail)}`);
-
-    // 三组反例同构：每组都要有「重复写法／为什么不合格／重写的版本／改法」四
-    // 栏。抽象规则对模型的约束力弱于真实反例，这三组是这一层唯一真正管用的
-    // 约束力来源——少一栏即判红，不接受「规则条目已经写了」这种替代。
-    const COUNTEREXAMPLE_COLUMNS: ReadonlyArray<readonly [string, number]> = [
-        ['  重复写法——', 3],
-        ['  为什么不合格：', 3],
-        ['  重写的版本——', 3],
-        ['  改法：', 3],
-    ];
-    const COUNTEREXAMPLE_TITLES = ['反例一 · ', '反例二 · ', '反例三 · '];
-    const brokenColumns = COUNTEREXAMPLE_COLUMNS.filter(([c, n]) => countOf(c) !== n);
-    const missingExTitles = COUNTEREXAMPLE_TITLES.filter(t => !genText.includes(t));
-    check('prompts：档案段三组反例四栏同构（重复写法/为什么不合格/重写的版本/改法 各三处＋三组标题在场）',
-        brokenColumns.length === 0 && missingExTitles.length === 0,
-        `栏数异常=${brokenColumns.map(([c, n]) => `${c.trim()}×${countOf(c)}≠${n}`).join(',') || '无'} 缺标题=${missingExTitles.join('/') || '无'}`);
-
-    // 归属优先级表：提示词里那份必须是 catalog 从 OWNERSHIP_PAIRS 渲染出来的。
-    // 整段逐字节相等锁住「表体没被手抄改字」；「段只能有一份」由 scripts/smoke.mjs
-    // 的标签符号计数断言兜住——在正文别处再摆一段完整表，那条锁的红是看不出来的
-    // （切片比较只看 OPEN 标签到 CLOSE 标签之间那一段）。
+    // 归属优先级表：提示词里那份必须是 catalog 从 OWNERSHIP_PAIRS 渲染出来的
+    // 接线位——表体单源派生，手抄进模板即在此红。
     const ownershipSection = genText.split(OWNERSHIP_TABLE_OPEN_TAG)[1]?.split(OWNERSHIP_TABLE_CLOSE_TAG)[0] ?? '';
-    check('prompts：档案段归属优先级表由 catalog 渲染（标签在场＋整段逐字节＝renderOwnershipTable）',
-        ownershipSection === `\n${renderOwnershipTable()}\n`,
-        `段长=${ownershipSection.length} 渲染=${renderOwnershipTable().length} 对数=${OWNERSHIP_PAIRS.length}`);
+    check('prompts：档案段归属优先级表由 catalog 渲染（标签在场＋整段＝renderOwnershipTable）',
+        ownershipSection === '\n' + renderOwnershipTable() + '\n',
+        `段长=${ownershipSection.length} 渲染=${renderOwnershipTable().length}`);
 
-    // 叶边界段在档案段是宏位成文（本次请求按策展 schema 收敛出行），所以模板
-    // 里判的是「段体只有宏位、标签在外」：宏位把段标签一起吞掉的话，切片比
-    // 就再也看不到标签有没有被填；标签在外则宏位只负责段体，填充值空到只剩段
-    // 标签这一层结构仍然在场。段头逐字＝逐字档 C-1b 原文（成文名与作用域交代
-    // 都钉在这一行）。
+    // 叶边界段在档案段是宏位（成文按本次策展 schema 收敛）：段体只有宏位、
+    // 标签在外——宏位把段标签一起吞掉的话，切片就看不到标签有没有被填。
     const definitionSection = genText.split(CATALOG_DEFINITIONS_OPEN_TAG)[1]?.split(CATALOG_DEFINITIONS_CLOSE_TAG)[0] ?? '';
-    const CATALOG_DEFINITIONS_HEADER_LITERAL = '[下面是本次 schema 里每个叶子键的边界——只出「这个键不装什么」。schema 里没有的键一律不输出。同一类事实按「归属优先级表」只写进一端，别处不重复叙述。]';
+    check('prompts：档案段叶边界段是宏位（模板段体＝{{catalog_definitions}}·标签在外）',
+        definitionSection === '\n{{catalog_definitions}}\n',
+        `模板段=${JSON.stringify(definitionSection)}`);
+
+    // 叶边界段静态成文：一叶一行、行首「块名」或「块名·叶名」落在真实块上
+    // （行首点名由渲染派生，这里守的是行形与点名可解析）。
     const staticDefinitionLines = renderCatalogDefinitions().split('\n');
-    // 叶行＝带「：」的行；段头说明行里没有全角冒号，天然不落进来（判据靠形状
-    // 而非靠「看起来像说明」，段头改字时这条不会误判）。
     const definitionRows = staticDefinitionLines.filter(l => l.indexOf('：') > 0);
-    const declaredLeafCount = PERSONA_BLOCK_CATALOG.reduce((n, block) => n + block.leaves.length, 0);
-    const optionalLeafCount = PERSONA_BLOCK_CATALOG.filter(block => block.optionalLeaf).length;
-    // 行首点名必须落在真实块上：模板叶出块名，其余叶出「块名·叶名」。
     const rowNamesValid = definitionRows.every(row => {
         const name = row.slice(0, row.indexOf('：'));
         return PERSONA_BLOCK_CATALOG.some(block => name === block.name || name.startsWith(`${block.name}·`));
     });
-    check('prompts：档案段叶边界段是宏位（模板段体逐字节＝{{catalog_definitions}}·段头首行＝逐字档 C-1b 原文·无位置指代）',
-        definitionSection === '\n{{catalog_definitions}}\n'
-        && staticDefinitionLines[0] === CATALOG_DEFINITIONS_HEADER_LITERAL
-        && !/[下上]方|以上/.test(staticDefinitionLines[0]),
-        `模板段=${JSON.stringify(definitionSection)} 段头逐字=${staticDefinitionLines[0] === CATALOG_DEFINITIONS_HEADER_LITERAL}`);
+    check('prompts：叶边界段静态成文一叶一行（每行冒号起头·行首落在真实块）',
+        definitionRows.length > 0 && rowNamesValid,
+        `行数=${definitionRows.length} 点名=${rowNamesValid}`);
 
-    check('prompts：叶边界段静态成文一叶一行（行数＝声明叶 18＋条件叶 1＝19·每行一个「块名·叶名」冒号·行首落在真实块）',
-        definitionRows.length === 19
-        && definitionRows.length === declaredLeafCount + optionalLeafCount
-        && optionalLeafCount === 1
-        && rowNamesValid,
-        `行数=${definitionRows.length} 声明叶=${declaredLeafCount} 条件叶=${optionalLeafCount} 点名=${rowNamesValid}`);
-
-    // 跨叶互指（设计层 F3 的真缺口，不做归属表合并）：排除半句里的「（…）」指着
-    // 别的叶，叶改名后这些指针会静默失效——档案段照着排除一个根本不存在的键，
-    // 本叶真正的边界反而没人守。解析规则按形态逐类定死：
-    //   ① 含「·」的原子＝「块名·叶名」键指针，必须命中 CATALOG_LEAF_KEYS；
-    //   ② 带「」的原子＝散文连写里的指针，只判引号内那半句，命中叶名或块名即可；
+    // 跨叶互指：排除半句「（…）」指着别的叶，叶改名后这些指针会静默失效——
+    // 档案段照着排除一个不存在的键，本叶真正的边界反而没人守。解析按形态：
+    //   ① 含「·」＝「块名·叶名」键指针，必须命中 CATALOG_LEAF_KEYS；
+    //   ② 带「」＝散文连写里的指针，只判引号内那半句，命中叶名或块名即可；
     //   ③ 其余裸原子必须命中叶名或块名。
-    // 散文尾豁免清单为空：锚点目录的定义括注全部是键指针形态，再出现散文尾
-    // 即翻红（旧目录靠豁免活着的四个散文尾已随目录重写消失）。
-    const PROSE_TAIL_POINTERS: ReadonlyArray<string> = [];
     const parenProblems: string[] = [];
     for (const row of definitionRows) {
         const body = row.slice(row.indexOf('：') + 1);
         for (const paren of body.matchAll(/（([^（）]*)）/g)) {
             for (const atom of paren[1].split(/[、，]/).map(a => a.trim()).filter(Boolean)) {
-                if (PROSE_TAIL_POINTERS.includes(atom)) continue;
                 const quoted = atom.match(/「([^」]+)」/);
                 const pointer = quoted ? quoted[1] : atom;
                 if (pointer.includes('·')) {
@@ -514,15 +331,14 @@ function runPromptsChecks(): void {
             }
         }
     }
-    check('prompts：叶边界段排除半句的跨叶互指全落在目录真实键上（块·叶／裸叶名／裸块名·零散文尾豁免）',
+    check('prompts：叶边界段排除半句的跨叶互指全落在目录真实键上（块·叶／裸叶名／裸块名）',
         parenProblems.length === 0,
         `目录外指针=${parenProblems.join(',') || '无'}`);
 
-    // 没有「不装：」半句的叶必须为 0：这类叶在定义段只能落兜底句，而兜底句换
-    // 不到任何边界信息（目录数据漏写「不装：」时该叶的边界即失守且无声）。
-    // 与上一条的 19 互为交叉校验——行数对得上、边界也真的写进去了。兜底句从
-    // catalog 导入：它是随提示词出厂的正文，不是普通期望值，抄第二份就等于
-    // 允许它两边各漂各的。
+    // 没有「不装：」半句的叶必须为 0：这类叶在定义段只能落兜底句，而兜底句
+    // 换不到任何边界信息（目录数据漏写「不装：」时该叶的边界即失守且无声）。
+    // 兜底句从 catalog 导入：它是随提示词出厂的正文，抄第二份等于允许两边
+    // 各漂各的。
     const fallbackLines = definitionRows.filter(l => l.endsWith(NO_EXCLUSION_TEXT));
     check('prompts：叶边界定义段无「不装」半句的叶＝0（兜底句零处）',
         fallbackLines.length === 0,
@@ -2661,5 +2477,5 @@ export async function runPersonaSmoke(): Promise<void> {
         process.exitCode = 1;
         return;
     }
-    console.info('[persona-smoke] OK：全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、锚点目录数据（目录叶集与策展目录逐叶相等·块序与块内叶序双向锁/叶总数＝18 绝对量/渲染文本整段逐字节相等/渲染行数＝目录条目数/骨架逐块叶集合＝字面量 6 块/归属对 4 对逐对相等且两端落在真实叶/条件叶成文位置与不占叶数·叶数段字面量/definition 非空率 100%/机制挂载段在场/策展收紧口径——上限 10 两处同值·推得出的不选·最强信号·宁缺毋滥·地基块之外让位）、提示词正文锁（策展段原则 7 四串在场、档案段绝不留空两串在场、行为心理类块名串＝字面量五块、值厚度 ≤40 汉字）、档案段生成契约（要求 6 事实唯一归属按序①–④与关键条款、每个「→」归属处落在真实块名或块·叶、要求 3 跨叶互补之后接跨叶不复述半句、三组反例四栏同构、归属优先级表整段＝catalog 渲染、叶边界段宏位且段头逐字、静态成文一叶一行·行数＝19、排除半句跨叶互指全落真实键、无「不装」半句的叶 0）、yaml 纯函数（分块/围栏·起手词补回判据行形态化——目录现值首叶行正例与散言反例）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（统一端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地·策展回退可见——curator 拒答回退内置骨架·标记置位·三段照发）、审稿回合（任务头字面＝[任务：审稿并修订]/判据层零命中仍无条件发出三段且末段认得出审稿指令/指令并进 messages 并携带整份档案＋末条是 user 审稿指令且全请求零 assistant 模型轮（审稿轮不带起手词）/审稿轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份修订落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶修订·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是审稿后的那一份·修订后档案逐字在框内/审稿轮收尾抛错（非 400 族）只降级不外抛·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了要修订却零改动即回滚/新增完全同值组拒·修订撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在审稿轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量三行、整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主侧修改后需确认）');
+    console.info('[persona-smoke] OK：全任务提示词引擎（Record 全键＋choice 17 模块红线/旧数组整键重建默认＋warn/两套 persona 默认/dump 按任务）、锚点目录与提示词的形状契约与跨源接线（策展清单行形·块名——叶名串；N 叶；/回退骨架行形/归属对两端落真实叶/条件叶成文位置·不占声明叶数·不进回退骨架/策展指令交代条件叶例外/definition 非空率 100%/机制挂载段在场/要求 6 归属处落真实键/归属优先级表整段＝catalog 渲染/叶边界段宏位/静态成文一叶一行·行首落真实块/排除半句跨叶互指落真实键/无「不装」半句的叶 0——提示词措辞面归 diff 评审不进机器锁）、yaml 纯函数（分块/围栏·起手词补回判据行形态化——目录现值首叶行正例与散言反例）＋档案叶级解析（叶层缩进取块内首叶·字段内联首叶/1 空格缩进叶不丢·单块与零叶档案按分类码报不可判定/宿主错误正文凑够两块形状闸放行·裸列表项与无主续行进无主行·未识别块与未识别叶分开计）＋确定性判据（列表承载叶与空值叶与契约占位排除/literal 必命中含靠标点表才成立的一对/反转版与语义改写零命中为预期/未识别块叶 0/归一两段分工机判·标点表逐条）、api 客户端形状（请求体两档/SSE 帧状态机/流内上游错误帧真实事故样本/error:null 反向守门/非流式错误帧）、端到端三段链（统一端点请求形状/curator→personaGen 引擎管线/流内错误帧去 prefill 重试＋轮内即学即用＋生成链不反写设置域/学习经组合根写穿设置域/已标记端点起手词摘除/重试仍失败不落标记＋错误 toast 在场/结果落地·策展回退可见——curator 拒答回退内置骨架·标记置位·三段照发）、审稿回合（任务头字面＝[任务：审稿并修订]/判据层零命中仍无条件发出三段且末段认得出审稿指令/指令并进 messages 并携带整份档案＋末条是 user 审稿指令且全请求零 assistant 模型轮（审稿轮不带起手词）/审稿轮 400 不触发去起手词重试·三段共 3 次请求·落降级态并保留首轮档案/整份修订落档·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶/皮毛漂移还原·未涉重叶的归一同值变体不落档/多行列表叶修订·模型行区间整段移植＋缩进按两侧行首空白差值平移/响应为空降级·结果框仍是首轮内容·不弹错误/store 路径结果框是审稿后的那一份·修订后档案逐字在框内/审稿轮收尾抛错（非 400 族）只降级不外抛·真因带栈进运行日志/骨架漂移拒·模型删叶整轮回滚/零变化拒绝·说了要修订却零改动即回滚/新增完全同值组拒·修订撞出同值新组即回滚/空值改写拒绝·整档抄写漏值不得清空原档/无围栏整档回执落档·宽松剥围栏后仍走骨架与逐叶合并守卫/四态文案逐字·失败原因白名单恰三项·空结果框显未运行态）、目录漂移告警（warn 打在审稿轮收尾·载荷只有计数与符号名不带档案内文·机制挂载块的叶不进计数·零漂移时一条不打）、persona 组装（curator 管线/persona_gen 管线占位符全填、档案段正文零跨段引用「原则 N·要求 N·策展段」、正文「块名·叶名」全落真实键、叶边界段随本次 schema 收敛且行集＝字面量三行、整段逐字节＝收敛成文、模块开关闭环）、全量注入空桶、store 互斥与显式保存点、CHAT_CHANGED 会话感知（lastRun 清空＋开场白重置默认档）、人设写回渲染通道（建档 initPersona 恰一次＋personas/描述符双写落地/两分支各刷一次列表/覆盖选中人设刷描述框＋镜像同步/覆盖非选中人设走 setUserAvatar 静默切换且不碰描述框与镜像）、切聊天取消 in-flight 生成（互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志落一条 persona 失败记录且无双记/切聊天落在世界书收集窗口内亦不写回旧会话 lastRun·请求不发出）、壳真钩子（人设 tab 描述符注册 onActivate 且只刷宿主派生快照·编辑现场不动）、写回保护（首次成功写回立基线故同值不打扰/宿主侧修改后需确认）');
 }

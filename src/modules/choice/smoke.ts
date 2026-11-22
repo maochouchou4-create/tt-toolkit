@@ -263,7 +263,6 @@ function runInjectionChecks(): void {
     const segment = allText.slice(allText.indexOf('<pool_entries>'), allText.indexOf('</pool_entries>'));
 
     check('池注入：pool_entries 段在场＋【候选风格】头句', allText.includes('<pool_entries>') && allText.includes('【候选风格】'));
-    check('池注入：菜单模式语义写进提示词文本（候选可能多于实际所需、按贴合度挑选）', allText.includes('候选可能多于实际所需') && allText.includes('贴合'));
     check('池注入：候选风格逐名编号渲染（1. 轻喜剧）', segment.includes('1. 轻喜剧') && segment.includes('2. 口是心非'));
     // 旧条目形态清零：分区标签不再存在；编号行内无全角冒号（旧形态 type：content
     // 拼行的判据——段首句以冒号收尾，段级 includes('：') 判不了）
@@ -273,11 +272,11 @@ function runInjectionChecks(): void {
         `段级编号行带冒号=${String(/^\d+\. .+：/m.test(segment))}`,
     );
 
-    // 池规则不再独立注入——<pool_rules> 段缺席，反 OOC 要点
-    // 整份写进模板 core_rules（<rules> 段），同一约束每请求只出现一份
+    // 池规则不再独立注入——<pool_rules> 退役段缺席，规则并入 <rules> 模板段
+    // （同一约束每请求只出现一份）。词面归模板正文，不进机器锁。
     check(
-        '池规则并入：无 <pool_rules> 独立段，反 OOC 要点在 <rules> 模板段',
-        !allText.includes('<pool_rules>') && allText.includes('<rules>') && allText.includes('从这个角色本来会的方式里来'),
+        '池规则并入：无 <pool_rules> 独立段，<rules> 模板段在场',
+        !allText.includes('<pool_rules>') && allText.includes('<rules>'),
     );
 
     const entTrace = result.trace.find(t => t.moduleId === 'inject_pool_entries');
@@ -795,30 +794,9 @@ function runAssemblyChecks(): string {
         `引用=${templateTagRefs.join(',')}`,
     );
     check('占位符替换（{{user}}/{{char}}/{{count}}）', !allText.includes('{{user}}') && !allText.includes('{{char}}') && !allText.includes('{{count}}') && allText.includes('王玉') && allText.includes('林霜'));
-    // G2 视角口径：规则/few-shot/指令三层全部第三人称混合视角
-    check('写作规则含三种推进视角（用户行动/角色主动/场景事件）', allText.includes('场景层面的事件') && allText.includes('主动行为'));
-    // 戏剧观两层同锁：规则第 3 条（约束层）＋ few_shot 写法对照段（示范层）
-    check('写作规则锁「见分晓拍」（正在发生、即将见分晓）', allText.includes('即将见分晓') && allText.includes('不写做完了的事后汇报'), `见分晓=${allText.includes('即将见分晓')}`);
-    check('few_shot 写法对照段在场（不要事后汇报／要见分晓）', allText.includes('写法对照') && allText.includes('不要（事后汇报）') && allText.includes('要（见分晓）'));
-    // 慢热闸：模板里唯一的推进闸（规则第 9 条），改成别的口径即翻红
-    check('写作规则含慢热闸（与记忆现状相称、一次只推一小格）', allText.includes('慢热闸') && allText.includes('一次只推一小格'), `慢热闸=${allText.includes('慢热闸')}`);
-    // 平行分支口径：同一刻的多种走法，彼此不互为前情（防递进式串联）。
-    // 三层同锁：平行分支规则（禁令）＋few-shot 引导句（示范层）＋任务指令（收尾层）
-    // ——只锁一层时另两层被改回串联形态不会翻红
-    check('写作规则＝同一刻的平行分支（各走一路、不互为前情）',
-        allText.includes('此刻同时摆开') && allText.includes('不互为因果') && allText.includes('不得被当成另一条的前情'),
-        `平行口径=${allText.includes('此刻同时摆开')}`);
-    // 风格轴口径：风格池菜单模式——风格决定姿态与笔调，一条一风格不重复，
-    // 不同风格＝不同行动（防「同一件事换语气」的换皮选项）
-    check('选项风格轴锁（一条一个风格、不重复；不同风格＝不同的行动）',
-        allText.includes('一条一个风格、不重复') && allText.includes('不同的行动') && allText.includes('不是同一件事换语气'),
-        `风格口径=${allText.includes('一条一个风格、不重复')}`);
-    check('平行口径三层同锁（规则/示例/指令）且旧措辞清零',
-        allText.includes('各走一路') && allText.includes('并排的') && !allText.includes('角度错开'),
-        `示例层=${allText.includes('各走一路')} 指令层=${allText.includes('并排的')}`);
-    check('第三人称硬约束在场（用角色名或他／她）', allText.includes('第三人称') && allText.includes('不用「你」'));
-    check('旧用户视角措辞清零', !allText.includes('以用户视角写') && !allText.includes('只写'));
-    check('few-shot 输出示例换血（反客为主/痛快应下/轻笑带过 在场，骤然断电退役）', allText.includes('反客为主') && allText.includes('痛快应下') && allText.includes('轻笑带过') && !allText.includes('骤然断电'));
+    // 写作规则的措辞面（见分晓拍/慢热闸/平行分支/风格轴/直球位等）不进机器
+    // 锁：模板正文属产品迭代面，散文回归归 diff 评审——机器只守结构契约
+    // （段标签/占位符/退役符号/条数基数）与行为面。
     const fewShot = config.modules.find(m => m.id === 'few_shot');
     const fewShotCount = fewShot && fewShot.kind === 'text' ? (fewShot.content.match(/"title":/g) ?? []).length : 0;
     check('few-shot 输出示例为 4 条（与恰好 N 条同基数；写法对照段另计）', fewShotCount === 4, `条数=${fewShotCount}`);
@@ -829,12 +807,11 @@ function runAssemblyChecks(): string {
     const outputFormat = config.modules.find(m => m.id === 'output_format');
     const coreRules = config.modules.find(m => m.id === 'core_rules');
     check(
-        'aim 退役：输出契约不再声明 aim 键（行动标签 2～6 字替代），写作规则段不提 aim',
-        outputFormat?.kind === 'text' && !outputFormat.content.includes('"aim":') && outputFormat.content.includes('2～6字')
+        'aim 退役：输出契约不再声明 aim 键，写作规则段不提 aim',
+        outputFormat?.kind === 'text' && !outputFormat.content.includes('"aim":')
             && coreRules?.kind === 'text' && !coreRules.content.includes('aim'),
         `format无aim=${outputFormat?.kind === 'text' ? String(!outputFormat.content.includes('"aim":')) : '（模块缺席）'} rules=${coreRules?.kind === 'text' ? String(!coreRules.content.includes('aim')) : '（模块缺席）'}`,
     );
-    check('生成指令口径＝下一步的行动选项/此刻并排的走法（task 与指令去重后）', allText.includes('下一步的行动选项') && allText.includes('并排的走法') && !allText.includes('为当前剧情提供'));
     check('任务指令收尾为 user 角色', result.messages[result.messages.length - 1]?.role === 'user');
     check('trace 全模块覆盖', result.trace.length === config.modules.length);
 
@@ -846,17 +823,12 @@ function runAssemblyChecks(): string {
     const extTrace = offResult.trace.find(t => t.moduleId === 'inject_external_slot');
     check('模块开关优先（关掉后不注入）', extTrace?.injected === false, `note=${extTrace?.note ?? '（无 trace）'}`);
 
-    // 池与模板的交付面锁：池侧扫风格名单单面（风格名即全部内容），模板侧
-    // 四锁（规则 6 新元素边界／规则 7 直球位／输出契约标题忠实性／few_shot
-    // 直球示例）——全是字面量锁，正文改字即翻红。
+    // 池交付面锁：风格名即池条目全部内容，扫题材词表防硬编码残留——池是
+    // 数据文件不是模板正文，数据质量可机判。模板侧措辞不在此锁（见上）。
     const { masterPool } = buildAssetPool();
     const BANNED = ['商队', '义体', '尸群', '丧尸', '公会', '师门', '末世', '辐射', '黑客', '修炼', '境界', '法宝', '灵根', '战技', '魔法', '江湖', '内力', '骑士', '精灵', '星舰', '机甲', '异能', '学院', '神殿', '祭坛', '神明', '侦探', '宫廷', '王朝', '战斗异能', '权谋斗争', '末日生存', '校园职场', '奇幻冒险', '科幻未来', '推理调查'];
     const bannedHits = (w: string) => masterPool.some(e => e.name.includes(w));
     check('asset：无题材硬编码残留（题材词表零命中）', !BANNED.some(bannedHits), BANNED.filter(bannedHits).join('/'));
-    check('写作规则锁「直接回应」直球位', allText.includes('至少一条选项是对它的直接回应') && allText.includes('不绕开、不岔走'));
-    check('输出契约锁标题忠实性（点出核心动作、不许埋在修饰里）', allText.includes('核心动作') && allText.includes('不许埋在修饰里'));
-    check('规则 6 锁新元素边界（背景服务＋不得偷走这一拍）', allText.includes('只能作背景') && allText.includes('不得偷走这一拍') && allText.includes('新元素不许把它挤掉'));
-    check('few_shot 直球示例换血（岔开话题退役）', allText.includes('痛快应下') && !allText.includes('岔开话题'));
 
     const traceText = renderTraceCompact(result);
     console.info(`[choice-smoke] trace: ${traceText}`);
