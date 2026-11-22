@@ -307,6 +307,20 @@ export function buildGenerateBody(messages: GenerateMessage[], config: GenerateR
             body.reverse_proxy = id.reverseProxy;
             body.proxy_password = id.proxyPassword;
         }
+        // 端点提示/密钥选择器逐字段镜像（宿主主聊天随行面，后端无条件读——
+        // 漏发即静默落默认端点；空值语义与宿主缺键等价，见 host/connection.ts
+        // 核实记录）。secret_id 宿主 trim 非空才发，此处同口径（空串与缺键
+        // 在后端 normalize_secret_id 同义，不发空串保持报文与主聊天一致）。
+        body.opencode_endpoint = id.opencodeEndpoint;
+        body.moonshot_endpoint = id.moonshotEndpoint;
+        body.zai_endpoint = id.zaiEndpoint;
+        body.siliconflow_endpoint = id.siliconflowEndpoint;
+        body.minimax_endpoint = id.minimaxEndpoint;
+        body.pollinations_endpoint = id.pollinationsEndpoint;
+        body.workers_ai_account_id = id.workersAiAccountId;
+        body.nanogpt_provider = id.nanogptProvider;
+        body.nanogpt_payg_override = id.nanogptPaygOverride;
+        if (id.secretId !== '') body.secret_id = id.secretId;
     }
     if (config.temperature !== undefined) body.temperature = config.temperature;
     body.stream = config.stream;

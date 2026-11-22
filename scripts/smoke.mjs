@@ -23,6 +23,7 @@ import { register } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { HARNESS_FILE_HEADER, transformDistFile } from './dev-harness/transform.mjs';
+import { MODEL_FIELDS } from './dev-harness/model-fields.mjs';
 
 const DIST_ENTRY = new URL('../dist/index.js', import.meta.url);
 // 子进程模式开关（boot2 隔离面，见文末二次启动段）：本脚本以 SMOKE_BOOT2_CHILD=1
@@ -121,8 +122,8 @@ const stubContext = {
         'stub_anchor': { value: '【锚点提示·stub】当前场景在旧货铺后院。', position: 0, depth: 0, scan: true, role: 0 },
     },
     // 跟随面：连接字段按宿主 oai_settings 形态（与 dev-harness/stubs.js
-    // 同一形态、分派表同源互指）；apis 冒烟经 __TT_SMOKE_STUBS__.getContext()
-    // 改写这些字段操控「酒馆当前连接」的各形态
+    // 同一形态；分派表＝model-fields.mjs 物理单源）；apis 冒烟经
+    // __TT_SMOKE_STUBS__.getContext() 改写这些字段操控「酒馆当前连接」的各形态
     chatCompletionSettings: {
         chat_completion_source: 'custom',
         custom_url: '',
@@ -139,24 +140,22 @@ const stubContext = {
         xai_model: '',
         zai_model: '',
         moonshot_model: '',
+        // 端点提示/密钥选择器（跟随镜像面，与 dev-harness/stubs.js 同一形态）
+        opencode_endpoint: '',
+        moonshot_endpoint: '',
+        zai_endpoint: '',
+        siliconflow_endpoint: '',
+        minimax_endpoint: '',
+        pollinations_endpoint: '',
+        workers_ai_account_id: '',
+        nanogpt_provider: '',
+        nanogpt_payg_override: false,
+        secret_id: '',
     },
     mainApi: 'openai',
     getChatCompletionModel() {
         const settings = stubContext.chatCompletionSettings;
-        const modelFields = {
-            custom: 'custom_model',
-            openai: 'openai_model',
-            claude: 'claude_model',
-            deepseek: 'deepseek_model',
-            makersuite: 'google_model',
-            google: 'google_model',
-            mistralai: 'mistralai_model',
-            openrouter: 'openrouter_model',
-            xai: 'xai_model',
-            zai: 'zai_model',
-            moonshot: 'moonshot_model',
-        };
-        const field = modelFields[settings.chat_completion_source];
+        const field = MODEL_FIELDS[settings.chat_completion_source];
         const model = field ? settings[field] : '';
         return typeof model === 'string' && model !== '' ? model : null;
     },
@@ -606,7 +605,7 @@ if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length
 // 见 src/main.ts runNodeSmoke 接线）
 // ---------------------------------------------------------------------------
 // PASS 行数精确断言（同上纪律）：增删断言同步 bump 期望值，沿革归 git 历史。
-const APIS_PASS_EXPECTED = 17;
+const APIS_PASS_EXPECTED = 19;
 const apisPassLines = boot1Lines.filter(l => l.startsWith('[apis-smoke] PASS'));
 const apisFailLines = boot1Lines.filter(MODULE_FAIL_LINE('apis'));
 if (apisPassLines.length !== APIS_PASS_EXPECTED || apisFailLines.length > 0) {

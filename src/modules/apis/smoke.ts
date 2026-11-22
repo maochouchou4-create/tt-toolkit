@@ -167,13 +167,13 @@ export function runApisSmoke(): void {
         process.exitCode = 1;
         return;
     }
-    console.info('[apis-smoke] OK：批量设置行与能力记忆十断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）＋跟随四断言（键归一坏值/跟随态路由与请求体/挡源 fail fast 与文案/状态快照三态与复位幂等）');
+    console.info('[apis-smoke] OK：批量设置行与能力记忆十断言（两行齐换/调参档保留/出站跟随/写穿 revision/删站收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）＋跟随六断言（键归一坏值/跟随态调参 override 与空档回落/跟随态路由与请求体含端点提示镜像/挡源 fail fast 与文案/状态快照三态与复位幂等）');
 }
 
 /** 冒烟 stub 访问（scripts/smoke.mjs 注入；类型只声明本文件用到的面）。 */
 interface FollowSmokeStubs {
     getContext(): {
-        chatCompletionSettings: Record<string, string>;
+        chatCompletionSettings: Record<string, string | boolean>;
         mainApi: string;
     };
 }
@@ -212,12 +212,22 @@ function runFollowChecks(): void {
         `route=${String(blockedRoute)}，msg=${blockedMsg}`,
     );
 
-    // ③ 跟随开＋可跟（custom 源填地址选模型）→ host 路由：忽略档案行
-    // （服务商已删、档案行未配置），调参档仍按任务默认
+    // ③ 跟随开＋档案行 override 调参档 → 跟随只换身份不换采样参数：
+    // override 半边（变异「跟随分支改发任务默认」在此红）
     conn.custom_url = 'https://follow.example/v1';
+    writeTaskProfiles({ choice: { providerId: '', model: '', temperature: 0.25, reasoningEffort: 'low' }, persona: { providerId: '', model: '' } });
+    const overrideRoute = resolveTaskRoute('choice');
+    check(
+        '跟随态调参：档案行 override 温度/思考生效',
+        overrideRoute !== null && overrideRoute.temperature === 0.25 && overrideRoute.reasoningEffort === 'low',
+        `route=${overrideRoute ? `t=${overrideRoute.temperature}，effort=${overrideRoute.reasoningEffort}` : 'null'}`,
+    );
+
+    // ③b 清空档案行 → 调参回落任务默认（默认半边）
+    writeTaskProfiles({ choice: { providerId: '', model: '' }, persona: { providerId: '', model: '' } });
     const followRoute = resolveTaskRoute('choice');
     check(
-        '跟随态路由：镜像宿主连接、忽略档案行、调参档仍生效',
+        '跟随态路由：镜像宿主连接、忽略档案行、空档回落任务默认',
         followRoute !== null
             && followRoute.providerId === ''
             && followRoute.identity.kind === 'host'
@@ -260,9 +270,37 @@ function runFollowChecks(): void {
             && proxyBody.reverse_proxy === 'https://rp.example/'
             && proxyBody.proxy_password === 'sk-rp'
             && !('custom_url' in proxyBody)
-            && proxyBody.model === 'gpt-follow',
+            && proxyBody.model === 'gpt-follow'
+            // 端点提示族无条件随行（空串=宿主缺省；secret_id 空＝不发，镜像宿主 trim 非空才发）
+            && proxyBody.moonshot_endpoint === ''
+            && proxyBody.workers_ai_account_id === ''
+            && proxyBody.nanogpt_payg_override === false
+            && !('secret_id' in proxyBody),
             `body=${proxyBody ? JSON.stringify(proxyBody) : 'null'}`,
         );
+
+        // ⑤b moonshot 源＋端点变体＋密钥选择器：逐字段镜像原样（漏发即静默
+        // 落默认端点——后端无条件读这批字段）
+        conn.chat_completion_source = 'moonshot';
+        conn.moonshot_model = 'm-ms';
+        conn.moonshot_endpoint = 'cn';
+        conn.secret_id = 'sec-1';
+        conn.nanogpt_payg_override = true;
+        const msRoute = resolveTaskRoute('choice');
+        const msBody = msRoute
+            ? buildGenerateBody([{ role: 'user', content: 'hi' }], routeToRequestConfig('choice', msRoute))
+            : null;
+        check(
+            '跟随态请求体：端点提示与密钥选择器逐字段镜像',
+            msBody !== null
+            && msBody.chat_completion_source === 'moonshot'
+            && msBody.moonshot_endpoint === 'cn'
+            && msBody.secret_id === 'sec-1'
+            && msBody.nanogpt_payg_override === true
+            && msBody.model === 'm-ms',
+            `body=${msBody ? JSON.stringify(msBody) : 'null'}`,
+        );
+        conn.nanogpt_payg_override = false;
 
         // ⑥ 挡源：claude 官方源 → null＋挡因文案点名，状态快照同步报挡
         conn.chat_completion_source = 'claude';
@@ -287,6 +325,10 @@ function runFollowChecks(): void {
     conn.proxy_password = '';
     conn.openai_model = '';
     conn.claude_model = '';
+    conn.moonshot_model = '';
+    conn.moonshot_endpoint = '';
+    conn.secret_id = '';
+    conn.nanogpt_payg_override = false;
     const offStatus = readFollowStatus();
     check(
         '跟随复位：关态三件归位（boot2 幂等前提）',

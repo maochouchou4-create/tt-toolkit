@@ -184,6 +184,17 @@ declare module '@sillytavern/scripts/st-context' {
          */
         chatCompletionSettings?: Record<string, unknown>;
         /**
+         * main_api 转发（'openai'＝聊天补全系主接口；跟随判挡消费）。
+         * @hostAnchor scripts/st-context.js:208 mainApi: main_api,
+         */
+        mainApi?: string;
+        /**
+         * 当前源→模型名单一出口转发（openai.js getChatCompletionModel
+         * 按 chat_completion_source 分派各 *_model 字段；未选返回 null）。
+         * @hostAnchor scripts/st-context.js:298 getChatCompletionModel,
+         */
+        getChatCompletionModel?: () => string | null;
+        /**
          * 全量世界书名快照（persona 书目分区）。
          * @hostAnchor scripts/st-context.js:293 getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
          */

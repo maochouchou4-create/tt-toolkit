@@ -13,7 +13,19 @@
  * - 身份解析在宿主后端（tt-application chat_completion_service/config.rs
  *   resolve_api_config）：custom 源 custom_url 非空→密钥取宿主 secret store
  *   CUSTOM 键；非 custom 源无反代→官方 URL＋按源取宿主密钥——**密钥全程
- *   不经过本扩展**，跟随只镜像源/模型/自定义地址/反代四件。
+ *   不经过本扩展**，跟随镜像源/模型/自定义地址/反代＋每源端点提示与
+ *   密钥选择器。
+ * - 端点提示随行面（scripts/openai.js sendOpenAIRequest）：opencode_
+ *   endpoint（:4485）、zai_endpoint（:4551）、siliconflow_endpoint
+ *   （:4557）、pollinations_endpoint（:4561）、minimax_endpoint（:4585）、
+ *   workers_ai_account_id（:4592）、nanogpt_provider/nanogpt_payg_override
+ *   （:4607）、moonshot_endpoint（:4613）、secret_id（:4376-4377，trim 非空
+ *   才发）。后端对这批字段无条件读 payload（config.rs:134-150）——不发
+ *   即空，用户选的端点变体（moonshot CN/opencode go/zai coding 等）会
+ *   静默落默认端点，跟随必须逐字段镜像。空串/缺键语义已核等价：string
+ *   缺键=空串（get_payload_string）、bool 缺键=false（get_payload_bool）、
+ *   secret_id 空串经 normalize_secret_id 过滤为 None 与缺键同义
+ *   （config.rs:407-409）——扩展端「读到什么发什么」即与宿主一致。
  *
  * 本层只做「窄接口收敛」：宿主宽松对象收窄成 HostConnection，判挡逻辑
  * （哪些源可跟）不在此层——守卫与档位清单住在消费侧 task-profiles
@@ -40,11 +52,28 @@ export interface HostConnection {
     reverseProxy: string;
     /** 反代通道密钥（oai_settings.proxy_password，普通设置字段非 secret） */
     proxyPassword: string;
+    /** 以下端点提示/密钥选择器字段：宿主各源 UI 的端点变体选择，空＝宿主缺省 */
+    opencodeEndpoint: string;
+    moonshotEndpoint: string;
+    zaiEndpoint: string;
+    siliconflowEndpoint: string;
+    minimaxEndpoint: string;
+    pollinationsEndpoint: string;
+    /** workers_ai 源的 Cloudflare account id（空＝后端报必填错，与宿主主聊天同行为） */
+    workersAiAccountId: string;
+    nanogptProvider: string;
+    nanogptPaygOverride: boolean;
+    /** 宿主密钥库条目选择器（多密钥用户选哪条；空＝按源默认键取） */
+    secretId: string;
 }
 
 function readStringField(settings: Record<string, unknown> | undefined, key: string): string {
     const value = settings?.[key];
     return typeof value === 'string' ? value : '';
+}
+
+function readBoolField(settings: Record<string, unknown> | undefined, key: string): boolean {
+    return settings?.[key] === true;
 }
 
 /**
@@ -71,5 +100,15 @@ export function readHostConnection(): HostConnection | null {
         opencodeApiFormat: readStringField(settings, 'opencode_api_format'),
         reverseProxy: readStringField(settings, 'reverse_proxy'),
         proxyPassword: readStringField(settings, 'proxy_password'),
+        opencodeEndpoint: readStringField(settings, 'opencode_endpoint'),
+        moonshotEndpoint: readStringField(settings, 'moonshot_endpoint'),
+        zaiEndpoint: readStringField(settings, 'zai_endpoint'),
+        siliconflowEndpoint: readStringField(settings, 'siliconflow_endpoint'),
+        minimaxEndpoint: readStringField(settings, 'minimax_endpoint'),
+        pollinationsEndpoint: readStringField(settings, 'pollinations_endpoint'),
+        workersAiAccountId: readStringField(settings, 'workers_ai_account_id'),
+        nanogptProvider: readStringField(settings, 'nanogpt_provider'),
+        nanogptPaygOverride: readBoolField(settings, 'nanogpt_payg_override'),
+        secretId: readStringField(settings, 'secret_id'),
     };
 }

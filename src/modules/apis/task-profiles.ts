@@ -153,6 +153,17 @@ export interface TaskRouteHostIdentity {
     customUrl: string;
     reverseProxy: string;
     proxyPassword: string;
+    /** 每源端点提示与密钥选择器（宿主后端无条件消费——漏发即落默认端点，见 host/connection.ts 核实记录） */
+    opencodeEndpoint: string;
+    moonshotEndpoint: string;
+    zaiEndpoint: string;
+    siliconflowEndpoint: string;
+    minimaxEndpoint: string;
+    pollinationsEndpoint: string;
+    workersAiAccountId: string;
+    nanogptProvider: string;
+    nanogptPaygOverride: boolean;
+    secretId: string;
 }
 
 export type TaskRouteIdentity = TaskRouteProviderIdentity | TaskRouteHostIdentity;
@@ -267,6 +278,16 @@ function hostIdentityFrom(conn: HostConnection): TaskRouteHostIdentity {
         customUrl: conn.customUrl,
         reverseProxy: conn.reverseProxy,
         proxyPassword: conn.proxyPassword,
+        opencodeEndpoint: conn.opencodeEndpoint,
+        moonshotEndpoint: conn.moonshotEndpoint,
+        zaiEndpoint: conn.zaiEndpoint,
+        siliconflowEndpoint: conn.siliconflowEndpoint,
+        minimaxEndpoint: conn.minimaxEndpoint,
+        pollinationsEndpoint: conn.pollinationsEndpoint,
+        workersAiAccountId: conn.workersAiAccountId,
+        nanogptProvider: conn.nanogptProvider,
+        nanogptPaygOverride: conn.nanogptPaygOverride,
+        secretId: conn.secretId,
     };
 }
 

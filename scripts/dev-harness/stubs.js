@@ -1,14 +1,19 @@
 /*
- * dev-harness 宿主 stub（经典脚本，在产物模块之前加载——模块脚本延迟
- * 执行，stub 装配先于产物求值，装配序不变）。
+ * dev-harness 宿主 stub（module 脚本，在产物模块之前加载——模块按文档
+ * 序延迟执行，装配序不变；module 化是为了与 node 冒烟共享 model-fields.mjs
+ * 物理单源，serve.mjs 的 MIME 表已含 .mjs）。
  * 只实现 tt-toolkit 实际消费的最小面（消费面清单见 README.md），
  * 全部内存态——刷新即重置，可反复折腾布局而不污染真实酒馆。
  *
+
  * __TT_HARNESS__ 的键与 dist 产物的全部外部 import（12 条）
  * 一一对应（build.mjs 的 STUBS 表同构）；另有窗口级全局（window.$ /
  * SillyTavern.getContext / quickReplyApi / toastr）按
  * 宿主挂载形态放到 globalThis 上。
  */
+
+import { MODEL_FIELDS } from './model-fields.mjs';
+
 (() => {
     'use strict';
 
@@ -205,28 +210,25 @@
             xai_model: '',
             zai_model: '',
             moonshot_model: '',
+            // 端点提示/密钥选择器（跟随镜像面，与 scripts/smoke.mjs stubContext 同一形态）
+            opencode_endpoint: '',
+            moonshot_endpoint: '',
+            zai_endpoint: '',
+            siliconflow_endpoint: '',
+            minimax_endpoint: '',
+            pollinations_endpoint: '',
+            workers_ai_account_id: '',
+            nanogpt_provider: '',
+            nanogpt_payg_override: false,
+            secret_id: '',
         },
         // 跟随面：主接口名（'openai'＝聊天补全系，宿主 main_api 同名转发）
         mainApi: 'openai',
         // 跟随面：按源分派模型字段（镜像宿主 openai.js getChatCompletionModel
-        // 的分派形态，常用源子集；未映射源返回 null＝未选模型，判挡安全兜底。
-        // 分派表与 scripts/smoke.mjs 的 stubContext 同源互指，改表两处同步）
+        // 的分派形态；表在 model-fields.mjs 物理单源，与 node 冒烟共享）。
         getChatCompletionModel() {
             const settings = context.chatCompletionSettings;
-            const modelFields = {
-                custom: 'custom_model',
-                openai: 'openai_model',
-                claude: 'claude_model',
-                deepseek: 'deepseek_model',
-                makersuite: 'google_model',
-                google: 'google_model',
-                mistralai: 'mistralai_model',
-                openrouter: 'openrouter_model',
-                xai: 'xai_model',
-                zai: 'zai_model',
-                moonshot: 'moonshot_model',
-            };
-            const field = modelFields[settings.chat_completion_source];
+            const field = MODEL_FIELDS[settings.chat_completion_source];
             const model = field ? settings[field] : '';
             return typeof model === 'string' && model !== '' ? model : null;
         },
