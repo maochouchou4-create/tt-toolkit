@@ -36,7 +36,7 @@ export const TEXT = {
     SCHEMA_FALLBACK_BRIEF: '策展模板不可用，本次按内置骨架生成',
 
     /**
-     * 复核简报四态：与 persona 其余文案同住一处（同一个 tab 的文案分两家，
+     * 审稿简报四态：与 persona 其余文案同住一处（同一个 tab 的文案分两家，
      * 改文案的人必然只翻到其中一家）。
      *
      * 它渲染在结果框正下方的一行里，**不并进结果框**：结果框经 upsertPersona
@@ -47,15 +47,15 @@ export const TEXT = {
      * （模型原始报错进不来），逻辑层的失败原因类型直接从它派生——类型即白名单。
      */
     REVIEW_BRIEF: {
-        /** 已改写：count＝归一后真变叶数（未涉重叶不进），键按档案扫描顺序列出（块·叶）。 */
-        REWRITTEN: (count: number, keys: string) => `模型复核：已改写 ${count} 个字段 —— ${keys}`,
-        NONE: '模型复核：未发现重复',
-        FAILED: (reason: string) => `模型复核：没能跑完，已保留上一版结果 —— ${reason}`,
-        /** 未进复核（结果框为空／还没生成过）——与「跑了没发现」必须分得开。 */
-        NOT_RUN: '模型复核：未运行',
+        /** 已修订：count＝归一后真变叶数（未涉重叶不进），键按档案扫描顺序列出（块·叶）。 */
+        REWRITTEN: (count: number, keys: string) => `模型审稿：修订 ${count} 处 —— ${keys}`,
+        NONE: '模型审稿：无可挑剔',
+        FAILED: (reason: string) => `模型审稿：没能跑完，已保留上一版结果 —— ${reason}`,
+        /** 未进审稿（结果框为空／还没生成过）——与「跑了没挑出毛病」必须分得开。 */
+        NOT_RUN: '模型审稿：未运行',
         FAILURE_REASON: {
             EMPTY: '响应为空',
-            UNUSABLE: '解析不了复核结果',
+            UNUSABLE: '解析不了审稿结果',
             REQUEST: '请求失败',
         },
     },

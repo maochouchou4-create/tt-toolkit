@@ -17,7 +17,7 @@ export type PromptRole = 'system' | 'user' | 'assistant';
  * schema 填充人设）。任务集形态 Record<TaskKey, PromptConfig>
  * （DEFAULT_PROMPT_CONFIGS，代码常量，无存储面）。
  *
- * 键数与「一次生成发几轮」不是一回事：人设链现在发三轮，第三轮（查重复核）
+ * 键数与「一次生成发几轮」不是一回事：人设链现在发三轮，第三轮（审稿修订）
  * 刻意不占任务键——它的指令与返回格式是一份契约，可编辑＝可静默降级
  * （见 src/prompts/review.ts）。
  */

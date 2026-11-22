@@ -40,7 +40,7 @@ const SCHEMA_KEY_LINE_RE = /^\s*([^\s\-:，。！？；、,.!?;…“”‘’"'
  * （isSchemaSkeleton）与 prefill 补回判据（generation-wrap 的
  * resumesPrefillHead）共用——两处判的是同一件事「这一行是 YAML 键行还是
  * 散文」，口径必须同源：补回侧宽一档会把散言前导误黏上起手词，严一档
- * 会把真实叶行漏掉（首块头静默丢失、首块叶逃出复核轮的叶级守卫）。
+ * 会把真实叶行漏掉（首块头静默丢失、首块叶逃出审稿轮的叶级守卫）。
  */
 export function isStrictKeyLine(line: string): boolean {
     return SCHEMA_KEY_LINE_RE.test(line);
@@ -254,7 +254,7 @@ export interface ProfileLeafRow {
     /**
      * 该叶在 `splitProfileLines` 结果里的行号跨度（0 基，含首行含末行）。
      *
-     * 消费方：按「块·叶」精确改写那一轮复核（整叶替换＝替换 [lineStart,
+     * 消费方：按「块·叶」精确修订那一轮审稿（整叶替换＝替换 [lineStart,
      * lineEnd] 这段行，而不是全档正则替换——正则替不掉缩进与列位，替了就把
      * 档案排版改掉）。
      */
@@ -339,7 +339,7 @@ function normalizeIndent(line: string): string {
 }
 
 /**
- * 值在该行里的起始下标（复核轮的整叶替换靠它保留键前缀逐字）。
+ * 值在该行里的起始下标（审稿轮的整叶替换靠它保留键前缀逐字）。
  *
  * 两个键正则都是「从键一路匹配到行尾」，`match[0].length` 量的是**整行剩余
  * 部分**的长度，不是「键 ＋ 冒号」的长度：直接拿它当值起点，改写会落在原值
@@ -354,7 +354,7 @@ function valueStartIn(indent: number, matched: RegExpMatchArray, value: string):
 
 /**
  * 档案正文的行切分（**档案段那一路的唯一定义**，本文件下半段的扫描器与
- * 复核轮的行级改写共用它）。
+ * 审稿轮的行级修订共用它）。
  *
  * 三件事在这里定死，各消费方不再各做一遍：剥围栏、制表符折算、按物理行切。
  * 改写那一轮要按 `ProfileLeafRow.lineStart/lineEnd/valueStart` 定位回原行，
@@ -510,7 +510,7 @@ export function shapeOfScan(result: ProfileScan | null): ProfileShape {
  * 形状闸只看得见块数与叶数，所以它必然放过「两个顶层块各挂一叶」的宿主错误
  * 正文。**该形态目前无守卫**：不抛错的目录对照体检只收「目录内块里写出的
  * 目录外叶」（catalogDriftLeaves），两块整块在目录外的错误正文落在它的口径
- * 之外恒不触发。这是取舍不是漏写——语义查重的判据面（analyzeRedundancy）
+ * 之外恒不触发。这是取舍不是漏写——语义判据面（analyzeRedundancy）
  * 随死码退役是有意决策，形状层不因少一个判据面就自行加码。
  */
 export function checkProfileShape(text: unknown): ProfileShape {

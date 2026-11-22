@@ -154,7 +154,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             requestText: domain.userContext.request,
             resultText: domain.userContext.result,
             /**
-             * 最近一次结果的复核简报态（内存态，**不落域**）。
+             * 最近一次结果的审稿简报态（内存态，**不落域**）。
              *
              * 不落域有两层理由：它是 UI 文案不是档案数据（落进 userContext 就会
              * 经 upsertPersona 进宿主 persona_description、经 inject_persona 进
@@ -200,7 +200,7 @@ export const usePersonaStore = defineStore('tt-persona', {
             return this.resultText.trim().length > 0;
         },
         /**
-         * 复核简报的展示态（四态文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
+         * 审稿简报的展示态（四态文案在 strings.ts 的 TEXT.REVIEW_BRIEF）。
          *
          * 派生而非各处置一份文案：结果框被用户手改清空时 hasResult 为假，简报
          * 必须回到「未运行」——那一档描述的是结果框，空框上还挂着「已改写 N 个
@@ -226,8 +226,8 @@ export const usePersonaStore = defineStore('tt-persona', {
             const domain = readPersonaDomain();
             this.requestText = domain.userContext.request;
             this.resultText = domain.userContext.result;
-            // 读回来的是上一会话落盘的结果，本会话没有复核过它——简报复位成
-            // 未运行（域里根本没有这个字段，落盘的档案不带复核结论）；策展
+            // 读回来的是上一会话落盘的结果，本会话没有审稿过它——简报复位成
+            // 未运行（域里根本没有这个字段，落盘的档案不带审稿结论）；策展
             // 回退标记同理复位。
             this.reviewBrief = REVIEW_BRIEF_NOT_RUN;
             this.schemaFallback = false;
@@ -284,7 +284,7 @@ export const usePersonaStore = defineStore('tt-persona', {
 
         // ---------------- 人设分区：生成/重 roll ----------------
 
-        /** 生成（三轮链：策展→填充→复核）。互斥：isProcessing 期间静默忽略。 */
+        /** 生成（三轮链：策展→填充→审稿）。互斥：isProcessing 期间静默忽略。 */
         async generate() {
             if (this.isProcessing) return;
             const api = buildApiConfig();

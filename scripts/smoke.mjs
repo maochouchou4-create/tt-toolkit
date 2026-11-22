@@ -615,18 +615,17 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 端到端 1：curator 段遇信封即中断、第二段不发出）＋策展目录与提示词正文
 // （本节小计不写死数字——check 只增不减，写死的数已漂过两轮，构成以下面
 // 的枚举为准、总数以 PERSONA_PASS_EXPECTED 机判为准；枚举：骨架逐块叶集合＝字面量期望、渲染行数＝目录条目数、L0 目录叶集与策展目录逐叶
-// 相等（含块序与块内叶序）、叶总数＝191 绝对量、L0 旧叶名逐个不在目录里、
-// L0 归属优先级对 10 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
-// 之前·叶数段字面量、目录 definition 非空率 100%、countText 覆盖词面只配模板叶块、
+// 相等（含块序与块内叶序）、叶总数＝18 绝对量、
+// L0 归属优先级对 4 对逐对相等且两端落在真实叶、条件叶成文在叶名串之后叶数段
+// 之前·叶数段字面量、目录 definition 非空率 100%、
 // L0 策展清单渲染文本整段逐字节相等、策展/档案两段正文锁死（原则 7 逐叶裁叶＋
-// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量九块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推不出才选＋让位序＋元层剥离、推论名单块名串＝手抄字面量六块、
+// 档案段原口径绝不留空；档案段零跨段引用改由组装段那条三类标记全扫判）、行为心理类块名串＝字面量五块、机制挂载开放段在场、策展收紧口径生效·上限 10 两处同值＋推得出的不选＋让位序＋元层剥离、
 // gen 值厚度与行为心理类传导）
-// ＋档案段生成契约 11（要求 7 事实唯一归属：归属顺序 ①–⑦ 按序＋关键条款与末句
-// 三维度例外；每个「→」归属处落在真实块名或「块名·叶名」；规则 4 跨叶不复述
+// ＋档案段生成契约 11（要求 6 事实唯一归属：归属顺序 ①–④ 按序＋关键条款；每个「→」归属处落在真实块名或「块名·叶名」；要求 3 跨叶不复述
 // 半句追加在跨叶互补之后；三组反例五栏同构——重复写法/为什么不合格/重写的版本
 // 各三处＋改法 2 处＋为什么合格 1 处；归属优先级表整段逐字节＝catalog 渲染；
 // 叶边界段在模板里是宏位（段体逐字节＝{{catalog_definitions}}）且段头首行逐字
-// ＝逐字档 C-1b、无位置指代；静态成文一叶一行且行数＝192（声明叶 191＋条件叶
+// ＝逐字档 C-1b、无位置指代；静态成文一叶一行且行数＝19（声明叶 18＋条件叶
 // 1）；排除半句里的跨叶互指全落在目录真实键上（块·叶／裸叶名／裸块名·散文尾
 // 豁免）；无「不装」半句的叶 0 兜底句零处——行数与兜底数互为交叉校验）
 // ＋流内上游
@@ -639,7 +638,7 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 缩进时拿上一个叶当基准会把末叶吞进中叶；列表承载叶与空值叶先排除：不排除即
 // 4 叶两两互判 6 对假命中；块首行内联的首叶不丢：档案段 prefill 从冒号之后接写，
 // 首叶不在缩进行上；1 空格缩进的叶仍算叶＋反向用例：切块口径缩进 ≤1 算块界，该文本
-// 走切块两块皆空即零叶而报告与「无重复」不可区分；单块档案按分类码 SINGLE_BLOCK
+// 走切块两块皆空即零叶而报告与「无需修改」不可区分；单块档案按分类码 SINGLE_BLOCK
 // 拒判＋反向用例：单顶层键整块去缩进分支会丢顶层键；机制挂载块的原生叫法不再整行
 // 丢弃且未识别块与未识别叶分开计；裸列表项与无主续行进无主行、不再静默丢弃；宿主
 // 错误正文报 NO_LEAVES：它有 2 个顶层「块」，只靠块数放行等于没校验；错误正文凑够
@@ -650,13 +649,13 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 字符各一条只有它能成立的断言）
 // ＋复核回合 15（判据层零命中仍无条件发出第三段·末段按指令首行认得出是复核段；
 // 指令并进 messages 并携带整份档案＋末条是 user 的查重指令且整份请求里没有任何
-// assistant 模型轮——复核轮不带起手词（读实发 body，不读传入的那份 messages）；
-// 复核轮 400 不触发去起手词重试（三段共 3 次请求）·失败落降级态并保留首轮档案——
+// assistant 模型轮——审稿轮不带起手词（读实发 body，不读传入的那份 messages）；
+// 审稿轮 400 不触发去起手词重试（三段共 3 次请求）·失败落降级态并保留首轮档案——
 // 「不带起手词是本轮的决定」与「端点不支持起手词」两条路径不混；整份重输出落档
 // ·改后档案逐字＝只换真变叶的那一份·简报按块·叶点名真变叶；皮毛漂移还原·未涉
 // 重叶的归一同值变体不落档；多行列表叶改写·模型行区间整段移植＋缩进按两侧行首
 // 空白差值平移；响应为空降级·结果框仍是首轮内容·不弹错误；store 路径的结果框
-// 是复核后的那一份而非改写前的首轮档案；复核轮收尾抛错（非 400 族）只降级不外抛
+// 是审稿后的那一份而非改写前的首轮档案；审稿轮收尾抛错（非 400 族）只降级不外抛
 // ·结果框仍首轮内容·不弹错误·真因带栈进运行日志——降级保证是结构性的不挑失败
 // 形态；骨架漂移拒·模型删叶整轮回滚；零变化拒绝与新增完全同值组拒——说了有重复
 // 却零改动／改写撞出同值新组均回滚；空值改写拒绝·整档抄写漏值不得清空原档——
@@ -664,8 +663,8 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 守卫；四态文案逐字＋失败原因白名单恰三项＋空结果框
 // 显未运行态）
 // ＋目录漂移告警 3（判据层一条：catalogDriftLeaves 只装「目录内块里写出的
-// 目录外叶」，机制挂载块的叶与无主行都不进；接线侧两条：warn 打在复核轮
-// 收尾——模型回「无重复」那条最常见的路也打，载荷只有计数与符号名不带档案
+// 目录外叶」，机制挂载块的叶与无主行都不进；接线侧两条：warn 打在审稿轮
+// 收尾——模型回「无需修改」那条最常见的路也打，载荷只有计数与符号名不带档案
 // 内文；零计数时一条 warn 都不打）＋切聊天取消 in-flight 2（会话切换中止
 // 进行中那轮：互斥即刻复位＋结果不误写＋lastRun 清空/取消在运行日志留痕
 // ——传输层单一写入点落一条 persona 失败记录且无双记）＋壳真钩子 2（人设
@@ -690,7 +689,7 @@ if (!boot1Lines.some(l => l.startsWith('[choice-smoke] PASS') && l.includes('deb
 // 逐字锁 1 随机制退役删除 ＝ −2。
 // ＝ v2.2.0 判据结构化批：起手词补回判据白名单负例删除−1、行形态正反例＋2、
 // 策展回退可见 e2e＋1 ＝ 148。
-const PERSONA_PASS_EXPECTED = 148;
+const PERSONA_PASS_EXPECTED = 146;
 const personaPassLines = boot1Lines.filter(l => l.startsWith('[persona-smoke] PASS'));
 const personaFailLines = boot1Lines.filter(MODULE_FAIL_LINE('persona'));
 if (personaPassLines.length !== PERSONA_PASS_EXPECTED || personaFailLines.length > 0) {
@@ -841,7 +840,7 @@ if (seg2ChoicePass !== CHOICE_PASS_EXPECTED || seg2PersonaPass !== PERSONA_PASS_
 // ＝收官版本。版本 bump＝五处同步改——漏改任何一处这里红；dist 内嵌一处
 // 专防「src 已 bump 而 dist 未重建」（构建链漏跑）。
 // ---------------------------------------------------------------------------
-const EXPECTED_VERSION = '2.2.0';
+const EXPECTED_VERSION = '3.0.0';
 const readJsonVersion = rel => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')).version;
 // 行首锚防注释骗门：version.ts 里出现同款式注释行（如「旧：export const
 // version = '…';」）时，无锚正则会取到注释值——注释值恰等于期望即假绿
@@ -908,4 +907,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/候选风格注入/自动生成守卫链＋请求超时与取消两语义分流——风格池 57 名纯随机抽、菜单模式多抽候选、aim 键退役），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与复核回合（空值拒绝＋无围栏整档）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序＋三组反例五栏＋叶边界段宏位与静态 192 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);
+console.log(`[smoke] OK：dist 加载成功，roundtrip ${roundtripLines.length} 条全 PASS，探测清单已打印，nav dump 口在场，P1 回归（存量 nav 域退役字段丢弃）通过；choice 机判 ${choicePassLines.length} 条全 PASS（组装注入/解析回退＋池抽取分布/候选风格注入/自动生成守卫链＋请求超时与取消两语义分流——风格池 57 名纯随机抽、菜单模式多抽候选、aim 键退役），__TT_TOOLKIT__.prompts 全局口在场（dump 按任务，默认模板三任务键齐备）；persona 机判 ${personaPassLines.length} 条全 PASS（统一端点请求形状与 SSE/三段链端到端与审稿回合（空值拒绝＋无围栏整档＋任务头字面）＋目录漂移告警/生成可停止/破限注入前缀/store 互斥与显式保存点/CHAT_CHANGED 会话感知清空/档案段生成契约：归属顺序①–④＋三组反例四栏＋叶边界段宏位与静态 19 行＋跨叶互指落真键/组装段：档案段零跨段引用＋「块名·叶名」全落真键＋叶边界段按本次 schema 收敛）；apis 机判 ${apisPassLines.length} 条全 PASS（任务档案批量写两行齐换/调参档保留/出站路由跟随/store 写穿 revision/删站联动收尾/noPrefill 归一兼容/路由带出 providerId 与 noPrefill/记忆复位写穿＋revision 精确自增/悬空与重复写入静默/请求配置构造器两任务同形与不发 max_tokens）；boot2 二次启动（子进程隔离整图重求值）no-op 通过（冒烟重跑 choice ${seg2ChoicePass}/persona ${seg2PersonaPass}/apis ${seg2ApisPass} 全 PASS）；退休符号 generateRaw dist 计数 0（apiSource/apiProfiles 由域结构断言保证退休）；版本链五处（version.ts/manifest.json/package.json/dist 内嵌字面量）一致＝${EXPECTED_VERSION}；产物漂移门过（dist 现产物经 transform 转换与 dist-harness/ ${expectedHarnessNames.length} 个文件逐字一致）。`);

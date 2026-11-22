@@ -4,7 +4,7 @@
  * nav dump → initChoiceMinimal()（不挂 DOM 的最小初始化）→
  * installPromptsPort() → runChoiceSmoke() → initApis()（域装载）→
  * initPersona() → runPersonaSmoke()（提示词引擎/纯函数/api 形状/
- * 端到端/复核回合）→ runApisSmoke()（apis 域机判收尾：十断言，批量设置行
+ * 端到端/审稿回合）→ runApisSmoke()（apis 域机判收尾：十断言，批量设置行
  * 两行齐换，夹具自持清场）→ boot 收尾标记（消费侧等待面）。
  *
  * 独立成件（批 A 发布件分块）：经入口动态 import 按需加载——浏览器分支

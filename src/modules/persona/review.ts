@@ -1,8 +1,8 @@
 /**
- * 复核回合的结论落地（纯逻辑层：无 IO、不发请求、不碰存储、不管文案）。
+ * 审稿回合的结论落地（纯逻辑层：无 IO、不发请求、不碰存储、不管文案）。
  *
  * 一件事：**把模型那一轮的回复落成档案**。回执与指令是同一份契约的两态：
- * 「无重复」四字，或改好后的整份档案（yaml 围栏）。整档回执**不直接采用**——
+ * 「无需修改」四字，或修订后的整份档案（yaml 围栏）。整档回执**不直接采用**——
  * 直接采用等于把档案定稿权交给模型输出的稳定性——而是走「剥围栏 → 扫描 →
  * 骨架对账 → 逐叶合并守卫 → 改后校验」，任一步不过就抛 `ReviewUnusableError`
  * ——**只有这一种异常类型出这道门**，调用方据此回滚到首轮档案并降级提示。
@@ -13,8 +13,8 @@
  * 的档案）。
  *
  * 边界（与判据层同一条纪律）：这里只做苦力——剥围栏、扫描、骨架对账、逐叶
- * 合并、校验、出简报**数据**。**不判语义、不做触发器、不删东西**：哪两叶在
- * 说同一件事、改成什么，由模型说；合并只决定模型给的值收不收、以哪种形态收。
+ * 合并、校验、出简报**数据**。**不判语义、不做触发器、不删东西**：哪个叶有
+ * 写法病、改成什么，由模型说；合并只决定模型给的值收不收、以哪种形态收。
  * 文案不在本文件（同一 tab 的文案唯一真源是 strings.ts 的 TEXT.REVIEW_BRIEF），
  * 本文件只出态。
  */
@@ -26,23 +26,23 @@ import { scanProfileLeaves, shapeOfScan, splitProfileLines } from './yaml';
 /**
  * 返回契约在代码里的字面量（判据与指令同源，不各写一份）。
  */
-const NO_DUPLICATE_ANSWER = '无重复';
+const NO_REVISION_ANSWER = '无需修改';
 /** 档案内的真分隔符（块·叶）：changedKeys 与简报展示统一这一形态。 */
 const KEY_SEPARATOR = '·';
 
-/** 复核失败的原因（值域即文案白名单恰三项，模型原始报错进不来）。 */
+/** 审稿失败的原因（值域即文案白名单恰三项，模型原始报错进不来）。 */
 export type ReviewFailureReason = (typeof TEXT.REVIEW_BRIEF.FAILURE_REASON)[keyof typeof TEXT.REVIEW_BRIEF.FAILURE_REASON];
 
 /**
- * 复核简报四态（UI 消费面；渲染在 store getter，文案在 strings.ts）。
+ * 审稿简报四态（UI 消费面；渲染在 store getter，文案在 strings.ts）。
  *
  * **它绝不并进档案正文**：档案经 `upsertPersona` 写进宿主 `persona_description`、
  * 经 `inject_persona` 进入此后每一轮对话，一行 UI 文案混进去就是每轮都在
- * 提示词里漂着「模型复核：…」。它也**不落 persona 域**（域归一按字段重建，
+ * 提示词里漂着「模型审稿：…」。它也**不落 persona 域**（域归一按字段重建，
  * 没登记的字段存不进去，硬塞只会得到一个每轮都被抹掉的影子）。
  *
  * - `notRun` 是必做态：结果框为空（本会话还没生成过／清空后）时它是唯一诚实的
- *   说法。少这一态，用户在「未发现重复」与「没跑过」之间无法分辨。
+ *   说法。少这一态，用户在「无可挑剔」与「没跑过」之间无法分辨。
  */
 export type ReviewBrief =
     | { kind: 'rewritten'; changedKeys: ReadonlyArray<string> }
@@ -67,15 +67,15 @@ export function renderReviewBrief(brief: ReviewBrief): string {
     }
 }
 
-/** 复核结果不可用：解析不到、套不成、或改后校验不过。调用方据此回滚。 */
+/** 审稿结果不可用：解析不到、套不成、或改后校验不过。调用方据此回滚。 */
 export class ReviewUnusableError extends Error {
     constructor(detail: string) {
-        super(`复核结果不可用：${detail}`);
+        super(`审稿结果不可用：${detail}`);
         this.name = 'ReviewUnusableError';
     }
 }
 
-/** 复核结论的落地结果：`none`＝模型说无重复；`rewritten`＝带改写后的档案。 */
+/** 审稿结论的落地结果：`none`＝模型说无需修改；`rewritten`＝带修订后的档案。 */
 export type ReviewOutcome =
     | { kind: 'none' }
     | { kind: 'rewritten'; text: string; changedKeys: ReadonlyArray<string> };
@@ -91,17 +91,17 @@ interface PendingEdit {
 const indentOf = (line: string): number => line.search(/\S|$/);
 
 /**
- * 把模型的复核回复落成档案。
+ * 把模型的审稿回复落成档案。
  *
  * 逐条对着返回契约走（两态机判分明）：
- *   - 整段 `trim()` 后等于 `无重复` ⇒ 无需改写（**逐字相等**：模型多写一句
- *     说明就当不可用——宽松匹配等于让「无重复，但其实是散文」混过去，而
+ *   - 整段 `trim()` 后等于 `无需修改` ⇒ 无可挑剔（**逐字相等**：模型多写一句
+ *     说明就当不可用——宽松匹配等于让「无需修改，但其实是散文」混过去，而
  *     用户看不到模型到底说了什么）；
  *   - 否则剥围栏（无围栏宽松放行：完整 YAML 直接走通，非档案文本由下一步
  *     扫描兜底），`scanProfileLeaves` 扫模型输出——解不出块或零叶即不可用，
  *     **不启发式猜**；
  *   - **骨架校验（真正的防错面）**：模型输出的块清单与叶清单（含顺序）与
- *     原档逐项相等，不等即不可用——改写轮不得动策展结果，删叶/加叶/改名/
+ *     原档逐项相等，不等即不可用——审稿轮不得动策展结果，删叶/加叶/改名/
  *     调序都在这里出局。旧按行契约里「点名的叶不在档案里」的防错面由它
  *     承接，且防得更宽：整个结构漂移面一次拦下；
  *   - **逐叶合并（守卫核心）**：叶键清单相等 ⇒ 两条扫描的叶序列**按扫描
@@ -112,22 +112,22 @@ const indentOf = (line: string): number => line.search(/\S|$/);
  *     列表叶移植模型该叶的行区间，缩进按「原档键行缩进 − 模型键行缩进」
  *     差值整体平移（保留模型内部相对结构、键行落回原档列位）。orphan 行与
  *     顶格散文不在骨架校验面：模型对这类行的改动静默丢弃、以原档为准——
- *     这类行本就不该由复核轮改（代价是模型意图不落地且不进简报，接受）；
- *   - 零变化拒绝：合并后变更叶数为 0 ⇒ 不可用（模型没回「无重复」却什么
- *     都没改——照单全收会让简报谎报「已改写」而档案逐字未变）；
+ *     这类行本就不该由审稿轮改（代价是模型意图不落地且不进简报，接受）；
+ *   - 零变化拒绝：合并后变更叶数为 0 ⇒ 不可用（模型没回「无需修改」却什么
+ *     都没改——照单全收会让简报谎报「已修订」而档案逐字未变）；
  *   - 改后校验：无新增完全同值组（literalDuplicateSignatures，脚本侧唯一有
  *     把握的那条判据）；骨架相等重扫合并文**恒真**（合并以原档为底、键前缀
  *     逐字保留），保留为合并算法的自检断言——**检出力在上面的骨架校验**，
  *     这道只防 splice/缩进平移的实现回归。形状不可判定时同值校验缺席
- *     （缺席由调用方在复核入口打日志）。
+ *     （缺席由调用方在审稿入口打日志）。
  */
 export function applyReviewVerdict(profileText: string, reply: string): ReviewOutcome {
-    if (reply.trim() === NO_DUPLICATE_ANSWER) return { kind: 'none' };
+    if (reply.trim() === NO_REVISION_ANSWER) return { kind: 'none' };
 
     const before = scanProfileLeaves(profileText);
     const lines = splitProfileLines(profileText);
     // 围栏剥离宽松放行（stripYamlFence 无围栏时返回原文）；prefill 传空串——
-    // 复核轮没有起手词，「补回起手词」那支判据对它无意义。**只从
+    // 审稿轮没有起手词，「补回起手词」那支判据对它无意义。**只从
     // './generation-wrap' 取**：generation.ts 的 re-export 会把整条生成链拉进
     // 本模块的初始化链并成环。
     const replyText = stripYamlFence(reply, '');
@@ -136,7 +136,7 @@ export function applyReviewVerdict(profileText: string, reply: string): ReviewOu
     if (modelScan.blockKeys.length === 0 || modelScan.leaves.length === 0) {
         throw new ReviewUnusableError('回执扫不出任何块或叶——不是一份可用的档案');
     }
-    // 骨架校验：改写轮不得动策展结果（含顺序比对——顺序变了意味着整份档案
+    // 骨架校验：审稿轮不得动策展结果（含顺序比对——顺序变了意味着整份档案
     // 的结构已被重排，逐叶索引对齐随之失去前提）。
     if (modelScan.blockKeys.join('\n') !== before.blockKeys.join('\n')) {
         throw new ReviewUnusableError('回执的顶层块清单与档案不一致（增删了块或改了块名/顺序）');
@@ -180,7 +180,7 @@ export function applyReviewVerdict(profileText: string, reply: string): ReviewOu
         edits.push({ lineStart: orig.lineStart, lineEnd: orig.lineEnd, replacementRows });
     }
     if (changedKeys.length === 0) {
-        throw new ReviewUnusableError('模型没有回「无重复」，逐叶比对却没有任何叶被改动');
+        throw new ReviewUnusableError('模型没有回「无需修改」，逐叶比对却没有任何叶被改动');
     }
 
     const out = [...lines];
@@ -205,8 +205,8 @@ export function applyReviewVerdict(profileText: string, reply: string): ReviewOu
     // 新增才是事故）。形状由**这份档案自己**的扫描派生——「形状说的就是这份
     // 文本」得是结构上的事实，交给调用方送一份可能来自别的文本的形状进来，
     // 校验就会读着一份不相干的形状放行或翻红。形状不可判定时这道缺席：模型
-    // 照样复核、结论照样落地，只是依赖完整叶集的那道校验本轮不在场（缺席由
-    // 调用方在复核入口打日志）。
+    // 照样审稿、结论照样落地，只是依赖完整叶集的那道校验本轮不在场（缺席由
+    // 调用方在审稿入口打日志）。
     if (shapeOfScan(before).ok) {
         const groupsBefore = new Set(literalDuplicateSignatures(profileText));
         for (const signature of literalDuplicateSignatures(text)) {

@@ -143,7 +143,7 @@ export async function requestOnce(params: RequestOnceParams): Promise<string> {
         // 一类字段），故 400 家族经信封路径同样命中重试（两条带起手词的
         // YAML 轮——策展段与档案段——均以 assistant 起手词结尾，被网关以
         // 「末条是模型轮」拒收正是这一族，兼容重试就是为它准备的；
-        // 复核轮不带起手词，压根不进这个分支）。
+        // 审稿轮不带起手词，压根不进这个分支）。
         const errLower = (err && (err instanceof Error ? err.message : err.toString()) || '').toString().toLowerCase();
         const isBadRequest = errLower.includes('400') || errLower.includes('bad request') || errLower.includes('invalid');
         if (prefill && isBadRequest) {

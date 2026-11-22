@@ -1,6 +1,6 @@
 /**
  * PersonaWeaver fork 生成链：首次生成三段（curator 策展 schema →
- * personaGen 按 schema 填充 → 档案整份复核）。提示词模板与模块
+ * personaGen 按 schema 填充 → 整份审稿修订）。提示词模板与模块
  * 管线在统一提示词引擎（src/prompts——按任务键取配置，assemble＋占位
  * 符填充＋trace/dump 一致可观测），本文件只承载任务上下文收集与调用链。
  *
@@ -142,7 +142,7 @@ export interface RunGenerationConfig extends GenerationApiConfig {
 
 interface ReviewRoundParams {
     config: GenerationApiConfig;
-    /** 档案段已组装好的消息与 trace（复核轮接在它后面，不重跑那一段）。 */
+    /** 档案段已组装好的消息与 trace（审稿轮接在它后面，不重跑那一段）。 */
     assembled: { messages: GenerateMessage[]; trace: ModuleTrace[] };
     /** 档案段的组装供给（复用同一份策展产出；只多带 profile）。 */
     sources: PersonaAssemblySources;
@@ -152,7 +152,7 @@ interface ReviewRoundParams {
     signal?: AbortSignal;
 }
 
-/** 生成链的结果：最终档案 ＋ 复核简报 ＋ 策展回退标记（三者分家——见 ReviewBrief 的注释）。 */
+/** 生成链的结果：最终档案 ＋ 审稿简报 ＋ 策展回退标记（三者分家——见 ReviewBrief 的注释）。 */
 export interface GenerationResult {
     profile: string;
     review: ReviewBrief;
@@ -166,15 +166,15 @@ export interface GenerationResult {
 }
 
 /**
- * 复核回合（AI 调用 3）：档案段成功后**无条件**再发一轮，判定权全给模型。
+ * 审稿回合（AI 调用 3）：档案段成功后**无条件**再发一轮，判定权全给模型。
  *
  * 钉死的约束在这里落地：
  *   - **只重发档案段**：复用同一份策展产出，不重跑策展——重跑会让 schema 变，
  *     指令里点名的「块.叶」随之可能不存在；
  *   - **本轮不带 prefill**：prefill 锚的是「这一轮要什么输出格式」，不是本次
- *     会话的常量。档案段要 ` ```yaml ` ＋块名的 YAML 续写；复核轮的输出是
- *     两态——没重复只回「无重复」四字，有改写才回整份档案。给复核轮续一段
- *     YAML 围栏起手，等于把模型钉死在「接着写档案」那一态上：「无重复」四字
+ *     会话的常量。档案段要 ` ```yaml ` ＋块名的 YAML 续写；审稿轮的输出是
+ *     两态——无可挑剔只回「无需修改」四字，有修订才回整份档案。给审稿轮续一段
+ *     YAML 围栏起手，等于把模型钉死在「接着写档案」那一态上：「无需修改」四字
  *     被起手词压掉，没重复的档案也得整份重抄一遍。**不带起手词是这一轮的
  *     决定，与端点能力无关**：端点不支持 prefill 那件事由能力记忆链承担
  *     （那两条 YAML 轮仍带起手词、仍走 400 去-prefill 重试），两条路径不混；
@@ -182,59 +182,59 @@ export interface GenerationResult {
  *     requestOnce 的 400 去-prefill 重发用的正是同一份 messages，指令若拼进
  *     promptArray 就会随 promptArray 一起被重置掉；
  *   - **首轮结果是兜底值**：空白／超时／网络错／回复不可用，一律返回首轮档案
- *     ＋ 对应降级简报。用户等满一轮复核的代价已经付了，换来的必须是一份档案
+ *     ＋ 对应降级简报。用户等满一轮审稿的代价已经付了，换来的必须是一份档案
  *     （这一保证是 settleReviewRound 的结构义务，见它的注释）；
- *   - **取消照旧上抛**：那是用户中止整轮，不是「复核没跑完」——结果框保持原值
+ *   - **取消照旧上抛**：那是用户中止整轮，不是「审稿没跑完」——结果框保持原值
  *     是取消通道的既有契约。
  */
-/** 复核轮产物：不含策展段旗标（那是 runGeneration 的职责面，收尾时并入）。 */
+/** 审稿轮产物：不含策展段旗标（那是 runGeneration 的职责面，收尾时并入）。 */
 type ReviewSettled = Omit<GenerationResult, 'schemaFallback'>;
 
 async function reviewProfile(params: ReviewRoundParams): Promise<ReviewSettled> {
     const { profile } = params;
     // 入口形状闸（纯诊断：它只决定脚本侧那道「无新增完全同值」本轮跑不跑，
-    // **不决定这一轮发不发**——拿形状判定当复核的闸门＝把语义检出率为零的判据层
+    // **不决定这一轮发不发**——拿形状判定当审稿的闸门＝把语义检出率为零的判据层
     // 重新接成触发器，redundancy.ts 的文件头明确禁这件事）。缺席要留痕。
     // 「形状能不能判」由落地层自己从这份档案派生（applyReviewVerdict 内部扫
     // before），这里只把 code 打进日志：让调用方送一份可能来自别的文本的形状
     // 进来，校验就会读着一份不相干的形状放行或翻红。
     const shape = checkProfileShape(profile);
     if (!shape.ok) {
-        log.warn('复核入口：档案形状不可判定，脚本侧同值校验本轮不跑（复核照发）', {
+        log.warn('审稿入口：档案形状不可判定，脚本侧同值校验本轮不跑（审稿照发）', {
             code: shape.code,
             topLevelBlocks: shape.topLevelBlocks,
             leafCount: shape.leafCount,
         });
     }
 
-    params.onProgress?.('查重复核中…');
+    params.onProgress?.('审稿修订中…');
     const result = await settleReviewRound(params);
-    // 目录漂移的唯一出口（挂在复核轮收尾而不是改写分支上：漂移与「有没有重复」
-    // 「这一轮改没改」三件正交，挂在改写分支上则模型回「无重复」那条最常见的路
+    // 目录漂移的唯一出口（挂在审稿轮收尾而不是修订分支上：漂移与「有没有毛病」
+    // 「这一轮改没改」三件正交，挂在修订分支上则模型回「无需修改」那条最常见的路
     // 没有告警——而那条路恰恰最需要它，没人改写就没人会发现目录漂了）。
-    // 三条出口（改写后／判定无重复／降级回退首轮档案）都过这里，一次生成一条：
+    // 三条出口（修订后／判定无需修改／降级回退首轮档案）都过这里，一次生成一条：
     // 降级也报，那条路的档案照样会被人存下来用，漂移照样存在。
     warnCatalogDrift(result.profile);
     return result;
 }
 
 /**
- * 复核轮本体：**组装指令 → 发请求 → 解析落地**，三步都在同一个降级 try 里。
+ * 审稿轮本体：**组装指令 → 发请求 → 解析落地**，三步都在同一个降级 try 里。
  *
  * 收口在一个 try 是结构保证而非风格选择：这三步里任何一处抛出，若由调用方各自
  * try，用户看到的就是「档案已经生成成功，却只得到一条错误提示」——首轮档案明明
  * 就在手上，而它只在 store 的成功分支里被赋值，降级与否全看这里有没有兜住。
- * 换句话说，「复核怎么失败都有一份档案」是这一层的义务，不该靠每个 throw 点
+ * 换句话说，「审稿怎么失败都有一份档案」是这一层的义务，不该靠每个 throw 点
  * 自觉。诊断（目录漂移 warn）在 try 之外，且它的入口不抛错，不参与成败。
  *
  * 异常分两类处理，界线是**异常是不是「模型那一份回执不合契约」**：
- *   - `ReviewUnusableError`：契约内唯一那型，降级文案说「解析不了复核结果」是
+ *   - `ReviewUnusableError`：契约内唯一那型，降级文案说「解析不了审稿结果」是
  *     对用户说的真话。
  *   - 其余（超时、网络、以及本模块自己的缺陷）：文案只有三档白名单，这一支落到
  *     「请求失败」那一档——对用户成立的是「这一轮没跑完，上一版结果还在」，而
  *     真正的原因连栈一起进 `log.error`。异常**不外抛**：档案已经生成成功，让它
  *     顶掉结果框是把一个可选环节的失败升级成整轮失败。
- *   - 取消照旧上抛（用户中止整轮，不是「复核没跑完」，取消通道的既有契约）。
+ *   - 取消照旧上抛（用户中止整轮，不是「审稿没跑完」，取消通道的既有契约）。
  */
 async function settleReviewRound(params: ReviewRoundParams): Promise<ReviewSettled> {
     const { profile } = params;
@@ -250,20 +250,20 @@ async function settleReviewRound(params: ReviewRoundParams): Promise<ReviewSettl
             signal: params.signal,
         });
         if (isBlankResponseContent(raw)) {
-            log.warn('复核轮响应为空，保留首轮结果');
+            log.warn('审稿轮响应为空，保留首轮结果');
             return { profile, review: { kind: 'failed', reason: TEXT.REVIEW_BRIEF.FAILURE_REASON.EMPTY } };
         }
         const outcome = applyReviewVerdict(profile, raw);
         if (outcome.kind === 'none') return { profile, review: { kind: 'none' } };
-        log.info(`复核改写落档案：${outcome.changedKeys.join('、')}`);
+        log.info(`审稿修订落档案：${outcome.changedKeys.join('、')}`);
         return { profile: outcome.text, review: { kind: 'rewritten', changedKeys: outcome.changedKeys } };
     } catch (err) {
         if (err instanceof PersonaRunCancelled) throw err;
         if (err instanceof ReviewUnusableError) {
-            log.warn('复核结果不可用，回滚到首轮结果', err);
+            log.warn('审稿结果不可用，回滚到首轮结果', err);
             return { profile, review: { kind: 'failed', reason: TEXT.REVIEW_BRIEF.FAILURE_REASON.UNUSABLE } };
         }
-        log.error('复核轮未能完成，保留首轮结果（异常带栈，不并入用户可见文案）', err);
+        log.error('审稿轮未能完成，保留首轮结果（异常带栈，不并入用户可见文案）', err);
         return { profile, review: { kind: 'failed', reason: TEXT.REVIEW_BRIEF.FAILURE_REASON.REQUEST } };
     }
 }
@@ -295,8 +295,8 @@ function warnCatalogDrift(profile: string): void {
 
 /**
  * 生成主链（旧 runGeneration 平移）：策展（schema，fail-soft 回退默认
- * 模板）→ personaGen 填充 → 整份复核（无条件一轮）。返回最终档案与复核
- * 简报；**空输出抛「API 返回为空」——那是档案段的事**，复核段不抛（见
+ * 模板）→ personaGen 填充 → 整份审稿修订（无条件一轮）。返回最终档案与审稿
+ * 简报；**空输出抛「API 返回为空」——那是档案段的事**，审稿段不抛（见
  * reviewProfile）。
  */
 export async function runGeneration(config: RunGenerationConfig): Promise<GenerationResult> {
@@ -401,7 +401,7 @@ export async function runGeneration(config: RunGenerationConfig): Promise<Genera
         signal: config.signal,
     });
 
-    // AI 调用 3：整份复核（无条件一轮；不带 prefill；失败降级，首轮档案兜底）。
+    // AI 调用 3：整份审稿修订（无条件一轮；不带 prefill；失败降级，首轮档案兜底）。
     const reviewed = await reviewProfile({
         config,
         assembled,
