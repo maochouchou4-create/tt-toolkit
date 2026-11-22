@@ -21,13 +21,23 @@ const log = createTtlog('modules/choice/persist');
 const EXTRA_CHOICE_KEY = 'choice';
 
 /**
+ * 楼层存档条目形态（与解析器的 ParsedOption 解耦）：写侧白名单拷贝是
+ * 两形态的唯一桥——解析器给 ParsedOption 加字段不会自动进存档，消费方
+ * 想用新字段须显式扩这里（编译期分叉可见，替代运行时才发现的口径谎）。
+ */
+export interface StoredOption {
+    title: string;
+    content: string;
+}
+
+/**
  * 楼层存档的读取形态（write 侧写入同构）。v1.26 及更早的存档还带
  * parsePath（解析路径徽标用，1.27 起徽标删除、新档不再写入）——读侧
  * 逐字段重建，旧档的该字段按未知字段忽略，无需迁移；解析路径的活
  * 数据在 runlog（每次生成 enrich 落记录）。
  */
 export interface StoredFloorOptions {
-    options: ParsedOption[];
+    options: StoredOption[];
     /**
      * partial 路径的残缺丢弃数；其余路径缺席。刻意 optional：v1.5.17
      * 存量档无此字段，守门若要求在场＝升级后旧楼选项全被判坏档清空。
@@ -52,7 +62,7 @@ function choiceNamespaceOf(message: Record<string, unknown>): Record<string, unk
  * 存档条目重建（读写两路共用）：逐字段挑出来再装回，与消息单例解耦——
  * 调用方改返回值不污染 extra，且不留引用型字段。
  */
-function toStoredOption(option: ParsedOption): ParsedOption {
+function toStoredOption(option: ParsedOption): StoredOption {
     return { title: option.title, content: option.content };
 }
 
